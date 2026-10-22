@@ -62,7 +62,6 @@
 
     <!-- Seerr requests -->
     <string name="je_request">Request</string>
-    <string name="je_request_4k">Request in 4K</string>
     <string name="je_request_more">Request more</string>
     <string name="je_request_missing">Request missing seasons</string>
     <string name="je_request_seasons">Request seasons</string>

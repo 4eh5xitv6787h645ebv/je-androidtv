@@ -17,7 +17,9 @@ official app.
 | Remove from Continue Watching / Next Up | Card menu on those home rows | Removes just that card from that row. Playing it again brings it back, as on the web. |
 | More from… | Movie and show details | Opens Seerr discovery for the cast and crew, genres, studios/networks and tags of the title, or its Seerr recommendations. |
 | Seerr rows | Details pages | "Recommended" and "Similar" titles on movies and shows, "More from <person>" on cast pages, and the missing parts of a collection. |
-| Seerr details and requests | Any Seerr card | Poster, overview and status, with Request / Request in 4K, a season picker for shows, "Open in library" once it's available, and a pending Spoiler Guard opt-in for titles you haven't got yet. |
+| Seerr details and requests | Any Seerr card | Poster, overview and status, with standard requests, a season picker for shows, "Open in library" once it's available, and a pending Spoiler Guard opt-in for titles you haven't got yet. |
+
+Seerr requests always use the standard option; there is no separate 4K choice. Shows still offer the season picker.
 
 The buttons follow the plugin's own settings: Spoiler Guard needs `SpoilerBlurEnabled`, Hide needs Hidden Content
 and the user's "show hide buttons" options, the remove-from-home entries need the user's "Remove from Continue
@@ -36,8 +38,9 @@ The details screen only fits six buttons. When there are more, the least importa
 | ![Remove from Continue Watching](docs/enhanced/remove-from-continue-watching.jpg) Card menu on Continue Watching | ![Person row](docs/enhanced/person-more-from-row.jpg) "More from" row on a cast page |
 
 Additional regression screenshots: [protected library details](docs/enhanced/seerr-library-spoiler-guard.png) and
-[offline refresh with Retry](docs/enhanced/seerr-refresh-retry.png). The final optimized build is shown in
-[director discovery](docs/enhanced/director-discovery-release.png).
+[offline refresh with Retry](docs/enhanced/seerr-refresh-retry.png). The optimized build is shown in
+[director discovery](docs/enhanced/director-discovery-release.png); the simplified request screen is shown in
+[standard request](docs/enhanced/standard-request.png).
 
 ## Install
 
@@ -101,7 +104,7 @@ linked Seerr user and applies its permission checks.
 ## Verification
 
 Latest checks (22 October 2026): debug and optimized release builds pass; all 97 app unit tests pass, including
-five regression tests for independent standard/4K request availability, deleted titles and seasons, and protected
+five regression tests for standard request availability, deleted titles and seasons, and protected
 cast/crew credits. The Android TV emulator was exercised against an isolated Jellyfin Enhanced lab server. The latest pass checked
 protected actor credits and a return to Seerr details while the server was offline: cached story/artwork stayed
 withheld, Retry received remote focus, and selecting it after recovery restored the protected details. Temporary

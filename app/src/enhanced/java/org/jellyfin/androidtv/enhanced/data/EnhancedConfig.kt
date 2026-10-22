@@ -28,8 +28,6 @@ data class EnhancedPublicConfig(
 	@SerialName("JellyseerrShowCollectionDiscovery") val jellyseerrShowCollectionDiscovery: Boolean = false,
 	@SerialName("JellyseerrExcludeLibraryItems") val jellyseerrExcludeLibraryItems: Boolean = false,
 	@SerialName("JellyseerrExcludeBlocklistedItems") val jellyseerrExcludeBlocklistedItems: Boolean = false,
-	@SerialName("JellyseerrEnable4KRequests") val jellyseerrEnable4KRequests: Boolean = false,
-	@SerialName("JellyseerrEnable4KTvRequests") val jellyseerrEnable4KTvRequests: Boolean = false,
 	@SerialName("JellyseerrShowAdvanced") val jellyseerrShowAdvanced: Boolean = false,
 	@SerialName("JellyseerrSingleSeasonRequestOnly") val jellyseerrSingleSeasonRequestOnly: Boolean = false,
 	@SerialName("JellyseerrShowQuotaInfo") val jellyseerrShowQuotaInfo: Boolean = false,

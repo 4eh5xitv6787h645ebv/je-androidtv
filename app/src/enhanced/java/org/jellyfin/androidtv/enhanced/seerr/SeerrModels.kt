@@ -4,7 +4,7 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
 
-/** Seerr `mediaInfo.status` / `status4k`. */
+/** Seerr standard-request `mediaInfo.status`. */
 object SeerrMediaStatus {
 	const val UNKNOWN = 1
 	const val PENDING = 2
@@ -25,7 +25,6 @@ object SeerrMediaStatus {
 data class SeerrSeasonStatus(
 	val seasonNumber: Int = 0,
 	val status: Int? = null,
-	val status4k: Int? = null,
 )
 
 @Serializable
@@ -34,18 +33,15 @@ data class SeerrMediaInfo(
 	val tmdbId: Int? = null,
 	val tvdbId: Int? = null,
 	val status: Int? = null,
-	val status4k: Int? = null,
 	val jellyfinMediaId: String? = null,
 	val jellyfinMediaId4k: String? = null,
 	val seasons: List<SeerrSeasonStatus> = emptyList(),
 ) {
 	val effectiveStatus get() = SeerrMediaStatus.effective(status, jellyfinMediaId)
-	val effectiveStatus4k get() = SeerrMediaStatus.effective(status4k, jellyfinMediaId4k)
 
-	fun effectiveSeasonStatus(seasonNumber: Int, is4k: Boolean): Int? {
+	fun effectiveSeasonStatus(seasonNumber: Int): Int? {
 		val season = seasons.firstOrNull { it.seasonNumber == seasonNumber }
-		return if (is4k) SeerrMediaStatus.effective(season?.status4k, jellyfinMediaId4k)
-		else SeerrMediaStatus.effective(season?.status, jellyfinMediaId)
+		return SeerrMediaStatus.effective(season?.status, jellyfinMediaId)
 	}
 }
 

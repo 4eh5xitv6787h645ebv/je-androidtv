@@ -351,7 +351,7 @@ class SeerrRepository(
 	 * Submit a request. [seasons] is only used for TV; null requests every season. Never retried automatically:
 	 * after a failure the caller should reload the details to see whether the request landed.
 	 */
-	suspend fun request(mediaType: String, tmdbId: Int, seasons: List<Int>? = null, is4k: Boolean = false, tvdbId: Int? = null): JsonElement {
+	suspend fun request(mediaType: String, tmdbId: Int, seasons: List<Int>? = null, tvdbId: Int? = null): JsonElement {
 		val body = buildJsonObject {
 			put("mediaType", mediaType)
 			put("mediaId", tmdbId)
@@ -360,7 +360,7 @@ class SeerrRepository(
 				else putJsonArray("seasons") { seasons.forEach { add(JsonPrimitive(it)) } }
 				if (tvdbId != null) put("tvdbId", tvdbId)
 			}
-			if (is4k) put("is4k", true)
+			put("is4k", false)
 		}
 		return enhancedApi.post("jellyseerr/request", body)
 	}

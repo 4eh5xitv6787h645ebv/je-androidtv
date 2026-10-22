@@ -237,7 +237,6 @@ class SeerrDetailsFragment : Fragment() {
 		val focusRequester = remember { FocusRequester() }
 		val media = details.mediaInfo
 		val status = media?.effectiveStatus
-		val status4k = media?.effectiveStatus4k
 		val story = ui.libraryStory
 		val overview = if (story != null) story.overview else details.overview
 		val tagline = if (story != null) story.tagline else details.tagline
@@ -276,12 +275,6 @@ class SeerrDetailsFragment : Fragment() {
 
 				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 					SeerrStatusBadge(status)
-					if (status4k != null && status4k != SeerrMediaStatus.UNKNOWN && seerrStatusLabel(status4k) != null) {
-						Row(verticalAlignment = Alignment.CenterVertically) {
-							Text("4K ", fontSize = 12.sp, color = Tokens.Color.colorGrey300)
-							SeerrStatusBadge(status4k)
-						}
-					}
 				}
 
 				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
@@ -315,17 +308,10 @@ class SeerrDetailsFragment : Fragment() {
 						focusRequester(focusRequester)
 					} else this
 
-					val config = ui.enhanced.config
 					if (ui.enhanced.seerrUsable) {
-						requestLabel(status, standard = true)?.let { label ->
-							Button(onClick = { startRequest(details, is4k = false) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
+						requestLabel(status)?.let { label ->
+							Button(onClick = { startRequest(details) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
 								Text(stringResource(label))
-							}
-						}
-						val allow4k = if (isTv) config.jellyseerrEnable4KTvRequests else config.jellyseerrEnable4KRequests
-						if (allow4k) requestLabel(status4k, standard = false)?.let {
-							Button(onClick = { startRequest(details, is4k = true) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
-								Text(stringResource(R.string.je_request_4k))
 							}
 						}
 					}
@@ -370,23 +356,23 @@ class SeerrDetailsFragment : Fragment() {
 		}
 
 		// Buttons come and go as the status changes; keep focus on the first one rather than losing it
-		LaunchedEffect(details.id, status, status4k, ui.spoilerPending, ui.loading, ui.error) {
+		LaunchedEffect(details.id, status, ui.spoilerPending, ui.loading, ui.error) {
 			if (!ui.loading && ui.error == null) runCatching { focusRequester.requestFocus() }
 		}
 	}
 
 	/** The label for the request button for a given status, or null when nothing can be requested. */
-	private fun requestLabel(status: Int?, standard: Boolean): Int? = when {
-		SeerrMediaStatus.isRequestable(status) -> if (standard) R.string.je_request else R.string.je_request_4k
+	private fun requestLabel(status: Int?): Int? = when {
+		SeerrMediaStatus.isRequestable(status) -> R.string.je_request
 		// TV shows can still request seasons that aren't requested yet
 		isTv && status == SeerrMediaStatus.PARTIALLY_AVAILABLE -> R.string.je_request_missing
 		isTv && (status == SeerrMediaStatus.PENDING || status == SeerrMediaStatus.PROCESSING) -> R.string.je_request_more
 		else -> null
 	}
 
-	private fun startRequest(details: SeerrDetails, is4k: Boolean) {
+	private fun startRequest(details: SeerrDetails) {
 		if (!isTv) {
-			submitRequest(details, null, is4k)
+			submitRequest(details, null)
 			return
 		}
 
@@ -395,7 +381,7 @@ class SeerrDetailsFragment : Fragment() {
 		if (details.externalIds?.tvdbId == null) {
 			val stored = details.mediaInfo?.tvdbId?.takeIf { it > 0 }
 			if (stored != null) {
-				pickSeasons(details, is4k, stored)
+				pickSeasons(details, stored)
 				return
 			}
 			lifecycleScope.launch {
@@ -415,28 +401,28 @@ class SeerrDetailsFragment : Fragment() {
 				val labels = candidates.map { c -> listOfNotNull(c.title, c.year?.toString(), "TVDB ${c.tvdbId}").joinToString(" · ") }.toTypedArray()
 				AlertDialog.Builder(context)
 					.setTitle(R.string.je_tvdb_pick_title)
-					.setItems(labels) { _, which -> pickSeasons(details, is4k, candidates[which].tvdbId) }
+					.setItems(labels) { _, which -> pickSeasons(details, candidates[which].tvdbId) }
 					.setNegativeButton(android.R.string.cancel, null)
 					.show()
 			}
 			return
 		}
 
-		pickSeasons(details, is4k, null)
+		pickSeasons(details, null)
 	}
 
 	/** Choose seasons and submit. [tvdbId] is the manual TVDB match, only when TMDB doesn't provide one. */
-	private fun pickSeasons(details: SeerrDetails, is4k: Boolean, tvdbId: Int?) {
+	private fun pickSeasons(details: SeerrDetails, tvdbId: Int?) {
 
 		val partial = state.value.partial
 		// Without partial requests Seerr wants the whole show: every regular season regardless of status, like the web
 		if (partial?.partialRequestsEnabled == false) {
 			val all = details.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
-			submitRequest(details, all.ifEmpty { null }, is4k, tvdbId)
+			submitRequest(details, all.ifEmpty { null }, tvdbId)
 			return
 		}
 
-		val requestable = requestableSeasons(details, is4k, partial)
+		val requestable = requestableSeasons(details, partial)
 		if (requestable.isEmpty()) {
 			toast(getString(R.string.je_nothing_found))
 			return
@@ -450,7 +436,7 @@ class SeerrDetailsFragment : Fragment() {
 		if (state.value.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
 			AlertDialog.Builder(context ?: return)
 				.setTitle(R.string.je_request_seasons)
-				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), is4k, tvdbId) }
+				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), tvdbId) }
 				.setNegativeButton(android.R.string.cancel, null)
 				.show()
 			return
@@ -462,17 +448,17 @@ class SeerrDetailsFragment : Fragment() {
 			.setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
 			.setPositiveButton(R.string.je_request) { _, _ ->
 				val seasons = requestable.filterIndexed { index, _ -> checked[index] }.map { it.seasonNumber }
-				if (seasons.isNotEmpty()) submitRequest(details, seasons, is4k, tvdbId)
+				if (seasons.isNotEmpty()) submitRequest(details, seasons, tvdbId)
 			}
 			.setNegativeButton(android.R.string.cancel, null)
 			.show()
 	}
 
-	private fun requestableSeasons(details: SeerrDetails, is4k: Boolean, partial: SeerrPartialRequestSettings?): List<SeerrSeason> {
+	private fun requestableSeasons(details: SeerrDetails, partial: SeerrPartialRequestSettings?): List<SeerrSeason> {
 		return details.seasons
 			.filter { it.episodeCount > 0 }
 			.filter { it.seasonNumber > 0 || partial?.enableSpecialEpisodes == true }
-			.filter { SeerrMediaStatus.isRequestable(details.mediaInfo?.effectiveSeasonStatus(it.seasonNumber, is4k)) }
+			.filter { SeerrMediaStatus.isRequestable(details.mediaInfo?.effectiveSeasonStatus(it.seasonNumber)) }
 			.sortedBy { it.seasonNumber }
 	}
 
@@ -498,11 +484,11 @@ class SeerrDetailsFragment : Fragment() {
 		Toast.makeText(context, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
 	}
 
-	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, is4k: Boolean, tvdbId: Int? = null) {
+	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, tvdbId: Int? = null) {
 		state.value = state.value.copy(busy = true)
 		lifecycleScope.launch {
 			try {
-				seerrRepository.request(mediaType, details.id, seasons, is4k, tvdbId)
+				seerrRepository.request(mediaType, details.id, seasons, tvdbId)
 				toast(getString(R.string.je_request_sent, details.displayTitle), long = true)
 			} catch (err: CancellationException) {
 				throw err

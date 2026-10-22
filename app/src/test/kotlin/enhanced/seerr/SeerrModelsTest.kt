@@ -4,24 +4,22 @@ import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 
 class SeerrModelsTest : FunSpec({
-	test("deleted library copies are requestable separately for standard and 4K") {
-		val media = SeerrMediaInfo(status = SeerrMediaStatus.AVAILABLE, status4k = SeerrMediaStatus.AVAILABLE, jellyfinMediaId4k = "4k-copy")
+	test("standard requests remain available when the standard library copy is missing") {
+		val media = SeerrMediaInfo(status = SeerrMediaStatus.AVAILABLE, jellyfinMediaId4k = "other-copy")
 		SeerrMediaStatus.isRequestable(media.effectiveStatus) shouldBe true
-		media.effectiveStatus4k shouldBe SeerrMediaStatus.AVAILABLE
-		SeerrMediaStatus.isRequestable(media.effectiveStatus4k) shouldBe false
-		val standardOnly = media.copy(jellyfinMediaId = "standard-copy", jellyfinMediaId4k = null)
-		standardOnly.effectiveStatus shouldBe SeerrMediaStatus.AVAILABLE
-		SeerrMediaStatus.isRequestable(standardOnly.effectiveStatus4k) shouldBe true
+		val available = media.copy(jellyfinMediaId = "standard-copy")
+		available.effectiveStatus shouldBe SeerrMediaStatus.AVAILABLE
+		SeerrMediaStatus.isRequestable(available.effectiveStatus) shouldBe false
 	}
 
-	test("stale available seasons can be requested again without touching the other resolution") {
+	test("stale available seasons can be requested again when the standard copy is missing") {
 		val media = SeerrMediaInfo(
-			jellyfinMediaId4k = "4k-copy",
-			seasons = listOf(SeerrSeasonStatus(seasonNumber = 1, status = SeerrMediaStatus.AVAILABLE, status4k = SeerrMediaStatus.AVAILABLE)),
+			jellyfinMediaId4k = "other-copy",
+			seasons = listOf(SeerrSeasonStatus(seasonNumber = 1, status = SeerrMediaStatus.AVAILABLE)),
 		)
-		SeerrMediaStatus.isRequestable(media.effectiveSeasonStatus(1, is4k = false)) shouldBe true
-		SeerrMediaStatus.isRequestable(media.effectiveSeasonStatus(1, is4k = true)) shouldBe false
-		SeerrMediaStatus.isRequestable(media.effectiveSeasonStatus(2, is4k = true)) shouldBe true
+		SeerrMediaStatus.isRequestable(media.effectiveSeasonStatus(1)) shouldBe true
+		SeerrMediaStatus.isRequestable(media.copy(jellyfinMediaId = "standard-copy").effectiveSeasonStatus(1)) shouldBe false
+		SeerrMediaStatus.isRequestable(media.effectiveSeasonStatus(2)) shouldBe true
 	}
 
 	test("pending and processing requests stay unavailable for duplicate requests") {
