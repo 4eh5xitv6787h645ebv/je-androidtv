@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.seerr
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /** Seerr `mediaInfo.status` / `status4k`. */
 object SeerrMediaStatus {
@@ -55,6 +56,8 @@ data class SeerrResult(
 	val character: String? = null,
 	val job: String? = null,
 	val mediaInfo: SeerrMediaInfo? = null,
+	/** Set for library titles while Spoiler Guard is on: the poster from the server instead of TMDB. */
+	@Transient val libraryPosterUrl: String? = null,
 ) {
 	val displayTitle get() = title ?: name ?: ""
 	val year get() = (releaseDate ?: firstAirDate)?.take(4)?.takeIf { it.length == 4 }

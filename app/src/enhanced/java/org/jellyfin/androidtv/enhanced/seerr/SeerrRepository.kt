@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.seerr
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.serialization.json.JsonElement
@@ -122,12 +123,15 @@ class SeerrRepository(
 		})
 	}
 
-	private suspend fun searchPerson(name: String): Int? = runCatching {
+	// The lookups below return null for "no match" and throw when the lookup itself fails, so the screen can offer
+	// Retry instead of reporting that nothing exists
+
+	private suspend fun searchPerson(name: String): Int? {
 		val people = getAs<SeerrPage>("tmdb/search/person", mapOf("query" to name)).results
 			.filter { it.mediaType == "person" }
 		val exact = people.filter { it.name.equals(name, ignoreCase = true) }
-		(exact.ifEmpty { people }).maxByOrNull { (if (it.profilePath != null) 2 else 0) }?.id
-	}.getOrNull()
+		return (exact.ifEmpty { people }).maxByOrNull { (if (it.profilePath != null) 2 else 0) }?.id
+	}
 
 	private suspend fun genres(mediaType: String) = genreCache.getOrPut(mediaType) {
 		getAs<List<SeerrGenre>>("tmdb/genres/$mediaType")
@@ -140,8 +144,9 @@ class SeerrRepository(
 			}?.id
 
 	private suspend fun genreFeeds(name: String): List<Feed> = coroutineScope {
-		val movieGenres = async { runCatching { genres(MEDIA_MOVIE) }.getOrDefault(emptyList()) }
-		val tvGenres = async { runCatching { genres(MEDIA_TV) }.getOrDefault(emptyList()) }
+		// Only successful catalogs are cached; a failure propagates so the whole lookup can be retried
+		val movieGenres = async { genres(MEDIA_MOVIE) }
+		val tvGenres = async { genres(MEDIA_TV) }
 		listOfNotNull(
 			matchGenre(movieGenres.await(), name)?.let { pageFeed("jellyseerr/discover/movies/genre/$it") },
 			matchGenre(tvGenres.await(), name)?.let { pageFeed("jellyseerr/discover/tv/genre/$it") },
@@ -154,12 +159,22 @@ class SeerrRepository(
 	}
 
 	private suspend fun studioFeeds(source: SeerrSource.Studio): List<Feed> {
-		val companyId = source.jellyfinStudioId?.let { id ->
+		val mappedCompanyId = source.jellyfinStudioId?.let { id ->
 			runCatching {
 				(enhancedApi.get("studio/$id").jsonObject["tmdbId"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
 			}.getOrNull()
-		} ?: searchCompany(source.name)
+		}
 		val networkId = knownNetworkId(source.name)
+		val companyId = mappedCompanyId ?: try {
+			searchCompany(source.name)
+		} catch (err: CancellationException) {
+			throw err
+		} catch (err: Exception) {
+			// A known network still gives a TV feed; without one there's nothing to show, so let the caller retry
+			if (networkId == null) throw err
+			Timber.w(err, "Company search failed for %s", source.name)
+			null
+		}
 		val tmdbEnabled = enhancedRepository.current.config.tmdbEnabled
 
 		return listOfNotNull(
@@ -172,26 +187,25 @@ class SeerrRepository(
 		)
 	}
 
-	private suspend fun searchCompany(name: String): Int? = runCatching {
+	private suspend fun searchCompany(name: String): Int? = run {
 		val results = enhancedApi.get("tmdb/search/company", mapOf("query" to name)).jsonObject["results"]
 			?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
 		val exact = results.firstOrNull { (it["name"] as? JsonPrimitive)?.contentOrNull.equals(name, ignoreCase = true) }
 		// Avoid matching "Disney+" or "Paramount+" to an unrelated company
-		if (exact == null && name.contains('+')) return@runCatching null
+		if (exact == null && name.contains('+')) return@run null
 		(exact ?: results.maxByOrNull { obj ->
 			val us = if ((obj["origin_country"] as? JsonPrimitive)?.contentOrNull == "US") 2 else 0
 			val logo = if ((obj["logo_path"] as? JsonPrimitive)?.contentOrNull != null) 1 else 0
 			us + logo
 		})?.get("id")?.let { (it as? JsonPrimitive)?.intOrNull }
-	}.getOrNull()
+	}
 
 	private suspend fun keywordFeeds(name: String): List<Feed> {
-		val keywordId = runCatching {
-			val results = enhancedApi.get("tmdb/search/keyword", mapOf("query" to name)).jsonObject["results"]
-				?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
-			(results.firstOrNull { (it["name"] as? JsonPrimitive)?.contentOrNull.equals(name, ignoreCase = true) } ?: results.firstOrNull())
-				?.get("id")?.let { (it as? JsonPrimitive)?.intOrNull }
-		}.getOrNull() ?: return emptyList()
+		val results = enhancedApi.get("tmdb/search/keyword", mapOf("query" to name)).jsonObject["results"]
+			?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
+		val keywordId = (results.firstOrNull { (it["name"] as? JsonPrimitive)?.contentOrNull.equals(name, ignoreCase = true) } ?: results.firstOrNull())
+			?.get("id")?.let { (it as? JsonPrimitive)?.intOrNull }
+			?: return emptyList()
 
 		return listOf(
 			pageFeed("jellyseerr/discover/movies/keyword/$keywordId"),
@@ -255,12 +269,18 @@ class SeerrRepository(
 		val hiddenItemIds = if (filterHidden) hidden!!.hiddenItemIds else emptySet()
 
 		val seen = HashSet<String>()
+		val guard = state.spoilerGuard
 		return results.filter { item ->
 			seen.add(item.dedupeKey) &&
 				item.id.toString() !in hiddenIds &&
 				item.mediaInfo?.jellyfinMediaId?.replace("-", "")?.lowercase() !in hiddenItemIds &&
 				!(state.config.jellyseerrExcludeLibraryItems && item.mediaInfo?.jellyfinMediaId != null) &&
 				!(state.config.jellyseerrExcludeBlocklistedItems && item.mediaInfo?.status == SeerrMediaStatus.BLOCKLISTED)
+		}.map { item ->
+			// Library titles: load the poster through the server while Spoiler Guard is on, so its artwork rules apply
+			val libraryId = item.mediaInfo?.jellyfinMediaId ?: item.mediaInfo?.jellyfinMediaId4k
+			if (guard && libraryId != null) item.copy(libraryPosterUrl = enhancedApi.imageUrl("/Items/$libraryId/Images/Primary", null, 300))
+			else item
 		}
 	}
 

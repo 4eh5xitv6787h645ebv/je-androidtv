@@ -52,10 +52,10 @@ class EnhancedApi(
 	)
 
 	/** An authenticated Jellyfin image URL. Keep [tag] as returned by the server: the plugin encodes state in it. */
-	fun imageUrl(path: String, tag: String, maxWidth: Int): String = api.createUrl(
+	fun imageUrl(path: String, tag: String?, maxWidth: Int): String = api.createUrl(
 		path,
 		emptyMap(),
-		mapOf("tag" to tag, "maxWidth" to maxWidth),
+		mapOf("tag" to tag, "maxWidth" to maxWidth).filterValues { it != null },
 		true,
 	)
 
