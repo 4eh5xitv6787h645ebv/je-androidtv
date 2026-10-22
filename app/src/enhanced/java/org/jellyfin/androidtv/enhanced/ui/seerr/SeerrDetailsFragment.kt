@@ -192,6 +192,7 @@ class SeerrDetailsFragment : Fragment() {
 		val spoilerConfig = ui.enhanced.config
 		val hideStory = ui.spoilerGuarded && (if (isTv) spoilerConfig.spoilerStripSeriesOverview else spoilerConfig.spoilerStripOverview)
 		val hideRatings = ui.spoilerGuarded && spoilerConfig.spoilerStripRatings
+		val hideTagline = ui.spoilerGuarded && spoilerConfig.spoilerStripTaglines
 
 		Row(
 			modifier = Modifier
@@ -233,7 +234,7 @@ class SeerrDetailsFragment : Fragment() {
 					}
 				}
 
-				details.tagline?.takeIf { it.isNotBlank() && !hideStory }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
+				details.tagline?.takeIf { it.isNotBlank() && !hideTagline }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
 				(if (hideStory) stringResource(R.string.je_spoiler_overview_placeholder) else details.overview)?.takeIf { it.isNotBlank() }?.let {
 					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
 				}
@@ -323,11 +324,49 @@ class SeerrDetailsFragment : Fragment() {
 			return
 		}
 
+		// Seerr can't hand a show to Sonarr without a TVDB id. When TMDB has none (common for anime) and Seerr hasn't
+		// stored one, have the user pick a Sonarr match first, like the web's season dialog does.
+		if (details.externalIds?.tvdbId == null) {
+			val stored = details.mediaInfo?.tvdbId?.takeIf { it > 0 }
+			if (stored != null) {
+				pickSeasons(details, is4k, stored)
+				return
+			}
+			lifecycleScope.launch {
+				val candidates = try {
+					seerrRepository.tvdbCandidates(details.id)
+				} catch (err: CancellationException) {
+					throw err
+				} catch (err: Exception) {
+					Timber.w(err, "Sonarr lookup failed")
+					emptyList()
+				}
+				val context = context ?: return@launch
+				if (candidates.isEmpty()) {
+					toast(getString(R.string.je_tvdb_no_match), long = true)
+					return@launch
+				}
+				val labels = candidates.map { c -> listOfNotNull(c.title, c.year?.toString(), "TVDB ${c.tvdbId}").joinToString(" · ") }.toTypedArray()
+				AlertDialog.Builder(context)
+					.setTitle(R.string.je_tvdb_pick_title)
+					.setItems(labels) { _, which -> pickSeasons(details, is4k, candidates[which].tvdbId) }
+					.setNegativeButton(android.R.string.cancel, null)
+					.show()
+			}
+			return
+		}
+
+		pickSeasons(details, is4k, null)
+	}
+
+	/** Choose seasons and submit. [tvdbId] is the manual TVDB match, only when TMDB doesn't provide one. */
+	private fun pickSeasons(details: SeerrDetails, is4k: Boolean, tvdbId: Int?) {
+
 		val partial = state.value.partial
 		// Without partial requests Seerr wants the whole show: every regular season regardless of status, like the web
 		if (partial?.partialRequestsEnabled == false) {
 			val all = details.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
-			submitRequest(details, all.ifEmpty { null }, is4k)
+			submitRequest(details, all.ifEmpty { null }, is4k, tvdbId)
 			return
 		}
 
@@ -343,21 +382,21 @@ class SeerrDetailsFragment : Fragment() {
 		}.toTypedArray()
 
 		if (state.value.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
-			AlertDialog.Builder(requireContext())
+			AlertDialog.Builder(context ?: return)
 				.setTitle(R.string.je_request_seasons)
-				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), is4k) }
+				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), is4k, tvdbId) }
 				.setNegativeButton(android.R.string.cancel, null)
 				.show()
 			return
 		}
 
 		val checked = BooleanArray(requestable.size) { true }
-		AlertDialog.Builder(requireContext())
+		AlertDialog.Builder(context ?: return)
 			.setTitle(R.string.je_request_seasons)
 			.setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
 			.setPositiveButton(R.string.je_request) { _, _ ->
 				val seasons = requestable.filterIndexed { index, _ -> checked[index] }.map { it.seasonNumber }
-				if (seasons.isNotEmpty()) submitRequest(details, seasons, is4k)
+				if (seasons.isNotEmpty()) submitRequest(details, seasons, is4k, tvdbId)
 			}
 			.setNegativeButton(android.R.string.cancel, null)
 			.show()
@@ -377,11 +416,11 @@ class SeerrDetailsFragment : Fragment() {
 		Toast.makeText(context, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
 	}
 
-	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, is4k: Boolean) {
+	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, is4k: Boolean, tvdbId: Int? = null) {
 		state.value = state.value.copy(busy = true)
 		lifecycleScope.launch {
 			try {
-				seerrRepository.request(mediaType, details.id, seasons, is4k, details.externalIds?.tvdbId)
+				seerrRepository.request(mediaType, details.id, seasons, is4k, tvdbId)
 				toast(getString(R.string.je_request_sent, details.displayTitle), long = true)
 			} catch (err: CancellationException) {
 				throw err

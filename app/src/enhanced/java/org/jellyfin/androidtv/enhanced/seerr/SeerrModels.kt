@@ -27,6 +27,7 @@ data class SeerrSeasonStatus(
 data class SeerrMediaInfo(
 	val id: Int? = null,
 	val tmdbId: Int? = null,
+	val tvdbId: Int? = null,
 	val status: Int? = null,
 	val status4k: Int? = null,
 	val jellyfinMediaId: String? = null,
@@ -114,6 +115,14 @@ data class SeerrDetails(
 	val displayTitle get() = title ?: name ?: ""
 	val year get() = (releaseDate ?: firstAirDate)?.take(4)?.takeIf { it.length == 4 }
 }
+
+/** A Sonarr lookup candidate, used to pick a TVDB match for shows TMDB has none for. */
+@Serializable
+data class SeerrTvdbCandidate(
+	val tvdbId: Int? = null,
+	val title: String? = null,
+	val year: Int? = null,
+)
 
 @Serializable
 data class SeerrPartialRequestSettings(

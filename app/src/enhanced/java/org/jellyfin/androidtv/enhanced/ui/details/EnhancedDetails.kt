@@ -68,6 +68,7 @@ object EnhancedDetails {
 	}
 
 	private val actionsByFragment = HashMap<Fragment, List<EnhancedAction>>()
+	private val busyButtons = java.util.Collections.newSetFromMap(java.util.WeakHashMap<TextUnderButton, Boolean>())
 
 	/**
 	 * Add the Jellyfin Enhanced action buttons. They are created hidden and revealed once the plugin's state for the
@@ -256,7 +257,8 @@ object EnhancedDetails {
 		val enable = !button.isActivated
 
 		fun apply() {
-			button.isEnabled = false
+			// Not isEnabled: disabling the focused button would throw focus to the toolbar
+			if (!busyButtons.add(button)) return
 			fragment.lifecycleScope.launch {
 				runCatching { spoilerGuardRepository.setGuarded(kind, item.id, item.name, enable) }
 					.onSuccess {
@@ -269,7 +271,7 @@ object EnhancedDetails {
 						Timber.w(it, "Failed to toggle Spoiler Guard")
 						Toast.makeText(context, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
 					}
-				button.isEnabled = true
+				busyButtons.remove(button)
 			}
 		}
 
@@ -288,7 +290,8 @@ object EnhancedDetails {
 		val context = fragment.requireContext()
 
 		fun apply(hide: Boolean, wholeSeries: Boolean = false) {
-			button.isEnabled = false
+			// Not isEnabled: disabling the focused button would throw focus to the toolbar
+			if (!busyButtons.add(button)) return
 			fragment.lifecycleScope.launch {
 				runCatching {
 					if (hide) hiddenContentRepository.hide(item, wholeSeries)
@@ -302,7 +305,7 @@ object EnhancedDetails {
 					Timber.w(it, "Failed to update hidden content")
 					Toast.makeText(context, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
 				}
-				button.isEnabled = true
+				busyButtons.remove(button)
 			}
 		}
 

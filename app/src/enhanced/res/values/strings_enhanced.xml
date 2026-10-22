@@ -81,4 +81,6 @@
     <string name="je_error_generic">Something went wrong. Try again.</string>
     <string name="je_loading">Loading…</string>
     <string name="je_retry">Retry</string>
+    <string name="je_tvdb_pick_title">Pick the matching show</string>
+    <string name="je_tvdb_no_match">TMDB has no TVDB match for this show and Sonarr found none. Request it from the web to enter one.</string>
 </resources>

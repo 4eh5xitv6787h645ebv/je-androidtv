@@ -255,6 +255,10 @@ class SeerrRepository(
 	suspend fun partialRequestSettings(): SeerrPartialRequestSettings? =
 		runCatching { getAs<SeerrPartialRequestSettings>("jellyseerr/settings/partial-requests") }.getOrNull()
 
+	/** Sonarr's TVDB candidates for a show. Throws when the lookup fails; a 404 means no Sonarr is configured. */
+	suspend fun tvdbCandidates(tmdbId: Int): List<SeerrTvdbCandidate> =
+		getAs<List<SeerrTvdbCandidate>>("jellyseerr/sonarr/lookup/$tmdbId").filter { (it.tvdbId ?: 0) > 0 }.take(6)
+
 	suspend fun quota(): SeerrQuota? = runCatching { getAs<SeerrQuota>("jellyseerr/quota") }.getOrNull()
 
 	/**

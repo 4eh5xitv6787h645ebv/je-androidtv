@@ -56,6 +56,8 @@ class SeerrDiscoveryFragment : Fragment() {
 		const val ARG_SOURCE = "source"
 		private const val COLUMNS = 8
 		private const val LOAD_MORE_THRESHOLD = COLUMNS * 2
+		// Stop chaining page loads after this many pages in a row added nothing visible
+		private const val MAX_EMPTY_PAGES = 5
 	}
 
 	private enum class Filter { ALL, MOVIES, TV }
@@ -69,6 +71,7 @@ class SeerrDiscoveryFragment : Fragment() {
 	private var feeds: List<SeerrRepository.Feed>? = null
 	private var nextPage = 1
 	private var hasMore = true
+	private var emptyPages = 0
 	private var loadJob: Job? = null
 
 	private val filter = MutableStateFlow(Filter.ALL)
@@ -125,8 +128,9 @@ class SeerrDiscoveryFragment : Fragment() {
 		if (feeds == null) loadMore() else applyFilter()
 	}
 
-	private fun loadMore() {
+	private fun loadMore(userTriggered: Boolean = true) {
 		if (!hasMore || loadJob?.isActive == true) return
+		if (userTriggered) emptyPages = 0
 		failed.value = false
 		loadJob = lifecycleScope.launch {
 			if (allResults.isEmpty()) status.value = getString(R.string.je_loading)
@@ -141,11 +145,14 @@ class SeerrDiscoveryFragment : Fragment() {
 					val known = allResults.mapTo(HashSet()) { it.dedupeKey }
 					val fresh = results.filter { it.dedupeKey !in known }
 					allResults += fresh
-					adapter.addAll(adapter.size(), fresh.filter(::matchesFilter))
-					// A page that was entirely filtered out shouldn't stall scrolling
-					if (adapter.size() < LOAD_MORE_THRESHOLD && hasMore) {
+					val visible = fresh.filter(::matchesFilter)
+					adapter.addAll(adapter.size(), visible)
+					// A page that was entirely filtered out adds no cards to scroll onto, so nothing would trigger the next
+					// load; keep going until something shows up (or the feed ends)
+					emptyPages = if (visible.isEmpty()) emptyPages + 1 else 0
+					if (hasMore && emptyPages < MAX_EMPTY_PAGES && (adapter.size() < LOAD_MORE_THRESHOLD || visible.isEmpty())) {
 						loadJob = null
-						loadMore()
+						loadMore(userTriggered = false)
 						return@launch
 					}
 				}

@@ -83,19 +83,28 @@ class HiddenContentRepository(
 	private fun userKey(): String =
 		requireNotNull(userRepository.currentUser.value?.id) { "No signed-in user" }.toString().replace("-", "")
 
+	/**
+	 * The session an edit belongs to. The access token changes before the new user is published when switching
+	 * accounts, so both are compared.
+	 */
+	private data class Session(val userKey: String, val token: String?)
+
+	private fun session() = Session(userKey(), enhancedApi.accessToken)
+
 	suspend fun get(): Snapshot =
 		Snapshot(enhancedApi.get("user-settings/${userKey()}/hidden-content.json").jsonObject)
 
 	/** Hide [item] everywhere. With [wholeSeries] an episode or season hides its parent show instead. */
 	suspend fun hide(item: BaseItemDto, wholeSeries: Boolean = false) {
+		val session = session()
 		val seriesId = item.seriesId
 		// Keep the show's TMDB id so Seerr rows can filter it too
-		val seriesTmdbId = if (wholeSeries && seriesId != null) seriesTmdbId(seriesId) else ""
-		edit { items -> hideInto(items, item, wholeSeries, seriesTmdbId) }
+		val seriesTmdbId = if (wholeSeries && seriesId != null) seriesTmdbId(seriesId, session) else ""
+		edit(session) { items -> hideInto(items, item, wholeSeries, seriesTmdbId) }
 	}
 
-	private suspend fun seriesTmdbId(seriesId: UUID): String = runCatching {
-		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to userKey())).jsonObject
+	private suspend fun seriesTmdbId(seriesId: UUID, session: Session): String = runCatching {
+		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to session.userKey)).jsonObject
 		(series["ProviderIds"] as? JsonObject)?.entries
 			?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
 			?.let { (it.value as? JsonPrimitive)?.contentOrNull }
@@ -129,7 +138,7 @@ class HiddenContentRepository(
 	}
 
 	/** Remove every global hide entry for [id]. Scoped home-surface entries are left alone. */
-	suspend fun unhide(id: UUID) = edit { items ->
+	suspend fun unhide(id: UUID) = edit(session()) { items ->
 		val key = normalize(id.toString())
 		items.entries
 			.filter { (k, v) ->
@@ -157,12 +166,13 @@ class HiddenContentRepository(
 	 * Read-modify-write of the whole document, as the web client does. The plugin has no per-entry API for global
 	 * hides, so a save from another client between our GET and POST can still be overwritten.
 	 */
-	private suspend fun edit(block: (MutableMap<String, kotlinx.serialization.json.JsonElement>) -> Unit) = mutex.withLock {
-		val userKey = userKey()
-		val path = "user-settings/$userKey/hidden-content.json"
+	private suspend fun edit(session: Session, block: (MutableMap<String, kotlinx.serialization.json.JsonElement>) -> Unit) = mutex.withLock {
+		// Don't touch user A's document with user B's session if the account changed while we waited or read
+		fun checkSession() = check(runCatching { session() }.getOrNull() == session) { "Session changed during a hidden content edit" }
+		checkSession()
+		val path = "user-settings/${session.userKey}/hidden-content.json"
 		val document = enhancedApi.get(path).jsonObject
-		// Don't write user A's document with user B's session if the account changed meanwhile
-		check(userKey() == userKey) { "Signed-in user changed during a hidden content edit" }
+		checkSession()
 		val items = (document["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
 		block(items)
 		val updated = JsonObject(document.toMutableMap().apply { put("Items", JsonObject(items)) })
