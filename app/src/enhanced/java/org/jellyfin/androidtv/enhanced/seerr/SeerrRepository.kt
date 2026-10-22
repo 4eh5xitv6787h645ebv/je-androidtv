@@ -269,18 +269,51 @@ class SeerrRepository(
 		val hiddenItemIds = if (filterHidden) hidden!!.hiddenItemIds else emptySet()
 
 		val seen = HashSet<String>()
-		val guard = state.spoilerGuard
-		return results.filter { item ->
+		val filtered = results.filter { item ->
 			seen.add(item.dedupeKey) &&
 				item.id.toString() !in hiddenIds &&
 				item.mediaInfo?.jellyfinMediaId?.replace("-", "")?.lowercase() !in hiddenItemIds &&
 				!(state.config.jellyseerrExcludeLibraryItems && item.mediaInfo?.jellyfinMediaId != null) &&
 				!(state.config.jellyseerrExcludeBlocklistedItems && item.mediaInfo?.status == SeerrMediaStatus.BLOCKLISTED)
-		}.map { item ->
-			// Library titles: load the poster through the server while Spoiler Guard is on, so its artwork rules apply
-			val libraryId = item.mediaInfo?.jellyfinMediaId ?: item.mediaInfo?.jellyfinMediaId4k
-			if (guard && libraryId != null) item.copy(libraryPosterUrl = enhancedApi.imageUrl("/Items/$libraryId/Images/Primary", null, 300))
-			else item
+		}
+		return if (state.spoilerGuard) withLibraryArtwork(filtered) else filtered
+	}
+
+	private fun SeerrResult.libraryId() = (mediaInfo?.jellyfinMediaId ?: mediaInfo?.jellyfinMediaId4k)?.replace("-", "")?.lowercase()
+
+	/**
+	 * While Spoiler Guard is on, library titles load their poster through the server so its artwork rules apply.
+	 * The URL carries the server's current image tag, which changes with the protection state, so a poster cached
+	 * before protection was turned on is never reused. If the tags can't be loaded the poster is withheld.
+	 */
+	private suspend fun withLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> {
+		val ids = results.mapNotNull { it.libraryId() }.distinct()
+		if (ids.isEmpty()) return results
+
+		val tags: Map<String, String>? = try {
+			enhancedApi.get("/Items", mapOf("ids" to ids.joinToString(","), "enableImageTypes" to "Primary")).jsonObject["Items"]
+				?.jsonArray.orEmpty()
+				.mapNotNull { it as? JsonObject }
+				.mapNotNull { item ->
+					val id = (item["Id"] as? JsonPrimitive)?.contentOrNull?.replace("-", "")?.lowercase() ?: return@mapNotNull null
+					val tag = ((item["ImageTags"] as? JsonObject)?.get("Primary") as? JsonPrimitive)?.contentOrNull ?: return@mapNotNull null
+					id to tag
+				}
+				.toMap()
+		} catch (err: CancellationException) {
+			throw err
+		} catch (err: Exception) {
+			Timber.w(err, "Failed to load library image tags")
+			null
+		}
+
+		return results.map { item ->
+			val id = item.libraryId() ?: return@map item
+			val tag = tags?.get(id)
+			item.copy(
+				libraryArtwork = true,
+				libraryPosterUrl = tag?.let { enhancedApi.imageUrl("/Items/$id/Images/Primary", it, 300) },
+			)
 		}
 	}
 

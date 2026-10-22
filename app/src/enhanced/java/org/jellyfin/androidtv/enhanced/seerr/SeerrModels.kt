@@ -56,7 +56,11 @@ data class SeerrResult(
 	val character: String? = null,
 	val job: String? = null,
 	val mediaInfo: SeerrMediaInfo? = null,
-	/** Set for library titles while Spoiler Guard is on: the poster from the server instead of TMDB. */
+	/**
+	 * Library titles while Spoiler Guard is on: show [libraryPosterUrl] (the server's poster, or none when it
+	 * couldn't be resolved) instead of the TMDB one.
+	 */
+	@Transient val libraryArtwork: Boolean = false,
 	@Transient val libraryPosterUrl: String? = null,
 ) {
 	val displayTitle get() = title ?: name ?: ""

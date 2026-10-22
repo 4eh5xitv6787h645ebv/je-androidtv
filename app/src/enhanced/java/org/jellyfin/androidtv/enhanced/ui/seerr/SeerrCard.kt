@@ -76,7 +76,7 @@ fun SeerrCard(
 ) {
 	val marquee = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 0) else Modifier
 	val subtitle = listOfNotNull(
-		item.year.takeIf { item.libraryPosterUrl == null },
+		item.year.takeIf { !item.libraryArtwork },
 		item.character?.takeIf { it.isNotBlank() } ?: item.job?.takeIf { it.isNotBlank() },
 	).joinToString(" · ").ifEmpty { null }
 
@@ -86,7 +86,7 @@ fun SeerrCard(
 			ItemCard(
 				modifier = Modifier.size(100.dp, 150.dp),
 				image = {
-					val url = item.libraryPosterUrl ?: SeerrImages.poster(item.posterPath)
+					val url = if (item.libraryArtwork) item.libraryPosterUrl else SeerrImages.poster(item.posterPath)
 					if (url != null) {
 						AsyncImage(
 							url = url,
