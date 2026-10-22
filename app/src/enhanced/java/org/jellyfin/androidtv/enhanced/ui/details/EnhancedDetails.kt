@@ -1,0 +1,479 @@
+package org.jellyfin.androidtv.enhanced.ui.details
+
+import android.app.AlertDialog
+import android.content.Context
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.widget.PopupMenu
+import android.widget.Toast
+import androidx.core.view.isVisible
+import androidx.fragment.app.Fragment
+import androidx.leanback.widget.ArrayObjectAdapter
+import androidx.leanback.widget.HeaderItem
+import androidx.leanback.widget.ListRow
+import androidx.leanback.widget.Row
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
+import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
+import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
+import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrViewAllCard
+import org.jellyfin.androidtv.ui.TextUnderButton
+import org.jellyfin.androidtv.ui.itemdetail.MyDetailsOverviewRow
+import org.jellyfin.androidtv.ui.navigation.NavigationRepository
+import org.jellyfin.androidtv.ui.presentation.MutableObjectAdapter
+import org.jellyfin.androidtv.util.MenuBuilder
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.model.api.BaseItemKind
+import org.jellyfin.sdk.model.api.PersonKind
+import org.koin.java.KoinJavaComponent.inject
+import timber.log.Timber
+import java.util.WeakHashMap
+
+/**
+ * Jellyfin Enhanced additions to the item details screen (FullDetailsFragment):
+ * - Spoiler Guard toggle on movies and shows
+ * - Hide / Unhide
+ * - "More from…" menu that opens Seerr discovery for the cast, genres, studios and tags
+ * - Seerr rows (recommended/similar titles, a person's other work, missing collection parts) that can be requested
+ */
+object EnhancedDetails {
+	private val enhancedRepository by inject<EnhancedRepository>(EnhancedRepository::class.java)
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>(SpoilerGuardRepository::class.java)
+	private val hiddenContentRepository by inject<HiddenContentRepository>(HiddenContentRepository::class.java)
+	private val seerrRepository by inject<SeerrRepository>(SeerrRepository::class.java)
+	private val navigationRepository by inject<NavigationRepository>(NavigationRepository::class.java)
+
+	private const val ROW_PREVIEW_SIZE = 20
+
+	private val Fragment.isAlive get() = lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED) && context != null
+
+	/** One of our action buttons, plus how to run it from upstream's "⋯" overflow menu when it doesn't fit. */
+	private class EnhancedAction(
+		val button: TextUnderButton,
+		val run: (anchor: View) -> Unit,
+	) {
+		var wanted = false
+	}
+
+	private val actionsByFragment = WeakHashMap<Fragment, List<EnhancedAction>>()
+
+	/**
+	 * Add the Jellyfin Enhanced action buttons. They are created hidden and revealed once the plugin's state for the
+	 * user is known, so nothing changes on servers without the plugin. [reload] refreshes the details screen.
+	 */
+	@JvmStatic
+	fun addButtons(fragment: Fragment, row: MyDetailsOverviewRow, item: BaseItemDto, buttonSize: Int, reload: Runnable) {
+		val context = fragment.requireContext()
+		val actions = mutableListOf<EnhancedAction>()
+
+		fun action(icon: Int, label: Int, run: (button: TextUnderButton, anchor: View) -> Unit): EnhancedAction {
+			lateinit var action: EnhancedAction
+			val button = TextUnderButton.create(context, icon, buttonSize, 2, context.getString(label)) { view -> action.run(view) }
+			button.isVisible = false
+			action = EnhancedAction(button) { anchor -> run(button, anchor) }
+			row.addAction(button)
+			actions += action
+			return action
+		}
+
+		val spoilerKind = SpoilerGuardRepository.kindOf(item)
+		val spoilerAction = spoilerKind?.let { kind ->
+			action(R.drawable.je_ic_blur_off, R.string.je_spoiler_guard) { button, _ -> toggleSpoilerGuard(fragment, button, item, kind, reload) }
+		}
+
+		val canHide = item.type in setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES, BaseItemKind.EPISODE, BaseItemKind.SEASON, BaseItemKind.PERSON)
+		val hideAction = if (canHide) {
+			action(R.drawable.je_ic_visibility, R.string.je_hide) { button, _ -> toggleHidden(fragment, button, item) }
+		} else null
+
+		val canDiscover = item.type == BaseItemKind.MOVIE || item.type == BaseItemKind.SERIES
+		val moreFromAction = if (canDiscover) {
+			action(R.drawable.je_ic_travel_explore, R.string.je_more_from) { _, anchor -> showMoreFromMenu(fragment, anchor, item) }
+		} else null
+
+		actionsByFragment[fragment] = actions
+		if (actions.isEmpty()) return
+
+		fragment.lifecycleScope.launch {
+			val state = enhancedRepository.ensureLoaded()
+			if (!state.available || !fragment.isAlive) return@launch
+
+			if (spoilerAction != null && spoilerKind != null && state.spoilerGuard) {
+				runCatching { spoilerGuardRepository.getState() }
+					.onSuccess { spoilerState ->
+						setSpoilerButtonState(spoilerAction.button, spoilerGuardRepository.isGuarded(spoilerState, spoilerKind, item.id))
+						spoilerAction.button.tag = spoilerState.prefs.skipDisableConfirm
+						spoilerAction.wanted = true
+					}
+					.onFailure { Timber.w(it, "Failed to load Spoiler Guard state") }
+			}
+
+			if (hideAction != null && state.hiddenContent) {
+				runCatching { hiddenContentRepository.get() }
+					.onSuccess { hidden ->
+						val settings = hidden.settings
+						val allowed = settings.enabled && settings.showHideButtons &&
+							if (item.type == BaseItemKind.PERSON) settings.showButtonCast else settings.showButtonDetails
+						if (allowed) {
+							setHideButtonState(hideAction.button, hidden.isHidden(item.id))
+							hideAction.wanted = true
+						}
+					}
+					.onFailure { Timber.w(it, "Failed to load hidden content") }
+			}
+
+			if (moreFromAction != null && moreFromEntries(context, item, state).isNotEmpty()) {
+				moreFromAction.wanted = true
+			}
+
+			if (fragment.isAlive) fitActions(row, actions)
+		}
+	}
+
+	/**
+	 * Show the wanted buttons and keep everything on the one-line button row. Like FullDetailsFragment itself,
+	 * overflowing buttons are hidden and offered from upstream's "⋯" button instead. Upstream's own collapsible
+	 * buttons go first (its ⋯ menu already lists any of them that are hidden), then ours, least important first.
+	 *
+	 * Upstream shows and hides some buttons asynchronously (resume, previous episode), so the fit is recomputed
+	 * whenever the row lays out. It only applies differences, so it settles after one pass.
+	 */
+	private fun fitActions(row: MyDetailsOverviewRow, actions: List<EnhancedAction>) {
+		val parent = actions.first().button.parent as? ViewGroup
+		if (parent == null) {
+			actions.forEach { it.button.isVisible = it.wanted }
+			return
+		}
+
+		val context = parent.context
+		val ours = actions.map { it.button }.toSet()
+		// Upstream adds its overflow button last
+		val moreButton = row.actions.lastOrNull()?.takeIf { it !in ours }
+		val upstreamCollapsible = listOf(
+			R.string.lbl_goto_series,
+			R.string.lbl_favorite,
+			R.string.lbl_shuffle_all,
+			R.string.lbl_play_trailers,
+			R.string.lbl_add_to_queue,
+		).map(context::getString)
+
+		val collapsedByUs = mutableSetOf<View>()
+		var moreShownByUs = false
+
+		fun refit() {
+			val buttonWidth = row.actions.firstOrNull { it.isVisible && it.width > 0 }?.width ?: return
+			val capacity = parent.width / buttonWidth
+			if (capacity <= 0) return
+
+			// What would be visible without our collapsing
+			val baseline = row.actions.filter { button ->
+				when {
+					button in ours -> actions.first { it.button === button }.wanted
+					button === moreButton -> button.isVisible && !moreShownByUs
+					else -> button.isVisible || button in collapsedByUs
+				}
+			}.toMutableSet()
+
+			val collapseOrder = upstreamCollapsible.flatMap { label ->
+				row.actions.filter { it !in ours && it !== moreButton && it.binding.label.text?.toString() == label }
+			} + actions.reversed().map { it.button }
+
+			val collapsed = mutableSetOf<View>()
+			var showMore = false
+			for (button in collapseOrder) {
+				val visible = baseline.size - collapsed.size + (if (showMore) 1 else 0)
+				if (visible <= capacity) break
+				if (button !in baseline) continue
+				collapsed += button
+				if (moreButton != null && moreButton !in baseline) showMore = true
+			}
+
+			for (button in row.actions) {
+				val target = when {
+					button === moreButton -> button in baseline || showMore
+					else -> button in baseline && button !in collapsed
+				}
+				if (button.isVisible != target) button.isVisible = target
+			}
+			collapsedByUs.clear()
+			collapsedByUs += collapsed.filter { it !in ours }
+			moreShownByUs = showMore
+		}
+
+		actions.forEach { it.button.isVisible = it.wanted }
+		parent.addOnLayoutChangeListener(object : View.OnLayoutChangeListener {
+			override fun onLayoutChange(v: View, l: Int, t: Int, r: Int, b: Int, ol: Int, ot: Int, or: Int, ob: Int) {
+				// The details row was rebuilt with new buttons
+				if (actions.first().button.parent !== parent) {
+					parent.removeOnLayoutChangeListener(this)
+					return
+				}
+				parent.post { refit() }
+			}
+		})
+		parent.post { refit() }
+	}
+
+	/** Add menu entries for our buttons that were collapsed into upstream's "⋯" overflow menu. */
+	@JvmStatic
+	fun addOverflowItems(fragment: Fragment, menu: MenuBuilder, anchor: View) {
+		actionsByFragment[fragment].orEmpty()
+			.filter { it.wanted && !it.button.isVisible }
+			.forEach { action -> menu.item(action.button.binding.label.text.toString()) { action.run(anchor) } }
+	}
+
+	private fun setSpoilerButtonState(button: TextUnderButton, guarded: Boolean) {
+		button.isActivated = guarded
+		button.setIcon(if (guarded) R.drawable.je_ic_blur_on else R.drawable.je_ic_blur_off, button.binding.imageButton.maxHeight)
+			}
+
+	private fun setHideButtonState(button: TextUnderButton, hidden: Boolean) {
+		button.isActivated = hidden
+		button.setIcon(if (hidden) R.drawable.je_ic_visibility_off else R.drawable.je_ic_visibility, button.binding.imageButton.maxHeight)
+		button.setLabel(button.context.getString(if (hidden) R.string.je_unhide else R.string.je_hide))
+	}
+
+	private fun toggleSpoilerGuard(fragment: Fragment, button: TextUnderButton, item: BaseItemDto, kind: SpoilerGuardRepository.Kind, reload: Runnable) {
+		val context = fragment.requireContext()
+		val enable = !button.isActivated
+
+		fun apply() {
+			button.isEnabled = false
+			fragment.lifecycleScope.launch {
+				runCatching { spoilerGuardRepository.setGuarded(kind, item.id, item.name, enable) }
+					.onSuccess {
+						Toast.makeText(context, if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off, Toast.LENGTH_SHORT).show()
+						setSpoilerButtonState(button, enable)
+						// The plugin rewrites overviews, titles and images server side; reload to pick that up
+						if (fragment.isAlive) reload.run()
+					}
+					.onFailure {
+						Timber.w(it, "Failed to toggle Spoiler Guard")
+						Toast.makeText(context, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
+					}
+				button.isEnabled = true
+			}
+		}
+
+		val skipConfirm = button.tag as? Boolean ?: false
+		if (!enable && !skipConfirm) {
+			AlertDialog.Builder(context)
+				.setTitle(R.string.je_spoiler_disable_title)
+				.setMessage(R.string.je_spoiler_disable_message)
+				.setPositiveButton(R.string.je_spoiler_disable_confirm) { _, _ -> apply() }
+				.setNegativeButton(android.R.string.cancel, null)
+				.show()
+		} else apply()
+	}
+
+	private fun toggleHidden(fragment: Fragment, button: TextUnderButton, item: BaseItemDto) {
+		val context = fragment.requireContext()
+
+		fun apply(hide: Boolean, wholeSeries: Boolean = false) {
+			button.isEnabled = false
+			fragment.lifecycleScope.launch {
+				runCatching {
+					if (hide) hiddenContentRepository.hide(item, wholeSeries)
+					else hiddenContentRepository.unhide(item.id)
+				}.onSuccess {
+					val name = if (wholeSeries) item.seriesName ?: item.name else item.name
+					Toast.makeText(context, context.getString(if (hide) R.string.je_hidden_toast else R.string.je_unhidden_toast, name.orEmpty()), Toast.LENGTH_SHORT).show()
+					// A whole-show hide doesn't hide this episode itself, so its button stays as it was
+					if (!wholeSeries) setHideButtonState(button, hide)
+				}.onFailure {
+					Timber.w(it, "Failed to update hidden content")
+					Toast.makeText(context, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
+				}
+				button.isEnabled = true
+			}
+		}
+
+		if (button.isActivated) {
+			apply(hide = false)
+			return
+		}
+
+		val hasSeries = (item.type == BaseItemKind.EPISODE || item.type == BaseItemKind.SEASON) && item.seriesId != null
+		if (hasSeries) {
+			val thisLabel = context.getString(if (item.type == BaseItemKind.EPISODE) R.string.je_hide_this_episode else R.string.je_hide_this_season)
+			AlertDialog.Builder(context)
+				.setTitle(context.getString(R.string.je_hide_confirm_title, item.name.orEmpty()))
+				.setItems(arrayOf(thisLabel, context.getString(R.string.je_hide_whole_show))) { _, which -> apply(hide = true, wholeSeries = which == 1) }
+				.setNegativeButton(android.R.string.cancel, null)
+				.show()
+			return
+		}
+
+		fragment.lifecycleScope.launch {
+			val confirm = runCatching { hiddenContentRepository.get().settings.showHideConfirmation }.getOrDefault(true)
+			if (!confirm) {
+				apply(hide = true)
+				return@launch
+			}
+			AlertDialog.Builder(context)
+				.setTitle(context.getString(R.string.je_hide_confirm_title, item.name.orEmpty()))
+				.setMessage(R.string.je_hide_confirm_message)
+				.setPositiveButton(R.string.je_hide) { _, _ -> apply(hide = true) }
+				.setNegativeButton(android.R.string.cancel, null)
+				.show()
+		}
+	}
+
+	// "More from…"
+
+	private fun tmdbId(item: BaseItemDto): Int? =
+		item.providerIds?.entries?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }?.value?.toIntOrNull()
+
+	private fun mediaType(item: BaseItemDto) = if (item.type == BaseItemKind.SERIES) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE
+
+	private fun moreFromEntries(context: Context, item: BaseItemDto, state: EnhancedState): List<Pair<String, SeerrSource>> {
+		if (!state.seerrUsable) return emptyList()
+		val config = state.config
+		val entries = mutableListOf<Pair<String, SeerrSource>>()
+
+		if (config.jellyseerrShowPersonDiscovery) {
+			val people = item.people.orEmpty()
+			val directors = people.filter { it.type == PersonKind.DIRECTOR }
+			val actors = people.filter { it.type == PersonKind.ACTOR }.take(8)
+			val writers = people.filter { it.type == PersonKind.WRITER }.take(2)
+			for ((person, role) in directors.map { it to R.string.je_role_director } + actors.map { it to R.string.je_role_actor } + writers.map { it to R.string.je_role_writer }) {
+				val name = person.name ?: continue
+				val roleLabel = if (person.type == PersonKind.ACTOR && !person.role.isNullOrBlank()) person.role!! else context.getString(role)
+				entries += context.getString(R.string.je_menu_person, name, roleLabel) to SeerrSource.Person(
+					jellyfinPersonId = person.id.toString(),
+					tmdbPersonId = null,
+					name = name,
+					title = context.getString(if (person.type == PersonKind.ACTOR) R.string.je_more_with_title else R.string.je_more_from_title, name),
+				)
+			}
+		}
+
+		if (config.jellyseerrShowGenreDiscovery) {
+			item.genres.orEmpty().forEach { genre ->
+				entries += context.getString(R.string.je_menu_genre, genre) to SeerrSource.Genre(genre, context.getString(R.string.je_genre_title, genre))
+			}
+		}
+
+		if (config.jellyseerrShowNetworkDiscovery) {
+			item.studios.orEmpty().forEach { studio ->
+				val name = studio.name ?: return@forEach
+				entries += context.getString(R.string.je_menu_studio, name) to SeerrSource.Studio(name, studio.id.toString(), context.getString(R.string.je_more_from_title, name))
+			}
+		}
+
+		if (config.jellyseerrShowTagDiscovery) {
+			item.tags.orEmpty().take(6).forEach { tag ->
+				entries += context.getString(R.string.je_menu_tag, tag) to SeerrSource.Keyword(tag, context.getString(R.string.je_genre_title, tag))
+			}
+		}
+
+		tmdbId(item)?.let { id ->
+			val type = mediaType(item)
+			if (config.jellyseerrShowRecommended) entries += context.getString(R.string.je_menu_recommended) to
+				SeerrSource.Recommended(type, id, context.getString(R.string.je_menu_recommended))
+			if (config.jellyseerrShowSimilar) entries += context.getString(R.string.je_menu_similar) to
+				SeerrSource.Similar(type, id, context.getString(R.string.je_menu_similar))
+		}
+
+		return entries
+	}
+
+	private fun showMoreFromMenu(fragment: Fragment, anchor: View, item: BaseItemDto) {
+		val context = fragment.requireContext()
+		val entries = moreFromEntries(context, item, enhancedRepository.current)
+		if (entries.isEmpty()) return
+
+		PopupMenu(context, anchor, Gravity.END).apply {
+			entries.forEachIndexed { index, (label, _) -> menu.add(0, index, index, label) }
+			setOnMenuItemClickListener { menuItem ->
+				navigationRepository.navigate(EnhancedDestinations.seerrDiscovery(entries[menuItem.itemId].second))
+				true
+			}
+		}.show()
+	}
+
+	// Seerr rows
+
+	/** Append Seerr rows below the regular rows of the details screen. */
+	@JvmStatic
+	fun addRows(fragment: Fragment, rowsAdapter: MutableObjectAdapter<Row>, item: BaseItemDto) {
+		val context = fragment.requireContext()
+
+		fragment.lifecycleScope.launch {
+			val state = enhancedRepository.ensureLoaded()
+			if (!state.seerrUsable || !fragment.isAlive) return@launch
+			val config = state.config
+
+			when (item.type) {
+				BaseItemKind.MOVIE, BaseItemKind.SERIES -> tmdbId(item)?.let { id ->
+					val type = mediaType(item)
+					if (config.jellyseerrShowRecommended) addSourceRow(fragment, rowsAdapter, context.getString(R.string.je_row_recommended),
+						SeerrSource.Recommended(type, id, context.getString(R.string.je_menu_recommended)))
+					if (config.jellyseerrShowSimilar) addSourceRow(fragment, rowsAdapter, context.getString(R.string.je_row_similar),
+						SeerrSource.Similar(type, id, context.getString(R.string.je_menu_similar)))
+				}
+
+				BaseItemKind.PERSON -> if (config.jellyseerrShowPersonDiscovery) {
+					val name = item.name.orEmpty()
+					addSourceRow(fragment, rowsAdapter, context.getString(R.string.je_row_more_from, name), SeerrSource.Person(
+						jellyfinPersonId = item.id.toString(),
+						tmdbPersonId = tmdbId(item),
+						name = name,
+						title = context.getString(R.string.je_more_from_title, name),
+					))
+				}
+
+				BaseItemKind.BOX_SET -> if (config.jellyseerrShowCollectionDiscovery) {
+					val missing = runCatching { seerrRepository.collectionMissing(item.id.toString()) }.getOrDefault(emptyList())
+					if (missing.isNotEmpty() && fragment.isAlive) addRow(rowsAdapter, context.getString(R.string.je_row_collection_missing), missing, null)
+				}
+
+				else -> Unit
+			}
+		}
+	}
+
+	private suspend fun addSourceRow(fragment: Fragment, rowsAdapter: MutableObjectAdapter<Row>, title: String, source: SeerrSource) {
+		val (results, hasMore) = runCatching {
+			val feeds = seerrRepository.feedsFor(source)
+			if (feeds.isEmpty()) emptyList<SeerrResult>() to false
+			else seerrRepository.loadPage(feeds, 1, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
+		}.onFailure { Timber.w(it, "Failed to load Seerr row %s", title) }.getOrDefault(emptyList<SeerrResult>() to false)
+
+		if (results.isEmpty() || !fragment.isAlive) return
+		addRow(rowsAdapter, title, results.take(ROW_PREVIEW_SIZE), if (hasMore || results.size > ROW_PREVIEW_SIZE) source else null)
+	}
+
+	private fun addRow(rowsAdapter: MutableObjectAdapter<Row>, title: String, results: List<SeerrResult>, viewAll: SeerrSource?) {
+		val adapter = ArrayObjectAdapter(SeerrCardPresenter())
+		adapter.addAll(0, results)
+		if (viewAll != null) adapter.add(SeerrViewAllCard(viewAll))
+		rowsAdapter.add(ListRow(HeaderItem(title), adapter))
+	}
+
+	/** Handle clicks on Seerr cards in the details rows. Returns true when the click was handled. */
+	@JvmStatic
+	fun onItemClicked(item: Any?): Boolean = when (item) {
+		is SeerrResult -> {
+			navigationRepository.navigate(EnhancedDestinations.seerrDetails(item.mediaType ?: SeerrRepository.MEDIA_MOVIE, item.id))
+			true
+		}
+
+		is SeerrViewAllCard -> {
+			navigationRepository.navigate(EnhancedDestinations.seerrDiscovery(item.source))
+			true
+		}
+
+		else -> false
+	}
+}

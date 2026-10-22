@@ -46,6 +46,7 @@ import org.jellyfin.androidtv.data.querying.GetSpecialsRequest;
 import org.jellyfin.androidtv.data.querying.GetTrailersRequest;
 import org.jellyfin.androidtv.data.repository.CustomMessageRepository;
 import org.jellyfin.androidtv.data.service.BackgroundService;
+import org.jellyfin.androidtv.enhanced.ui.details.EnhancedDetails;
 import org.jellyfin.androidtv.databinding.FragmentFullDetailsBinding;
 import org.jellyfin.androidtv.preference.UserPreferences;
 import org.jellyfin.androidtv.preference.constant.ClockBehavior;
@@ -480,6 +481,7 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
 
             updateInfo(detailsOverviewRow.getItem());
             addAdditionalRows(mRowsAdapter);
+            EnhancedDetails.addRows(FullDetailsFragment.this, mRowsAdapter, mBaseItem);
 
         }
     }
@@ -1058,6 +1060,8 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
 
         }
 
+        EnhancedDetails.addButtons(this, mDetailsOverviewRow, mBaseItem, buttonSize, () -> loadItem(mBaseItem.getId()));
+
         //Now, create a more button to show if needed
         moreButton = TextUnderButton.create(requireContext(), R.drawable.ic_more, buttonSize, 0, getString(R.string.lbl_other_options), new View.OnClickListener() {
             @Override
@@ -1189,6 +1193,7 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
         public void onItemClicked(final Presenter.ViewHolder itemViewHolder, Object item,
                                   RowPresenter.ViewHolder rowViewHolder, Row row) {
 
+            if (EnhancedDetails.onItemClicked(item)) return;
             if (!(item instanceof BaseRowItem)) return;
             itemLauncher.getValue().launch((BaseRowItem) item, (ItemRowAdapter) ((ListRow) row).getAdapter(), requireContext());
         }

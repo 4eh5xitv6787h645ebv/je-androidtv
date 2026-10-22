@@ -12,6 +12,7 @@ import org.jellyfin.androidtv.R;
 import org.jellyfin.androidtv.constant.CustomMessage;
 import org.jellyfin.androidtv.data.repository.CustomMessageRepository;
 import org.jellyfin.androidtv.data.repository.ItemMutationRepository;
+import org.jellyfin.androidtv.enhanced.ui.menu.EnhancedItemMenu;
 import org.jellyfin.androidtv.ui.itemhandling.AudioQueueBaseRowItem;
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem;
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowType;
@@ -248,6 +249,8 @@ public class KeyProcessor {
                     menu.getMenu().add(0, MENU_MARK_FAVORITE, order++, activity.getString(R.string.lbl_add_favorite));
                 }
             }
+
+            EnhancedItemMenu.contribute(menu.getMenu(), rowItem, order);
         }
 
         menu.setOnMenuItemClickListener(new KeyProcessorItemMenuClickListener(activity, rowItem));
@@ -343,7 +346,7 @@ public class KeyProcessor {
                     return true;
             }
 
-            return false;
+            return EnhancedItemMenu.onMenuItemClick(menuItem, rowItem, activity);
         }
     };
 

@@ -3,6 +3,7 @@ package org.jellyfin.androidtv.di
 import android.content.Context
 import androidx.startup.Initializer
 import org.jellyfin.androidtv.LogInitializer
+import org.jellyfin.androidtv.enhanced.enhancedModule
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.KoinApplication
 import org.koin.core.context.startKoin
@@ -18,6 +19,7 @@ class KoinInitializer : Initializer<KoinApplication> {
 			playbackModule,
 			preferenceModule,
 			utilsModule,
+			enhancedModule,
 		)
 	}
 

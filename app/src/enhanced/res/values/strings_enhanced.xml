@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Spoiler Guard -->
+    <string name="je_spoiler_guard">Spoiler Guard</string>
+    <string name="je_spoiler_guard_on">Spoiler Guard: On</string>
+    <string name="je_spoiler_guard_off">Spoiler Guard: Off</string>
+    <string name="je_spoiler_disable_title">Disable Spoiler Guard?</string>
+    <string name="je_spoiler_disable_message">Original images and episode details will be visible again straight away.</string>
+    <string name="je_spoiler_disable_confirm">Disable</string>
+    <string name="je_spoiler_enable_pending">Enable Spoiler Guard</string>
+    <string name="je_spoiler_pending">Spoiler Guard (pending)</string>
+
+    <!-- Hidden Content -->
+    <string name="je_hide">Hide</string>
+    <string name="je_unhide">Unhide</string>
+    <string name="je_hidden_toast">Hidden: %1$s</string>
+    <string name="je_unhidden_toast">Unhidden: %1$s</string>
+    <string name="je_hide_confirm_title">Hide %1$s?</string>
+    <string name="je_hide_confirm_message">It won\'t show up in your library, Next Up, Continue Watching or recommendations. You can unhide it from its details page.</string>
+    <string name="je_hide_this_episode">Hide this episode</string>
+    <string name="je_hide_this_season">Hide this season</string>
+    <string name="je_hide_whole_show">Hide the whole show</string>
+
+    <!-- Home removal -->
+    <string name="je_remove_continue_watching">Remove from Continue Watching</string>
+    <string name="je_remove_next_up">Remove from Next Up</string>
+    <string name="je_removed_continue_watching">Removed from Continue Watching</string>
+    <string name="je_removed_next_up">Removed from Next Up</string>
+
+    <!-- Seerr discovery -->
+    <string name="je_more_from">More from…</string>
+    <string name="je_more_from_title">More from %1$s</string>
+    <string name="je_more_with_title">More with %1$s</string>
+    <string name="je_genre_title">%1$s on Seerr</string>
+    <string name="je_menu_person">%1$s (%2$s)</string>
+    <string name="je_menu_genre">Genre: %1$s</string>
+    <string name="je_menu_studio">Studio: %1$s</string>
+    <string name="je_menu_tag">Tag: %1$s</string>
+    <string name="je_menu_recommended">Recommended on Seerr</string>
+    <string name="je_menu_similar">Similar on Seerr</string>
+    <string name="je_row_recommended">Recommended (request on Seerr)</string>
+    <string name="je_row_similar">Similar (request on Seerr)</string>
+    <string name="je_row_more_from">More from %1$s (request on Seerr)</string>
+    <string name="je_row_collection_missing">Missing from this collection</string>
+    <string name="je_view_all">View all</string>
+    <string name="je_nothing_found">Nothing found on Seerr.</string>
+    <string name="je_filter_all">All</string>
+    <string name="je_filter_movies">Movies</string>
+    <string name="je_filter_tv">TV shows</string>
+    <string name="je_role_actor">Actor</string>
+    <string name="je_role_director">Director</string>
+    <string name="je_role_writer">Writer</string>
+
+    <!-- Seerr status -->
+    <string name="je_status_available">Available</string>
+    <string name="je_status_partial">Partially available</string>
+    <string name="je_status_processing">Processing</string>
+    <string name="je_status_pending">Requested</string>
+    <string name="je_status_blocklisted">Blocklisted</string>
+    <string name="je_status_not_requested">Not requested</string>
+
+    <!-- Seerr requests -->
+    <string name="je_request">Request</string>
+    <string name="je_request_4k">Request in 4K</string>
+    <string name="je_request_more">Request more</string>
+    <string name="je_request_missing">Request missing seasons</string>
+    <string name="je_request_seasons">Request seasons</string>
+    <string name="je_request_selected">Request %1$d season(s)</string>
+    <string name="je_request_all_seasons">All seasons</string>
+    <string name="je_request_sent">Requested %1$s</string>
+    <string name="je_request_failed">Request failed: %1$s</string>
+    <string name="je_open_in_library">Open in library</string>
+    <string name="je_season_number">Season %1$d</string>
+    <string name="je_specials">Specials</string>
+    <string name="je_episodes_count">%1$d episodes</string>
+    <string name="je_quota">%1$s requests left: %2$d of %3$d (every %4$d days)</string>
+    <string name="je_quota_movie">Movie</string>
+    <string name="je_quota_tv">TV</string>
+    <string name="je_seerr_unavailable">Seerr is not available for your account.</string>
+    <string name="je_error_generic">Something went wrong. Try again.</string>
+    <string name="je_loading">Loading…</string>
+    <string name="je_retry">Retry</string>
+</resources>

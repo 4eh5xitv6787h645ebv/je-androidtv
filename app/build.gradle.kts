@@ -188,3 +188,24 @@ dependencies {
 	testImplementation(libs.kotest.assertions)
 	testImplementation(libs.mockk)
 }
+
+// Jellyfin Enhanced fork: own application id, sources and resources. Everything the fork adds lives in
+// src/enhanced so upstream merges only ever touch the small hook calls listed in ENHANCED.md.
+android {
+	val enhancedId = "org.jellyfin.androidtv.enhanced"
+	defaultConfig.applicationId = enhancedId
+
+	sourceSets.getByName("main") {
+		java.srcDir("src/enhanced/java")
+		kotlin.srcDir("src/enhanced/java")
+		res.srcDir("src/enhanced/res")
+	}
+
+	buildTypes.all {
+		val id = enhancedId + (applicationIdSuffix ?: "")
+		resValue("string", "app_id", id)
+		resValue("string", "app_search_suggest_authority", "$id.content")
+		resValue("string", "app_search_suggest_intent_data", "content://$id.content/intent")
+		resValue("string", "app_name", if (name == "debug") "Jellyfin Enhanced Debug" else "Jellyfin Enhanced")
+	}
+}
