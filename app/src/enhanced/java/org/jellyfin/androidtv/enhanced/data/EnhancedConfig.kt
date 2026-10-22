@@ -12,10 +12,6 @@ import kotlinx.serialization.Serializable
 data class EnhancedPublicConfig(
 	// Spoiler Guard
 	@SerialName("SpoilerBlurEnabled") val spoilerBlurEnabled: Boolean = false,
-	@SerialName("SpoilerStripSeriesOverview") val spoilerStripSeriesOverview: Boolean = true,
-	@SerialName("SpoilerStripOverview") val spoilerStripOverview: Boolean = true,
-	@SerialName("SpoilerStripRatings") val spoilerStripRatings: Boolean = true,
-	@SerialName("SpoilerStripTaglines") val spoilerStripTaglines: Boolean = true,
 
 	// Hidden Content / home removal
 	@SerialName("HiddenContentEnabled") val hiddenContentEnabled: Boolean = false,

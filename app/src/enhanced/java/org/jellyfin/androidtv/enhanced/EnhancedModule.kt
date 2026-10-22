@@ -9,7 +9,7 @@ import org.koin.dsl.module
 
 /** Koin bindings for the Jellyfin Enhanced layer. Registered from KoinInitializer. */
 val enhancedModule = module {
-	single { EnhancedApi(get()) }
+	single { EnhancedApi(get(), get()) }
 	single(createdAtStart = true) { EnhancedRepository(get(), get()) }
 	single { SpoilerGuardRepository(get()) }
 	single { HiddenContentRepository(get(), get()) }

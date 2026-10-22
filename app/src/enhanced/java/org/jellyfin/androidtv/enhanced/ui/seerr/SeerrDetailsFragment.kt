@@ -43,6 +43,11 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonArray
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
@@ -76,6 +81,7 @@ class SeerrDetailsFragment : Fragment() {
 	private val seerrRepository by inject<SeerrRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
+	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
 
 	private data class UiState(
@@ -86,10 +92,16 @@ class SeerrDetailsFragment : Fragment() {
 		val partial: SeerrPartialRequestSettings? = null,
 		val quota: SeerrQuota? = null,
 		val spoilerPending: Boolean? = null,
-		/** The title is in the library and Spoiler Guard protects it, so hide its story details here too. */
-		val spoilerGuarded: Boolean = false,
+		/**
+		 * For titles in the library while Spoiler Guard is on: the story fields as the server returns them for this
+		 * user, already filtered by the plugin (direct, collection-inherited and watched-state rules alike).
+		 */
+		val libraryStory: LibraryStory? = null,
 		val busy: Boolean = false,
 	)
+
+	/** Overview, tagline and rating of the library copy of a title. Null fields were removed by the server. */
+	private data class LibraryStory(val overview: String?, val tagline: String?, val rating: Double?)
 
 	private val state = MutableStateFlow(UiState())
 	private val mediaType by lazy { requireArguments().getString(ARG_MEDIA_TYPE) ?: SeerrRepository.MEDIA_MOVIE }
@@ -115,9 +127,10 @@ class SeerrDetailsFragment : Fragment() {
 					}
 					val details = detailsCall.await()
 					val spoilerState = spoilerCall.await()
-					// Seerr's JSON doesn't go through the plugin's Spoiler Guard filter, so apply it here for library titles
+					// Seerr's JSON doesn't go through the plugin's Spoiler Guard filter. For titles in the library, show the
+					// story fields from the server's own (filtered) copy instead
 					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
-					val guardKind = if (isTv) SpoilerGuardRepository.Kind.SERIES else SpoilerGuardRepository.Kind.MOVIE
+					val libraryStory = if (enhanced.spoilerGuard && libraryId != null) libraryStory(libraryId) else null
 					UiState(
 						loading = false,
 						details = details,
@@ -125,8 +138,7 @@ class SeerrDetailsFragment : Fragment() {
 						partial = partialCall.await(),
 						quota = quotaCall.await(),
 						spoilerPending = spoilerState?.let { spoilerGuardRepository.isPending(it, mediaType, tmdbId) },
-						spoilerGuarded = spoilerState != null && libraryId != null &&
-							spoilerGuardRepository.isGuarded(spoilerState, guardKind, libraryId),
+						libraryStory = libraryStory,
 					)
 				}
 				state.value = loaded
@@ -189,10 +201,10 @@ class SeerrDetailsFragment : Fragment() {
 	private fun DetailsContent(ui: UiState, details: SeerrDetails) {
 		val focusRequester = remember { FocusRequester() }
 		val media = details.mediaInfo
-		val spoilerConfig = ui.enhanced.config
-		val hideStory = ui.spoilerGuarded && (if (isTv) spoilerConfig.spoilerStripSeriesOverview else spoilerConfig.spoilerStripOverview)
-		val hideRatings = ui.spoilerGuarded && spoilerConfig.spoilerStripRatings
-		val hideTagline = ui.spoilerGuarded && spoilerConfig.spoilerStripTaglines
+		val story = ui.libraryStory
+		val overview = if (story != null) story.overview else details.overview
+		val tagline = if (story != null) story.tagline else details.tagline
+		val rating = if (story != null) story.rating else details.voteAverage
 
 		Row(
 			modifier = Modifier
@@ -219,7 +231,7 @@ class SeerrDetailsFragment : Fragment() {
 					details.year,
 					details.runtime?.takeIf { it > 0 }?.let { "${it / 60}h ${it % 60}m" },
 					details.seasons.count { it.seasonNumber > 0 }.takeIf { isTv && it > 0 }?.let { "$it ${if (it == 1) "season" else "seasons"}" },
-					details.voteAverage?.takeIf { it > 0 && !hideRatings }?.let { "★ %.1f".format(it) },
+					rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
 					details.genres.joinToString(", ") { it.name }.ifEmpty { null },
 				).joinToString("   ·   ")
 				if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 16.sp)
@@ -234,8 +246,8 @@ class SeerrDetailsFragment : Fragment() {
 					}
 				}
 
-				details.tagline?.takeIf { it.isNotBlank() && !hideTagline }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
-				(if (hideStory) stringResource(R.string.je_spoiler_overview_placeholder) else details.overview)?.takeIf { it.isNotBlank() }?.let {
+				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
+				overview?.takeIf { it.isNotBlank() }?.let {
 					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
 				}
 
@@ -409,6 +421,21 @@ class SeerrDetailsFragment : Fragment() {
 			.filter { it.seasonNumber > 0 || partial?.enableSpecialEpisodes == true }
 			.filter { SeerrMediaStatus.isRequestable(statuses[it.seasonNumber]) }
 			.sortedBy { it.seasonNumber }
+	}
+
+	/** The library copy's story fields; if they can't be loaded, hide them all rather than risk a spoiler. */
+	private suspend fun libraryStory(id: UUID): LibraryStory = try {
+		val item = enhancedApi.get("/Items/$id", mapOf("userId" to enhancedApi.currentUserId())).jsonObject
+		LibraryStory(
+			overview = (item["Overview"] as? JsonPrimitive)?.contentOrNull,
+			tagline = (item["Taglines"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull },
+			rating = (item["CommunityRating"] as? JsonPrimitive)?.doubleOrNull,
+		)
+	} catch (err: CancellationException) {
+		throw err
+	} catch (err: Exception) {
+		Timber.w(err, "Failed to load the library copy of %s", id)
+		LibraryStory(overview = getString(R.string.je_spoiler_overview_placeholder), tagline = null, rating = null)
 	}
 
 	private fun toast(text: String, long: Boolean = false) {

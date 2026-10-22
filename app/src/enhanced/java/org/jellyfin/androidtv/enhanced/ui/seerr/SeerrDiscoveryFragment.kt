@@ -77,6 +77,7 @@ class SeerrDiscoveryFragment : Fragment() {
 	private val filter = MutableStateFlow(Filter.ALL)
 	private val status = MutableStateFlow<String?>(null)
 	private val failed = MutableStateFlow(false)
+	private val paused = MutableStateFlow(false)
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -132,6 +133,7 @@ class SeerrDiscoveryFragment : Fragment() {
 		if (!hasMore || loadJob?.isActive == true) return
 		if (userTriggered) emptyPages = 0
 		failed.value = false
+		paused.value = false
 		loadJob = lifecycleScope.launch {
 			if (allResults.isEmpty()) status.value = getString(R.string.je_loading)
 			try {
@@ -156,7 +158,13 @@ class SeerrDiscoveryFragment : Fragment() {
 						return@launch
 					}
 				}
-				status.value = if (allResults.isEmpty()) getString(R.string.je_nothing_found) else null
+				// Paused at the empty-page cap with more to fetch: offer an explicit way on
+				paused.value = hasMore && emptyPages >= MAX_EMPTY_PAGES
+				status.value = when {
+					adapter.size() > 0 -> null
+					hasMore -> getString(R.string.je_nothing_yet)
+					else -> getString(R.string.je_nothing_found)
+				}
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
@@ -185,6 +193,7 @@ class SeerrDiscoveryFragment : Fragment() {
 		val currentFilter by filter.collectAsState()
 		val currentStatus by status.collectAsState()
 		val currentFailed by failed.collectAsState()
+		val currentPaused by paused.collectAsState()
 
 		Column(
 			modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 27.dp),
@@ -218,6 +227,8 @@ class SeerrDiscoveryFragment : Fragment() {
 				currentStatus?.let { Text(text = it, color = Tokens.Color.colorGrey300, modifier = Modifier.padding(start = 16.dp)) }
 				if (currentFailed) {
 					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_retry)) }
+				} else if (currentPaused) {
+					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_load_more)) }
 				}
 			}
 		}

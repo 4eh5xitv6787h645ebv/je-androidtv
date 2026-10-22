@@ -87,9 +87,17 @@ class HiddenContentRepository(
 	 * The session an edit belongs to. The access token changes before the new user is published when switching
 	 * accounts, so both are compared.
 	 */
-	private data class Session(val userKey: String, val token: String?)
+	private class Session(val userKey: String, val api: EnhancedApi)
 
-	private fun session() = Session(userKey(), enhancedApi.accessToken)
+	/**
+	 * Pin an API client to the current token, then ask the server whose token it is. Every request of the operation
+	 * goes through that client, so the user id and credentials can't come from different accounts.
+	 */
+	private suspend fun session(): Session {
+		val api = enhancedApi.pinned()
+		val me = api.currentUserId()
+		return Session(requireNotNull(me) { "Could not resolve the signed-in user" }.replace("-", "").lowercase(), api)
+	}
 
 	suspend fun get(): Snapshot =
 		Snapshot(enhancedApi.get("user-settings/${userKey()}/hidden-content.json").jsonObject)
@@ -104,7 +112,7 @@ class HiddenContentRepository(
 	}
 
 	private suspend fun seriesTmdbId(seriesId: UUID, session: Session): String = runCatching {
-		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to session.userKey)).jsonObject
+		val series = session.api.get("/Items/$seriesId", mapOf("userId" to session.userKey)).jsonObject
 		(series["ProviderIds"] as? JsonObject)?.entries
 			?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
 			?.let { (it.value as? JsonPrimitive)?.contentOrNull }
@@ -167,16 +175,14 @@ class HiddenContentRepository(
 	 * hides, so a save from another client between our GET and POST can still be overwritten.
 	 */
 	private suspend fun edit(session: Session, block: (MutableMap<String, kotlinx.serialization.json.JsonElement>) -> Unit) = mutex.withLock {
-		// Don't touch user A's document with user B's session if the account changed while we waited or read
-		fun checkSession() = check(runCatching { session() }.getOrNull() == session) { "Session changed during a hidden content edit" }
-		checkSession()
+		// Both requests go through the client pinned to the user who started the edit, so switching accounts
+		// meanwhile can't send this user's document with someone else's credentials
 		val path = "user-settings/${session.userKey}/hidden-content.json"
-		val document = enhancedApi.get(path).jsonObject
-		checkSession()
+		val document = session.api.get(path).jsonObject
 		val items = (document["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
 		block(items)
 		val updated = JsonObject(document.toMutableMap().apply { put("Items", JsonObject(items)) })
-		enhancedApi.post(path, updated)
+		session.api.post(path, updated)
 		Unit
 	}
 

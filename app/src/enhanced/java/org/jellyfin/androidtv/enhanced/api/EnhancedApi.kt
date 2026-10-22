@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
+import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.HttpMethod
 import timber.log.Timber
@@ -17,6 +18,7 @@ import timber.log.Timber
  */
 class EnhancedApi(
 	private val api: ApiClient,
+	private val jellyfin: Jellyfin,
 ) {
 	companion object {
 		const val BASE = "/JellyfinEnhanced"
@@ -33,6 +35,25 @@ class EnhancedApi(
 
 	val baseUrl: String? get() = api.baseUrl
 	val accessToken: String? get() = api.accessToken
+
+	/**
+	 * A copy bound to the current server and access token. The shared client is updated in place when the user
+	 * switches accounts, so multi-request operations that must stay with one user use this instead.
+	 */
+	fun pinned(): EnhancedApi = EnhancedApi(
+		api = jellyfin.createApi(
+			baseUrl = api.baseUrl,
+			accessToken = api.accessToken,
+			clientInfo = api.clientInfo,
+			deviceInfo = api.deviceInfo,
+			httpClientOptions = api.httpClientOptions,
+		),
+		jellyfin = jellyfin,
+	)
+
+	/** The id of the user the client's token belongs to. */
+	suspend fun currentUserId(): String? =
+		(get("/Users/Me") as? JsonObject)?.get("Id")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
 
 	suspend fun get(path: String, query: Map<String, Any?> = emptyMap()): JsonElement =
 		call(HttpMethod.GET, path, query, null)
