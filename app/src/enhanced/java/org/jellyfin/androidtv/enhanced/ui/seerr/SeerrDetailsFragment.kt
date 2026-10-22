@@ -48,6 +48,7 @@ import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
@@ -100,8 +101,18 @@ class SeerrDetailsFragment : Fragment() {
 		val busy: Boolean = false,
 	)
 
-	/** Overview, tagline and rating of the library copy of a title. Null fields were removed by the server. */
-	private data class LibraryStory(val overview: String?, val tagline: String?, val rating: Double?)
+	/**
+	 * Story fields and artwork of the library copy of a title, as the server returns them for this user. Null fields
+	 * were removed by the server (or couldn't be loaded, in which case everything is withheld).
+	 */
+	private data class LibraryStory(
+		val overview: String?,
+		val tagline: String?,
+		val rating: Double?,
+		val year: String?,
+		val posterUrl: String?,
+		val backdropUrl: String?,
+	)
 
 	private val state = MutableStateFlow(UiState())
 	private val mediaType by lazy { requireArguments().getString(ARG_MEDIA_TYPE) ?: SeerrRepository.MEDIA_MOVIE }
@@ -157,9 +168,10 @@ class SeerrDetailsFragment : Fragment() {
 
 		JellyfinTheme {
 		Box(modifier = Modifier.fillMaxSize()) {
-			details?.backdropPath?.let { path ->
+			val story = ui.libraryStory
+			(if (story != null) story.backdropUrl else SeerrImages.backdrop(details?.backdropPath))?.let { url ->
 				coil3.compose.AsyncImage(
-					model = SeerrImages.backdrop(path),
+					model = url,
 					contentDescription = null,
 					contentScale = ContentScale.Crop,
 					modifier = Modifier.fillMaxSize(),
@@ -205,6 +217,7 @@ class SeerrDetailsFragment : Fragment() {
 		val overview = if (story != null) story.overview else details.overview
 		val tagline = if (story != null) story.tagline else details.tagline
 		val rating = if (story != null) story.rating else details.voteAverage
+		val year = if (story != null) story.year else details.year
 
 		Row(
 			modifier = Modifier
@@ -214,7 +227,7 @@ class SeerrDetailsFragment : Fragment() {
 		) {
 			Box(modifier = Modifier.size(200.dp, 300.dp)) {
 				AsyncImage(
-					url = SeerrImages.poster(details.posterPath, "w500"),
+					url = if (ui.libraryStory != null) ui.libraryStory.posterUrl else SeerrImages.poster(details.posterPath, "w500"),
 					aspectRatio = 2f / 3f,
 					scaleType = ImageView.ScaleType.CENTER_CROP,
 					modifier = Modifier.fillMaxSize(),
@@ -228,7 +241,7 @@ class SeerrDetailsFragment : Fragment() {
 				Text(text = details.displayTitle, fontSize = 32.sp, color = Tokens.Color.colorWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
 
 				val meta = listOfNotNull(
-					details.year,
+					year,
 					details.runtime?.takeIf { it > 0 }?.let { "${it / 60}h ${it % 60}m" },
 					details.seasons.count { it.seasonNumber > 0 }.takeIf { isTv && it > 0 }?.let { "$it ${if (it == 1) "season" else "seasons"}" },
 					rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
@@ -426,16 +439,30 @@ class SeerrDetailsFragment : Fragment() {
 	/** The library copy's story fields; if they can't be loaded, hide them all rather than risk a spoiler. */
 	private suspend fun libraryStory(id: UUID): LibraryStory = try {
 		val item = enhancedApi.get("/Items/$id", mapOf("userId" to enhancedApi.currentUserId())).jsonObject
+		fun string(key: String) = (item[key] as? JsonPrimitive)?.contentOrNull
+		val primaryTag = (item["ImageTags"] as? JsonObject)?.get("Primary")?.let { (it as? JsonPrimitive)?.contentOrNull }
+		val backdropTag = (item["BackdropImageTags"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull }
 		LibraryStory(
-			overview = (item["Overview"] as? JsonPrimitive)?.contentOrNull,
+			overview = string("Overview"),
 			tagline = (item["Taglines"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull },
 			rating = (item["CommunityRating"] as? JsonPrimitive)?.doubleOrNull,
+			year = string("PremiereDate")?.take(4),
+			// Server image routes, so the plugin's artwork protection applies
+			posterUrl = primaryTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Primary", it, 500) },
+			backdropUrl = backdropTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Backdrop/0", it, 1280) },
 		)
 	} catch (err: CancellationException) {
 		throw err
 	} catch (err: Exception) {
 		Timber.w(err, "Failed to load the library copy of %s", id)
-		LibraryStory(overview = getString(R.string.je_spoiler_overview_placeholder), tagline = null, rating = null)
+		LibraryStory(
+			overview = getString(R.string.je_spoiler_overview_placeholder),
+			tagline = null,
+			rating = null,
+			year = null,
+			posterUrl = null,
+			backdropUrl = null,
+		)
 	}
 
 	private fun toast(text: String, long: Boolean = false) {

@@ -68,8 +68,7 @@ class SeerrDiscoveryFragment : Fragment() {
 	private lateinit var source: SeerrSource
 	private val adapter = ArrayObjectAdapter(SeerrCardPresenter())
 	private val allResults = mutableListOf<SeerrResult>()
-	private var feeds: List<SeerrRepository.Feed>? = null
-	private var nextPage = 1
+	private var cursor: SeerrRepository.FeedCursor? = null
 	private var hasMore = true
 	private var emptyPages = 0
 	private var loadJob: Job? = null
@@ -126,7 +125,7 @@ class SeerrDiscoveryFragment : Fragment() {
 
 	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 		super.onViewCreated(view, savedInstanceState)
-		if (feeds == null) loadMore() else applyFilter()
+		if (cursor == null) loadMore() else applyFilter()
 	}
 
 	private fun loadMore(userTriggered: Boolean = true) {
@@ -137,13 +136,15 @@ class SeerrDiscoveryFragment : Fragment() {
 		loadJob = lifecycleScope.launch {
 			if (allResults.isEmpty()) status.value = getString(R.string.je_loading)
 			try {
-				val resolved = feeds ?: seerrRepository.feedsFor(source).also { feeds = it }
-				if (resolved.isEmpty()) {
+				val resolved = cursor ?: SeerrRepository.FeedCursor(seerrRepository.feedsFor(source)).also { cursor = it }
+				if (!resolved.hasMore) {
 					hasMore = false
 				} else {
-					val (results, more) = seerrRepository.loadPage(resolved, nextPage, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
-					nextPage++
-					hasMore = more
+					val batch = seerrRepository.loadNext(resolved, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
+					hasMore = resolved.hasMore
+					// Some feed failed: keep what loaded and offer Retry, which reloads that feed's page
+					if (batch.partialFailure) failed.value = true
+					val results = batch.results
 					val known = allResults.mapTo(HashSet()) { it.dedupeKey }
 					val fresh = results.filter { it.dedupeKey !in known }
 					allResults += fresh

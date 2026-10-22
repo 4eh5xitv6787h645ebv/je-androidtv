@@ -200,22 +200,50 @@ class SeerrRepository(
 	}
 
 	/**
-	 * Load [page] of every feed and interleave them. Results are filtered the way the web filters discovery
-	 * cards: duplicates, hidden titles, and (when configured) titles already in the library or blocklisted.
+	 * Pages through several feeds together. Each feed keeps its own page number, so a feed that fails is retried at
+	 * the same page next time instead of being skipped while the others move on.
 	 */
-	suspend fun loadPage(feeds: List<Feed>, page: Int, recommendations: Boolean = false): Pair<List<SeerrResult>, Boolean> = coroutineScope {
-		val attempts = feeds.map { feed -> async { runCatching { feed.load(page) }.onFailure { Timber.w(it) } } }
-			.map { it.await() }
-		// Only an error when nothing loaded at all; one failing feed of two still shows the other
-		attempts.firstOrNull { it.isFailure }?.takeIf { attempts.all { it.isFailure } }?.exceptionOrNull()?.let { throw it }
-		val pages = attempts.map { it.getOrNull() }
-		val lists = pages.map { it?.results.orEmpty() }
+	class FeedCursor(private val feeds: List<Feed>) {
+		internal val nextPage = IntArray(feeds.size) { 1 }
+		internal val done = BooleanArray(feeds.size)
+		internal fun feed(index: Int) = feeds[index]
+		internal val size get() = feeds.size
+
+		val hasMore get() = done.any { !it }
+	}
+
+	/** One load: the new results, and whether some feed failed (its page will be retried). */
+	class Batch(val results: List<SeerrResult>, val partialFailure: Boolean)
+
+	/**
+	 * Load the next page of every unfinished feed and interleave them. Results are filtered the way the web filters
+	 * discovery cards: duplicates, hidden titles, and (when configured) titles in the library or blocklisted.
+	 * Throws when every attempted feed failed.
+	 */
+	suspend fun loadNext(cursor: FeedCursor, recommendations: Boolean = false): Batch = coroutineScope {
+		val indices = (0 until cursor.size).filter { !cursor.done[it] }
+		val attempts = indices.map { i ->
+			async {
+				val page = cursor.nextPage[i]
+				if (page > MAX_TMDB_PAGE) Result.success(SeerrPage(page = page, totalPages = MAX_TMDB_PAGE))
+				else runCatching { cursor.feed(i).load(page) }.onFailure { Timber.w(it) }
+			}
+		}.map { it.await() }
+
+		if (attempts.isNotEmpty() && attempts.all { it.isFailure }) throw attempts.first().exceptionOrNull()!!
+
+		val lists = mutableListOf<List<SeerrResult>>()
+		indices.zip(attempts).forEach { (i, attempt) ->
+			val page = attempt.getOrNull() ?: return@forEach
+			lists += page.results
+			cursor.nextPage[i]++
+			if (page.page >= page.totalPages || page.page >= MAX_TMDB_PAGE || page.results.isEmpty()) cursor.done[i] = true
+		}
 		val interleaved = buildList {
 			val max = lists.maxOfOrNull { it.size } ?: 0
-			for (i in 0 until max) for (list in lists) list.getOrNull(i)?.let(::add)
+			for (j in 0 until max) for (list in lists) list.getOrNull(j)?.let(::add)
 		}
-		val hasMore = pages.any { it != null && it.page < it.totalPages && it.page < MAX_TMDB_PAGE }
-		filterResults(interleaved, recommendations) to hasMore
+		Batch(filterResults(interleaved, recommendations), partialFailure = attempts.any { it.isFailure })
 	}
 
 	suspend fun filterResults(results: List<SeerrResult>, recommendations: Boolean = false): List<SeerrResult> {

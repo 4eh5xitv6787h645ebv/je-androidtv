@@ -434,9 +434,10 @@ object EnhancedDetails {
 
 	private suspend fun addSourceRow(fragment: Fragment, rowsAdapter: MutableObjectAdapter<Row>, title: String, source: SeerrSource) {
 		val (results, hasMore) = runCatching {
-			val feeds = seerrRepository.feedsFor(source)
-			if (feeds.isEmpty()) emptyList<SeerrResult>() to false
-			else seerrRepository.loadPage(feeds, 1, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
+			val cursor = SeerrRepository.FeedCursor(seerrRepository.feedsFor(source))
+			if (!cursor.hasMore) emptyList<SeerrResult>() to false
+			else seerrRepository.loadNext(cursor, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
+				.let { batch -> batch.results to (cursor.hasMore || batch.partialFailure) }
 		}.onFailure { Timber.w(it, "Failed to load Seerr row %s", title) }.getOrDefault(emptyList<SeerrResult>() to false)
 
 		if (results.isEmpty() || !fragment.isAlive) return

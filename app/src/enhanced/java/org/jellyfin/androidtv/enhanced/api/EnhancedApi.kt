@@ -51,6 +51,14 @@ class EnhancedApi(
 		jellyfin = jellyfin,
 	)
 
+	/** An authenticated Jellyfin image URL. Keep [tag] as returned by the server: the plugin encodes state in it. */
+	fun imageUrl(path: String, tag: String, maxWidth: Int): String = api.createUrl(
+		path,
+		emptyMap(),
+		mapOf("tag" to tag, "maxWidth" to maxWidth),
+		true,
+	)
+
 	/** The id of the user the client's token belongs to. */
 	suspend fun currentUserId(): String? =
 		(get("/Users/Me") as? JsonObject)?.get("Id")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.content }
