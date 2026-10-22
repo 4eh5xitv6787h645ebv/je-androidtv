@@ -77,7 +77,7 @@ fun SeerrCard(
 	val marquee = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 0) else Modifier
 	val subtitle = listOfNotNull(
 		item.year.takeIf { !item.libraryArtwork },
-		item.character?.takeIf { it.isNotBlank() } ?: item.job?.takeIf { it.isNotBlank() },
+		item.displayCredit,
 	).joinToString(" · ").ifEmpty { null }
 
 	ItemPreview(

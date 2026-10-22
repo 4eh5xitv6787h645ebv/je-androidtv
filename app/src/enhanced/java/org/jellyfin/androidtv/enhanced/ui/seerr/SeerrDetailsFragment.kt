@@ -124,8 +124,8 @@ class SeerrDetailsFragment : Fragment() {
 		reload()
 	}
 
-	override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
-		super.onViewCreated(view, savedInstanceState)
+	override fun onStart() {
+		super.onStart()
 		// Coming back from the back stack: Spoiler Guard may have changed (e.g. via "Open in library"), so withhold
 		// the library copy's fields and artwork until they're fetched again
 		val current = state.value
@@ -146,6 +146,8 @@ class SeerrDetailsFragment : Fragment() {
 	)
 
 	private fun reload() {
+		Timber.d("Refreshing Seerr details (%s/%d)", mediaType, tmdbId)
+		state.value = state.value.copy(loading = true, error = null)
 		lifecycleScope.launch {
 			try {
 				// coroutineScope so a failed call surfaces here instead of cancelling (and crashing) lifecycleScope
@@ -234,6 +236,8 @@ class SeerrDetailsFragment : Fragment() {
 	private fun DetailsContent(ui: UiState, details: SeerrDetails) {
 		val focusRequester = remember { FocusRequester() }
 		val media = details.mediaInfo
+		val status = media?.effectiveStatus
+		val status4k = media?.effectiveStatus4k
 		val story = ui.libraryStory
 		val overview = if (story != null) story.overview else details.overview
 		val tagline = if (story != null) story.tagline else details.tagline
@@ -271,11 +275,11 @@ class SeerrDetailsFragment : Fragment() {
 				if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 16.sp)
 
 				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					SeerrStatusBadge(media?.status)
-					if (media?.status4k != null && media.status4k != SeerrMediaStatus.UNKNOWN && seerrStatusLabel(media.status4k) != null) {
+					SeerrStatusBadge(status)
+					if (status4k != null && status4k != SeerrMediaStatus.UNKNOWN && seerrStatusLabel(status4k) != null) {
 						Row(verticalAlignment = Alignment.CenterVertically) {
 							Text("4K ", fontSize = 12.sp, color = Tokens.Color.colorGrey300)
-							SeerrStatusBadge(media.status4k)
+							SeerrStatusBadge(status4k)
 						}
 					}
 				}
@@ -283,6 +287,20 @@ class SeerrDetailsFragment : Fragment() {
 				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
 				overview?.takeIf { it.isNotBlank() }?.let {
 					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
+				}
+
+				ui.error?.let { error ->
+					val retryFocus = remember { FocusRequester() }
+					Row(
+						horizontalArrangement = Arrangement.spacedBy(12.dp),
+						verticalAlignment = Alignment.CenterVertically,
+					) {
+						Text(error, color = Tokens.Color.colorGrey100, fontSize = 16.sp)
+						Button(onClick = { reload() }, enabled = !ui.loading, modifier = Modifier.focusRequester(retryFocus)) {
+							Text(stringResource(R.string.je_retry))
+						}
+					}
+					LaunchedEffect(error) { runCatching { retryFocus.requestFocus() } }
 				}
 
 				Spacer(modifier = Modifier.height(8.dp))
@@ -299,13 +317,13 @@ class SeerrDetailsFragment : Fragment() {
 
 					val config = ui.enhanced.config
 					if (ui.enhanced.seerrUsable) {
-						requestLabel(media?.status, standard = true)?.let { label ->
+						requestLabel(status, standard = true)?.let { label ->
 							Button(onClick = { startRequest(details, is4k = false) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
 								Text(stringResource(label))
 							}
 						}
 						val allow4k = if (isTv) config.jellyseerrEnable4KTvRequests else config.jellyseerrEnable4KRequests
-						if (allow4k) requestLabel(media?.status4k, standard = false)?.let {
+						if (allow4k) requestLabel(status4k, standard = false)?.let {
 							Button(onClick = { startRequest(details, is4k = true) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
 								Text(stringResource(R.string.je_request_4k))
 							}
@@ -352,7 +370,9 @@ class SeerrDetailsFragment : Fragment() {
 		}
 
 		// Buttons come and go as the status changes; keep focus on the first one rather than losing it
-		LaunchedEffect(details.id, media?.status, media?.status4k, ui.spoilerPending) { runCatching { focusRequester.requestFocus() } }
+		LaunchedEffect(details.id, status, status4k, ui.spoilerPending, ui.loading, ui.error) {
+			if (!ui.loading && ui.error == null) runCatching { focusRequester.requestFocus() }
+		}
 	}
 
 	/** The label for the request button for a given status, or null when nothing can be requested. */
@@ -449,21 +469,20 @@ class SeerrDetailsFragment : Fragment() {
 	}
 
 	private fun requestableSeasons(details: SeerrDetails, is4k: Boolean, partial: SeerrPartialRequestSettings?): List<SeerrSeason> {
-		val statuses = details.mediaInfo?.seasons.orEmpty().associate { it.seasonNumber to if (is4k) it.status4k else it.status }
 		return details.seasons
 			.filter { it.episodeCount > 0 }
 			.filter { it.seasonNumber > 0 || partial?.enableSpecialEpisodes == true }
-			.filter { SeerrMediaStatus.isRequestable(statuses[it.seasonNumber]) }
+			.filter { SeerrMediaStatus.isRequestable(details.mediaInfo?.effectiveSeasonStatus(it.seasonNumber, is4k)) }
 			.sortedBy { it.seasonNumber }
 	}
 
-	/** The library copy's story fields; if they can't be loaded, hide them all rather than risk a spoiler. */
-	private suspend fun libraryStory(id: UUID): LibraryStory = try {
+	/** The library copy's story fields; failures reach the screen's Retry UI while cached fields stay withheld. */
+	private suspend fun libraryStory(id: UUID): LibraryStory {
 		val item = enhancedApi.get("/Items/$id", mapOf("userId" to enhancedApi.currentUserId())).jsonObject
 		fun string(key: String) = (item[key] as? JsonPrimitive)?.contentOrNull
 		val primaryTag = (item["ImageTags"] as? JsonObject)?.get("Primary")?.let { (it as? JsonPrimitive)?.contentOrNull }
 		val backdropTag = (item["BackdropImageTags"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull }
-		LibraryStory(
+		return LibraryStory(
 			overview = string("Overview"),
 			tagline = (item["Taglines"] as? JsonArray)?.firstOrNull()?.let { (it as? JsonPrimitive)?.contentOrNull },
 			rating = (item["CommunityRating"] as? JsonPrimitive)?.doubleOrNull,
@@ -472,11 +491,6 @@ class SeerrDetailsFragment : Fragment() {
 			posterUrl = primaryTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Primary", it, 500) },
 			backdropUrl = backdropTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Backdrop/0", it, 1280) },
 		)
-	} catch (err: CancellationException) {
-		throw err
-	} catch (err: Exception) {
-		Timber.w(err, "Failed to load the library copy of %s", id)
-		withheldStory()
 	}
 
 	private fun toast(text: String, long: Boolean = false) {

@@ -14,6 +14,10 @@ object SeerrMediaStatus {
 	const val BLOCKLISTED = 6
 	const val DELETED = 7
 
+	/** Seerr can retain Available after the library copy was deleted, as in JE's effectiveMediaStatus. */
+	fun effective(status: Int?, jellyfinId: String?): Int? =
+		if (status == AVAILABLE && jellyfinId.isNullOrBlank()) DELETED else status
+
 	fun isRequestable(status: Int?) = status == null || status == 0 || status == UNKNOWN || status == DELETED
 }
 
@@ -34,7 +38,16 @@ data class SeerrMediaInfo(
 	val jellyfinMediaId: String? = null,
 	val jellyfinMediaId4k: String? = null,
 	val seasons: List<SeerrSeasonStatus> = emptyList(),
-)
+) {
+	val effectiveStatus get() = SeerrMediaStatus.effective(status, jellyfinMediaId)
+	val effectiveStatus4k get() = SeerrMediaStatus.effective(status4k, jellyfinMediaId4k)
+
+	fun effectiveSeasonStatus(seasonNumber: Int, is4k: Boolean): Int? {
+		val season = seasons.firstOrNull { it.seasonNumber == seasonNumber }
+		return if (is4k) SeerrMediaStatus.effective(season?.status4k, jellyfinMediaId4k)
+		else SeerrMediaStatus.effective(season?.status, jellyfinMediaId)
+	}
+}
 
 /** A movie, show or person result from a Seerr search/discover/credits list. `id` is the TMDB id. */
 @Serializable
@@ -67,7 +80,8 @@ data class SeerrResult(
 	val year get() = (releaseDate ?: firstAirDate)?.take(4)?.takeIf { it.length == 4 }
 	val isMovie get() = mediaType == "movie"
 	val isTv get() = mediaType == "tv"
-	val status get() = mediaInfo?.status
+	val status get() = mediaInfo?.effectiveStatus
+	val displayCredit get() = if (libraryArtwork) null else character?.takeIf { it.isNotBlank() } ?: job?.takeIf { it.isNotBlank() }
 	val dedupeKey get() = "$mediaType-$id"
 }
 

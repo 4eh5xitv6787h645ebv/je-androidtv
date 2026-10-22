@@ -1,7 +1,7 @@
 # Jellyfin Enhanced for Android TV
 
 This is the official [Jellyfin Android TV client](https://github.com/jellyfin/jellyfin-androidtv) with a thin
-[Jellyfin Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) layer on top. Everything upstream does still works
+[Jellyfin Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) layer on top. Everything upstream does still work
 the same way; the extra controls only appear when the server runs the Jellyfin Enhanced plugin and the feature is
 turned on there.
 
@@ -35,9 +35,15 @@ The details screen only fits six buttons. When there are more, the least importa
 | ![Season picker](docs/enhanced/season-request.jpg) Requesting seasons of a show | ![Spoiler Guard on](docs/enhanced/spoiler-guard-on.jpg) A show with Spoiler Guard on |
 | ![Remove from Continue Watching](docs/enhanced/remove-from-continue-watching.jpg) Card menu on Continue Watching | ![Person row](docs/enhanced/person-more-from-row.jpg) "More from" row on a cast page |
 
+Additional regression screenshots: [protected library details](docs/enhanced/seerr-library-spoiler-guard.png) and
+[offline refresh with Retry](docs/enhanced/seerr-refresh-retry.png). The final optimized build is shown in
+[director discovery](docs/enhanced/director-discovery-release.png).
+
 ## Install
 
 Sideload the APK onto your TV, for example with `adb install jellyfin-enhanced.apk` or the Downloader app.
+The local build delivered in `../artifacts/jellyfin-enhanced-androidtv.apk` is optimized with R8 and signed with
+this machine's Android debug key for testing. Use your own persistent release key for distribution.
 
 ## Build
 
@@ -91,6 +97,16 @@ linked Seerr user and applies its permission checks.
 | Details buttons and rows | `enhanced/ui/details/EnhancedDetails.kt` |
 | Card menu | `enhanced/ui/menu/EnhancedItemMenu.kt` |
 | Seerr screens | `enhanced/ui/seerr/` |
+
+## Verification
+
+Latest checks (22 October 2026): debug and optimized release builds pass; all 97 app unit tests pass, including
+five regression tests for independent standard/4K request availability, deleted titles and seasons, and protected
+cast/crew credits. The Android TV emulator was exercised against an isolated Jellyfin Enhanced lab server. The latest pass checked
+protected actor credits and a return to Seerr details while the server was offline: cached story/artwork stayed
+withheld, Retry received remote focus, and selecting it after recovery restored the protected details. Temporary
+lab settings and title protection were restored afterwards. A smoke test of the final signed release APK also
+confirmed library details, the overflow menu, director discovery, and Seerr details after R8 optimization.
 
 ## Not done yet
 
