@@ -26,6 +26,15 @@ Watching" setting, and the Seerr features need Seerr to be set up in the plugin 
 The details screen only fits six buttons. When there are more, the least important ones (Favorite, trailers,
 "More from…", then Hide) move into the "Other options" (⋯) button, the same way the official app handles its own.
 
+## Screenshots
+
+| | |
+|---|---|
+| ![Details buttons](docs/enhanced/details-buttons.jpg) Spoiler Guard, Hide and More from… on a movie | ![More from menu](docs/enhanced/more-from-menu.jpg) "More from…" lists cast, crew, genres, studios and tags |
+| ![Discovery grid](docs/enhanced/discovery-grid.jpg) Seerr discovery for an actor | ![Seerr details](docs/enhanced/seerr-details-requested.jpg) Seerr details after a request |
+| ![Season picker](docs/enhanced/season-request.jpg) Requesting seasons of a show | ![Spoiler Guard on](docs/enhanced/spoiler-guard-on.jpg) A show with Spoiler Guard on |
+| ![Remove from Continue Watching](docs/enhanced/remove-from-continue-watching.jpg) Card menu on Continue Watching | ![Person row](docs/enhanced/person-more-from-row.jpg) "More from" row on a cast page |
+
 ## Install
 
 Sideload the APK onto your TV, for example with `adb install jellyfin-enhanced.apk` or the Downloader app.
