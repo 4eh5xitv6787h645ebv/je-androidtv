@@ -125,7 +125,7 @@ class SeerrDiscoveryFragment : Fragment() {
 
 	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 		super.onViewCreated(view, savedInstanceState)
-		if (cursor == null) loadMore() else applyFilter()
+		if (cursor == null) loadMore() else showAgain()
 	}
 
 	private fun loadMore(userTriggered: Boolean = true) {
@@ -174,6 +174,27 @@ class SeerrDiscoveryFragment : Fragment() {
 				status.value = getString(R.string.je_error_generic)
 				failed.value = true
 			}
+		}
+	}
+
+	/**
+	 * Coming back to this screen: Spoiler Guard may have changed meanwhile, so library posters are withheld at once
+	 * and re-resolved with the server's current image tags before they show again.
+	 */
+	private fun showAgain() {
+		allResults.replaceAll { if (it.mediaInfo?.jellyfinMediaId != null || it.mediaInfo?.jellyfinMediaId4k != null) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it }
+		applyFilter()
+		lifecycleScope.launch {
+			val refreshed = try {
+				seerrRepository.refreshLibraryArtwork(allResults.toList()).associateBy { it.dedupeKey }
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Failed to refresh library artwork")
+				return@launch
+			}
+			allResults.replaceAll { refreshed[it.dedupeKey] ?: it }
+			applyFilter()
 		}
 	}
 

@@ -124,6 +124,27 @@ class SeerrDetailsFragment : Fragment() {
 		reload()
 	}
 
+	override fun onViewCreated(view: android.view.View, savedInstanceState: Bundle?) {
+		super.onViewCreated(view, savedInstanceState)
+		// Coming back from the back stack: Spoiler Guard may have changed (e.g. via "Open in library"), so withhold
+		// the library copy's fields and artwork until they're fetched again
+		val current = state.value
+		val media = current.details?.mediaInfo
+		if (current.details != null && (media?.jellyfinMediaId != null || media?.jellyfinMediaId4k != null)) {
+			state.value = current.copy(libraryStory = withheldStory())
+			reload()
+		}
+	}
+
+	private fun withheldStory() = LibraryStory(
+		overview = getString(R.string.je_spoiler_overview_placeholder),
+		tagline = null,
+		rating = null,
+		year = null,
+		posterUrl = null,
+		backdropUrl = null,
+	)
+
 	private fun reload() {
 		lifecycleScope.launch {
 			try {
@@ -455,14 +476,7 @@ class SeerrDetailsFragment : Fragment() {
 		throw err
 	} catch (err: Exception) {
 		Timber.w(err, "Failed to load the library copy of %s", id)
-		LibraryStory(
-			overview = getString(R.string.je_spoiler_overview_placeholder),
-			tagline = null,
-			rating = null,
-			year = null,
-			posterUrl = null,
-			backdropUrl = null,
-		)
+		withheldStory()
 	}
 
 	private fun toast(text: String, long: Boolean = false) {

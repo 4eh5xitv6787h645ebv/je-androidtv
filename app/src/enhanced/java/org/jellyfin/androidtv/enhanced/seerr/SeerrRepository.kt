@@ -286,6 +286,11 @@ class SeerrRepository(
 	 * The URL carries the server's current image tag, which changes with the protection state, so a poster cached
 	 * before protection was turned on is never reused. If the tags can't be loaded the poster is withheld.
 	 */
+	/** Re-resolve library posters (current tags) for results that are about to be shown again. */
+	suspend fun refreshLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> =
+		if (enhancedRepository.current.spoilerGuard) withLibraryArtwork(results)
+		else results.map { if (it.libraryArtwork) it.copy(libraryArtwork = false, libraryPosterUrl = null) else it }
+
 	private suspend fun withLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> {
 		val ids = results.mapNotNull { it.libraryId() }.distinct()
 		if (ids.isEmpty()) return results
