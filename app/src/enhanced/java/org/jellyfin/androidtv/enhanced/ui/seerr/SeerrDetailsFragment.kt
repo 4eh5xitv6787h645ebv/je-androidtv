@@ -86,6 +86,8 @@ class SeerrDetailsFragment : Fragment() {
 		val partial: SeerrPartialRequestSettings? = null,
 		val quota: SeerrQuota? = null,
 		val spoilerPending: Boolean? = null,
+		/** The title is in the library and Spoiler Guard protects it, so hide its story details here too. */
+		val spoilerGuarded: Boolean = false,
 		val busy: Boolean = false,
 	)
 
@@ -109,17 +111,22 @@ class SeerrDetailsFragment : Fragment() {
 					val partialCall = async { if (isTv) seerrRepository.partialRequestSettings() else null }
 					val quotaCall = async { if (enhanced.config.jellyseerrShowQuotaInfo) seerrRepository.quota() else null }
 					val spoilerCall = async {
-						if (enhanced.spoilerGuard) runCatching {
-							spoilerGuardRepository.isPending(spoilerGuardRepository.getState(), mediaType, tmdbId)
-						}.getOrNull() else null
+						if (enhanced.spoilerGuard) runCatching { spoilerGuardRepository.getState() }.getOrNull() else null
 					}
+					val details = detailsCall.await()
+					val spoilerState = spoilerCall.await()
+					// Seerr's JSON doesn't go through the plugin's Spoiler Guard filter, so apply it here for library titles
+					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
+					val guardKind = if (isTv) SpoilerGuardRepository.Kind.SERIES else SpoilerGuardRepository.Kind.MOVIE
 					UiState(
 						loading = false,
-						details = detailsCall.await(),
+						details = details,
 						enhanced = enhanced,
 						partial = partialCall.await(),
 						quota = quotaCall.await(),
-						spoilerPending = spoilerCall.await(),
+						spoilerPending = spoilerState?.let { spoilerGuardRepository.isPending(it, mediaType, tmdbId) },
+						spoilerGuarded = spoilerState != null && libraryId != null &&
+							spoilerGuardRepository.isGuarded(spoilerState, guardKind, libraryId),
 					)
 				}
 				state.value = loaded
@@ -182,6 +189,9 @@ class SeerrDetailsFragment : Fragment() {
 	private fun DetailsContent(ui: UiState, details: SeerrDetails) {
 		val focusRequester = remember { FocusRequester() }
 		val media = details.mediaInfo
+		val spoilerConfig = ui.enhanced.config
+		val hideStory = ui.spoilerGuarded && (if (isTv) spoilerConfig.spoilerStripSeriesOverview else spoilerConfig.spoilerStripOverview)
+		val hideRatings = ui.spoilerGuarded && spoilerConfig.spoilerStripRatings
 
 		Row(
 			modifier = Modifier
@@ -208,7 +218,7 @@ class SeerrDetailsFragment : Fragment() {
 					details.year,
 					details.runtime?.takeIf { it > 0 }?.let { "${it / 60}h ${it % 60}m" },
 					details.seasons.count { it.seasonNumber > 0 }.takeIf { isTv && it > 0 }?.let { "$it ${if (it == 1) "season" else "seasons"}" },
-					details.voteAverage?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
+					details.voteAverage?.takeIf { it > 0 && !hideRatings }?.let { "★ %.1f".format(it) },
 					details.genres.joinToString(", ") { it.name }.ifEmpty { null },
 				).joinToString("   ·   ")
 				if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 16.sp)
@@ -223,8 +233,8 @@ class SeerrDetailsFragment : Fragment() {
 					}
 				}
 
-				details.tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
-				details.overview?.takeIf { it.isNotBlank() }?.let {
+				details.tagline?.takeIf { it.isNotBlank() && !hideStory }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
+				(if (hideStory) stringResource(R.string.je_spoiler_overview_placeholder) else details.overview)?.takeIf { it.isNotBlank() }?.let {
 					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
 				}
 
@@ -314,15 +324,16 @@ class SeerrDetailsFragment : Fragment() {
 		}
 
 		val partial = state.value.partial
-		val requestable = requestableSeasons(details, is4k, partial)
-		if (requestable.isEmpty()) {
-			Toast.makeText(requireContext(), R.string.je_nothing_found, Toast.LENGTH_SHORT).show()
+		// Without partial requests Seerr wants the whole show: every regular season regardless of status, like the web
+		if (partial?.partialRequestsEnabled == false) {
+			val all = details.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
+			submitRequest(details, all.ifEmpty { null }, is4k)
 			return
 		}
 
-		// Without partial requests Seerr wants every season, so skip the picker like the web does
-		if (partial?.partialRequestsEnabled == false) {
-			submitRequest(details, requestable.map { it.seasonNumber }, is4k)
+		val requestable = requestableSeasons(details, is4k, partial)
+		if (requestable.isEmpty()) {
+			toast(getString(R.string.je_nothing_found))
 			return
 		}
 
@@ -361,18 +372,25 @@ class SeerrDetailsFragment : Fragment() {
 			.sortedBy { it.seasonNumber }
 	}
 
+	private fun toast(text: String, long: Boolean = false) {
+		val context = context ?: return
+		Toast.makeText(context, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
+	}
+
 	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, is4k: Boolean) {
 		state.value = state.value.copy(busy = true)
 		lifecycleScope.launch {
 			try {
 				seerrRepository.request(mediaType, details.id, seasons, is4k, details.externalIds?.tvdbId)
-				Toast.makeText(requireContext(), getString(R.string.je_request_sent, details.displayTitle), Toast.LENGTH_LONG).show()
+				toast(getString(R.string.je_request_sent, details.displayTitle), long = true)
+			} catch (err: CancellationException) {
+				throw err
 			} catch (err: EnhancedApi.EnhancedApiException) {
 				Timber.w(err, "Seerr request failed")
-				Toast.makeText(requireContext(), getString(R.string.je_request_failed, "HTTP ${err.status}"), Toast.LENGTH_LONG).show()
+				toast(getString(R.string.je_request_failed, "HTTP ${err.status}"), long = true)
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr request failed")
-				Toast.makeText(requireContext(), getString(R.string.je_request_failed, err.message ?: ""), Toast.LENGTH_LONG).show()
+				toast(getString(R.string.je_request_failed, err.message ?: ""), long = true)
 			}
 			// Never retry blindly: reload to see what actually happened
 			reload()
@@ -382,14 +400,15 @@ class SeerrDetailsFragment : Fragment() {
 	private fun toggleSpoilerPending(details: SeerrDetails, enable: Boolean) {
 		state.value = state.value.copy(busy = true)
 		lifecycleScope.launch {
-			runCatching { spoilerGuardRepository.setPending(mediaType, details.id, details.displayTitle, enable) }
-				.onSuccess {
-					Toast.makeText(requireContext(), if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off, Toast.LENGTH_SHORT).show()
-				}
-				.onFailure {
-					Timber.w(it, "Spoiler Guard pending toggle failed")
-					Toast.makeText(requireContext(), R.string.je_error_generic, Toast.LENGTH_SHORT).show()
-				}
+			try {
+				spoilerGuardRepository.setPending(mediaType, details.id, details.displayTitle, enable)
+				toast(getString(if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off))
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Spoiler Guard pending toggle failed")
+				toast(getString(R.string.je_error_generic))
+			}
 			reload()
 		}
 	}

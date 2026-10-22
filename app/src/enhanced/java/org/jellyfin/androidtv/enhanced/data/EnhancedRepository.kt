@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.jsonObject
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import timber.log.Timber
@@ -88,6 +89,12 @@ class EnhancedRepository(
 			}.getOrDefault(SeerrUserStatus())
 		} else SeerrUserStatus()
 
-		EnhancedState(available = true, config = config, userSettings = settings, seerr = seerr)
+		val hiddenSettings = if (config.hiddenContentEnabled) {
+			runCatching {
+				HiddenContentRepository.Snapshot(enhancedApi.get("user-settings/$userKey/hidden-content.json").jsonObject).settings
+			}.getOrNull()
+		} else null
+
+		EnhancedState(available = true, config = config, userSettings = settings, seerr = seerr, hiddenSettings = hiddenSettings)
 	}
 }

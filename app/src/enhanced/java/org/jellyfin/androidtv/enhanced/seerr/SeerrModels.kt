@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.seerr
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** Seerr `mediaInfo.status` / `status4k`. */
@@ -141,21 +142,27 @@ sealed interface SeerrSource {
 	val title: String
 
 	@Serializable
+	@SerialName("person")
 	data class Person(val jellyfinPersonId: String?, val tmdbPersonId: Int?, val name: String, override val title: String) : SeerrSource
 
 	@Serializable
+	@SerialName("genre")
 	data class Genre(val name: String, override val title: String) : SeerrSource
 
 	@Serializable
+	@SerialName("studio")
 	data class Studio(val name: String, val jellyfinStudioId: String?, override val title: String) : SeerrSource
 
 	@Serializable
+	@SerialName("keyword")
 	data class Keyword(val name: String, override val title: String) : SeerrSource
 
 	@Serializable
+	@SerialName("recommended")
 	data class Recommended(val mediaType: String, val tmdbId: Int, override val title: String) : SeerrSource
 
 	@Serializable
+	@SerialName("similar")
 	data class Similar(val mediaType: String, val tmdbId: Int, override val title: String) : SeerrSource
 }
 

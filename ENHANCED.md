@@ -89,4 +89,6 @@ linked Seerr user and applies its permission checks.
 - Seerr advanced request options (server, quality profile, root folder) and override rules. Requests use Seerr's
   defaults.
 - Managing the hidden items list. Unhide from the item's details page, or use the web.
+- Hidden Content is saved as a whole document, as on the web, so a hide made on another device at the same moment
+  can be overwritten. The plugin has no per-item API for global hides.
 - Seerr search from the app's search screen.

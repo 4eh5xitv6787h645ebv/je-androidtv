@@ -67,7 +67,12 @@ class HiddenContentRepository(
 			return entries.any { normalize(it.string("ItemId")) == key && it.scope() == "global" }
 		}
 
-		/** TMDB ids hidden everywhere, as `movie:603` / `tv:1399` plus bare ids, for filtering Seerr rows. */
+		/** Jellyfin ids (dash-less, lower case) hidden everywhere, to match Seerr results that are in the library. */
+		val hiddenItemIds: Set<String> by lazy {
+			entries.filter { it.scope() == "global" }.map { normalize(it.string("ItemId")) }.filter { it.isNotEmpty() }.toSet()
+		}
+
+		/** TMDB ids hidden everywhere, for filtering Seerr rows. */
 		val hiddenTmdbIds: Set<String> by lazy {
 			entries.filter { it.scope() == "global" && it.string("TmdbId").isNotEmpty() }
 				.map { it.string("TmdbId") }
@@ -82,14 +87,28 @@ class HiddenContentRepository(
 		Snapshot(enhancedApi.get("user-settings/${userKey()}/hidden-content.json").jsonObject)
 
 	/** Hide [item] everywhere. With [wholeSeries] an episode or season hides its parent show instead. */
-	suspend fun hide(item: BaseItemDto, wholeSeries: Boolean = false) = edit { items ->
+	suspend fun hide(item: BaseItemDto, wholeSeries: Boolean = false) {
+		val seriesId = item.seriesId
+		// Keep the show's TMDB id so Seerr rows can filter it too
+		val seriesTmdbId = if (wholeSeries && seriesId != null) seriesTmdbId(seriesId) else ""
+		edit { items -> hideInto(items, item, wholeSeries, seriesTmdbId) }
+	}
+
+	private suspend fun seriesTmdbId(seriesId: UUID): String = runCatching {
+		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to userKey())).jsonObject
+		(series["ProviderIds"] as? JsonObject)?.entries
+			?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
+			?.let { (it.value as? JsonPrimitive)?.contentOrNull }
+	}.getOrNull().orEmpty()
+
+	private fun hideInto(items: MutableMap<String, kotlinx.serialization.json.JsonElement>, item: BaseItemDto, wholeSeries: Boolean, seriesTmdbId: String) {
 		val seriesId = item.seriesId
 		val entry = if (wholeSeries && seriesId != null) {
 			buildEntry(
 				itemId = seriesId,
 				name = item.seriesName.orEmpty(),
 				type = "Series",
-				tmdbId = "",
+				tmdbId = seriesTmdbId,
 			)
 		} else {
 			buildEntry(
@@ -134,9 +153,16 @@ class HiddenContentRepository(
 		Unit
 	}
 
+	/**
+	 * Read-modify-write of the whole document, as the web client does. The plugin has no per-entry API for global
+	 * hides, so a save from another client between our GET and POST can still be overwritten.
+	 */
 	private suspend fun edit(block: (MutableMap<String, kotlinx.serialization.json.JsonElement>) -> Unit) = mutex.withLock {
-		val path = "user-settings/${userKey()}/hidden-content.json"
+		val userKey = userKey()
+		val path = "user-settings/$userKey/hidden-content.json"
 		val document = enhancedApi.get(path).jsonObject
+		// Don't write user A's document with user B's session if the account changed meanwhile
+		check(userKey() == userKey) { "Signed-in user changed during a hidden content edit" }
 		val items = (document["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
 		block(items)
 		val updated = JsonObject(document.toMutableMap().apply { put("Items", JsonObject(items)) })

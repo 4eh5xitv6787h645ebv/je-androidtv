@@ -12,6 +12,9 @@ import kotlinx.serialization.Serializable
 data class EnhancedPublicConfig(
 	// Spoiler Guard
 	@SerialName("SpoilerBlurEnabled") val spoilerBlurEnabled: Boolean = false,
+	@SerialName("SpoilerStripSeriesOverview") val spoilerStripSeriesOverview: Boolean = true,
+	@SerialName("SpoilerStripOverview") val spoilerStripOverview: Boolean = true,
+	@SerialName("SpoilerStripRatings") val spoilerStripRatings: Boolean = true,
 
 	// Hidden Content / home removal
 	@SerialName("HiddenContentEnabled") val hiddenContentEnabled: Boolean = false,
@@ -62,9 +65,14 @@ data class EnhancedState(
 	val config: EnhancedPublicConfig = EnhancedPublicConfig(),
 	val userSettings: EnhancedUserSettings = EnhancedUserSettings(),
 	val seerr: SeerrUserStatus = SeerrUserStatus(),
+	/** The user's `hidden-content.json` settings, when Hidden Content is enabled. */
+	val hiddenSettings: HiddenContentSettings? = null,
 ) {
 	val spoilerGuard get() = available && config.spoilerBlurEnabled
 	val hiddenContent get() = available && config.hiddenContentEnabled
+
+	/** Whether to offer Hide buttons and menu entries, following the user's Hidden Content settings. */
+	val hideControls get() = hiddenContent && hiddenSettings?.let { it.enabled && it.showHideButtons } == true
 
 	/** The web shows "Remove from Continue Watching / Next Up" when the user's effective preference is on. */
 	val removeFromHome

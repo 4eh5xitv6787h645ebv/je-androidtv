@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupMenu
 import android.widget.Toast
+import androidx.core.view.doOnAttach
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.leanback.widget.ArrayObjectAdapter
@@ -14,6 +15,7 @@ import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
 import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
@@ -25,6 +27,7 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.HideFlow
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrViewAllCard
 import org.jellyfin.androidtv.ui.TextUnderButton
@@ -37,7 +40,6 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import org.jellyfin.sdk.model.api.PersonKind
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
-import java.util.WeakHashMap
 
 /**
  * Jellyfin Enhanced additions to the item details screen (FullDetailsFragment):
@@ -65,7 +67,7 @@ object EnhancedDetails {
 		var wanted = false
 	}
 
-	private val actionsByFragment = WeakHashMap<Fragment, List<EnhancedAction>>()
+	private val actionsByFragment = HashMap<Fragment, List<EnhancedAction>>()
 
 	/**
 	 * Add the Jellyfin Enhanced action buttons. They are created hidden and revealed once the plugin's state for the
@@ -101,7 +103,12 @@ object EnhancedDetails {
 			action(R.drawable.je_ic_travel_explore, R.string.je_more_from) { _, anchor -> showMoreFromMenu(fragment, anchor, item) }
 		} else null
 
-		actionsByFragment[fragment] = actions
+		// The actions capture the fragment, so drop them with it (a WeakHashMap alone would keep it alive)
+		if (actionsByFragment.put(fragment, actions) == null) {
+			fragment.lifecycle.addObserver(LifecycleEventObserver { _, event ->
+				if (event == Lifecycle.Event.ON_DESTROY) actionsByFragment.remove(fragment)
+			})
+		}
 		if (actions.isEmpty()) return
 
 		fragment.lifecycleScope.launch {
@@ -151,7 +158,8 @@ object EnhancedDetails {
 	private fun fitActions(row: MyDetailsOverviewRow, actions: List<EnhancedAction>) {
 		val parent = actions.first().button.parent as? ViewGroup
 		if (parent == null) {
-			actions.forEach { it.button.isVisible = it.wanted }
+			// Not on screen yet (the state was already cached): fit once the row is attached
+			actions.first().button.doOnAttach { fitActions(row, actions) }
 			return
 		}
 
@@ -303,30 +311,8 @@ object EnhancedDetails {
 			return
 		}
 
-		val hasSeries = (item.type == BaseItemKind.EPISODE || item.type == BaseItemKind.SEASON) && item.seriesId != null
-		if (hasSeries) {
-			val thisLabel = context.getString(if (item.type == BaseItemKind.EPISODE) R.string.je_hide_this_episode else R.string.je_hide_this_season)
-			AlertDialog.Builder(context)
-				.setTitle(context.getString(R.string.je_hide_confirm_title, item.name.orEmpty()))
-				.setItems(arrayOf(thisLabel, context.getString(R.string.je_hide_whole_show))) { _, which -> apply(hide = true, wholeSeries = which == 1) }
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
-			return
-		}
-
-		fragment.lifecycleScope.launch {
-			val confirm = runCatching { hiddenContentRepository.get().settings.showHideConfirmation }.getOrDefault(true)
-			if (!confirm) {
-				apply(hide = true)
-				return@launch
-			}
-			AlertDialog.Builder(context)
-				.setTitle(context.getString(R.string.je_hide_confirm_title, item.name.orEmpty()))
-				.setMessage(R.string.je_hide_confirm_message)
-				.setPositiveButton(R.string.je_hide) { _, _ -> apply(hide = true) }
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
-		}
+		val askConfirmation = enhancedRepository.current.hiddenSettings?.showHideConfirmation ?: true
+		HideFlow.confirm(context, item, askConfirmation) { wholeSeries -> apply(hide = true, wholeSeries = wholeSeries) }
 	}
 
 	// "More from…"

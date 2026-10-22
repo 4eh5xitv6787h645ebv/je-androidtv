@@ -9,6 +9,7 @@
     <string name="je_spoiler_disable_confirm">Disable</string>
     <string name="je_spoiler_enable_pending">Enable Spoiler Guard</string>
     <string name="je_spoiler_pending">Spoiler Guard (pending)</string>
+    <string name="je_spoiler_overview_placeholder">Spoiler Guard activated</string>
 
     <!-- Hidden Content -->
     <string name="je_hide">Hide</string>

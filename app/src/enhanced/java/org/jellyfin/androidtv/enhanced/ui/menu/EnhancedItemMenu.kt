@@ -13,6 +13,7 @@ import org.jellyfin.androidtv.constant.QueryType
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.HomeSurface
+import org.jellyfin.androidtv.enhanced.ui.HideFlow
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter
 import org.koin.java.KoinJavaComponent.inject
@@ -64,7 +65,7 @@ object EnhancedItemMenu {
 			null -> Unit
 		}
 
-		if (state.hiddenContent) menu.add(0, MENU_HIDE, position, R.string.je_hide)
+		if (state.hideControls) menu.add(0, MENU_HIDE, position, R.string.je_hide)
 	}
 
 	/** Handle a click on one of our entries. Returns false for entries that aren't ours. */
@@ -93,16 +94,22 @@ object EnhancedItemMenu {
 				}
 			}
 
-			MENU_HIDE -> activity.lifecycleScope.launch {
-				runCatching { hiddenContentRepository.hide(item) }
-					.onSuccess {
-						removeFromRow(row, rowItem)
-						Toast.makeText(activity, activity.getString(R.string.je_hidden_toast, item.name.orEmpty()), Toast.LENGTH_SHORT).show()
+			MENU_HIDE -> {
+				val askConfirmation = enhancedRepository.current.hiddenSettings?.showHideConfirmation ?: true
+				HideFlow.confirm(activity, item, askConfirmation) { wholeSeries ->
+					activity.lifecycleScope.launch {
+						runCatching { hiddenContentRepository.hide(item, wholeSeries) }
+							.onSuccess {
+								removeFromRow(row, rowItem)
+								val name = if (wholeSeries) item.seriesName ?: item.name else item.name
+								Toast.makeText(activity, activity.getString(R.string.je_hidden_toast, name.orEmpty()), Toast.LENGTH_SHORT).show()
+							}
+							.onFailure {
+								Timber.w(it, "Failed to hide %s", item.id)
+								Toast.makeText(activity, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
+							}
 					}
-					.onFailure {
-						Timber.w(it, "Failed to hide %s", item.id)
-						Toast.makeText(activity, R.string.je_error_generic, Toast.LENGTH_SHORT).show()
-					}
+				}
 			}
 
 			else -> return false

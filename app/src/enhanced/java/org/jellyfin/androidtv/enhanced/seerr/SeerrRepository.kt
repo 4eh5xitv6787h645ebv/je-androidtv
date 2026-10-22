@@ -224,11 +224,13 @@ class SeerrRepository(
 		val filterHidden = hidden != null && hidden.settings.enabled &&
 			(if (recommendations) hidden.settings.filterRecommendations else hidden.settings.filterDiscovery)
 		val hiddenIds = if (filterHidden) hidden!!.hiddenTmdbIds else emptySet()
+		val hiddenItemIds = if (filterHidden) hidden!!.hiddenItemIds else emptySet()
 
 		val seen = HashSet<String>()
 		return results.filter { item ->
 			seen.add(item.dedupeKey) &&
 				item.id.toString() !in hiddenIds &&
+				item.mediaInfo?.jellyfinMediaId?.replace("-", "")?.lowercase() !in hiddenItemIds &&
 				!(state.config.jellyseerrExcludeLibraryItems && item.mediaInfo?.jellyfinMediaId != null) &&
 				!(state.config.jellyseerrExcludeBlocklistedItems && item.mediaInfo?.status == SeerrMediaStatus.BLOCKLISTED)
 		}
