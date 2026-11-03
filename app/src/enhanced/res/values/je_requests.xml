@@ -115,4 +115,13 @@
     <string name="je_requests_paused_empty">Nothing to show on the pages checked so far.</string>
     <string name="je_requests_hidden_unavailable">Couldn\'t load your hidden content, so this list isn\'t shown.</string>
     <string name="je_requests_working">Updating…</string>
+    <plurals name="je_requests_count">
+        <item quantity="one">%1$d request</item>
+        <item quantity="other">%1$d requests</item>
+    </plurals>
+    <plurals name="je_requests_waiting">
+        <item quantity="one">%1$d waiting for you</item>
+        <item quantity="other">%1$d waiting for you</item>
+    </plurals>
+    <string name="je_requests_subtitle_joined">%1$s · %2$s</string>
 </resources>
