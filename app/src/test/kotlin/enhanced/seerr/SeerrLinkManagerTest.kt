@@ -9,11 +9,14 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
@@ -39,8 +42,14 @@ class SeerrLinkManagerTest : FunSpec({
 	val unlinked = SeerrUserStatus(active = true, userFound = false, reason = "unlinked")
 	val linked = SeerrUserStatus(active = true, userFound = true, reason = "linked", jellyseerrUserId = "7")
 
-	class Fixture(initial: EnhancedState, statusAnswer: String) {
-		val api = mockk<EnhancedApi>()
+	class Fixture(
+		initial: EnhancedState,
+		statusAnswer: String,
+		wait: suspend (SeerrLinkKind) -> Unit = {},
+		clock: () -> Long = { 0L },
+	) {
+		var server = "http://lab"
+		val api = mockk<EnhancedApi> { every { baseUrl } answers { server } }
 		val states = MutableStateFlow(initial)
 		val users = MutableStateFlow<UserDto?>(user(UUID.randomUUID()))
 		val repository = mockk<EnhancedRepository> {
@@ -59,13 +68,14 @@ class SeerrLinkManagerTest : FunSpec({
 			}
 		}
 
-		// Unconfined and no delay: the delayed second look runs at once, inside the state collection
+		// Unconfined and (by default) no wait: the delayed second look runs at once, inside the state collection
 		val manager = SeerrLinkManager(
 			enhancedApi = api,
 			enhancedRepository = repository,
 			userRepository = mockk<UserRepository> { every { currentUser } returns users },
 			scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
-			recheckDelay = { 0L },
+			waitBeforeRecheck = wait,
+			clock = clock,
 		)
 
 		fun statusReads(count: Int) = coVerify(exactly = count) { api.get("jellyseerr/user-status", any()) }
@@ -150,5 +160,79 @@ class SeerrLinkManagerTest : FunSpec({
 			fixture.manager.linkedDisplayName(state(linked.copy(jellyseerrUserId = "8"), admin = false)) shouldBe null
 		}
 		coVerify(exactly = 1) { fixture.api.get("jellyseerr/user", any()) }
+	}
+
+	/** A wait that really suspends until [release], recording when it started and whether it was cancelled. */
+	class SuspendingWait {
+		val waiting = CompletableDeferred<Unit>()
+		val cancelled = CompletableDeferred<Unit>()
+		private val release = CompletableDeferred<Unit>()
+
+		val wait: suspend (SeerrLinkKind) -> Unit = {
+			waiting.complete(Unit)
+			try {
+				release.await()
+			} catch (err: CancellationException) {
+				cancelled.complete(Unit)
+				throw err
+			}
+		}
+
+		fun release() = release.complete(Unit)
+	}
+
+	test("a scheduled look is dropped when a refresh says blocked, unreachable or no-user while it waits") {
+		for (reason in listOf("blocked", "unreachable", "no_user")) {
+			val wait = SuspendingWait()
+			val fixture = Fixture(state(unlinked), """{"active":true,"userFound":true,"reason":"linked"}""", wait = wait.wait)
+			fixture.manager
+			runBlocking { withTimeout(5_000) { wait.waiting.await() } }
+			fixture.states.value = state(SeerrUserStatus(active = reason == "blocked", userFound = false, reason = reason))
+			runBlocking { withTimeout(5_000) { wait.cancelled.await() } }
+			wait.release()
+			fixture.statusReads(0)
+		}
+	}
+
+	test("a scheduled look survives a state that isn't loaded yet, and runs when its wait is over") {
+		val wait = SuspendingWait()
+		val fixture = Fixture(state(unlinked), """{"active":true,"userFound":true,"jellyseerrUserId":"7","reason":"linked"}""", wait = wait.wait)
+		fixture.manager
+		runBlocking { withTimeout(5_000) { wait.waiting.await() } }
+		fixture.statusReads(0)
+		// A forced reload passes through the empty state (Seerr off as far as the link goes)
+		fixture.states.value = EnhancedState()
+		fixture.states.value = state(unlinked)
+		wait.release()
+		wait.cancelled.isCompleted shouldBe false
+		fixture.statusReads(1)
+		SeerrLink.kind(fixture.states.value) shouldBe SeerrLinkKind.LINKED
+	}
+
+	test("a missing display name is kept for a while and per server, so About doesn't fetch the list every time") {
+		var now = 1_000L
+		val fixture = Fixture(state(linked, admin = true), "{}", clock = { now })
+		coEvery { fixture.api.get("jellyseerr/user", any()) } returns json.parseToJsonElement("""{"results":[{"id":2,"displayName":"real-viewer"}]}""")
+		runBlocking {
+			repeat(3) { fixture.manager.linkedDisplayName(state(linked, admin = true)) shouldBe null }
+			coVerify(exactly = 1) { fixture.api.get("jellyseerr/user", any()) }
+			// The same Seerr id on another server is another user
+			fixture.server = "http://other"
+			fixture.manager.linkedDisplayName(state(linked, admin = true)) shouldBe null
+			coVerify(exactly = 2) { fixture.api.get("jellyseerr/user", any()) }
+			// A failed list is kept as "no name" too, then asked again once the time is up
+			fixture.server = "http://lab"
+			now += SeerrLinkManager.MISSING_NAME_TTL_MS
+			coEvery { fixture.api.get("jellyseerr/user", any()) } throws EnhancedApi.EnhancedApiException(502, "down")
+			repeat(2) { fixture.manager.linkedDisplayName(state(linked, admin = true)) shouldBe null }
+			coVerify(exactly = 3) { fixture.api.get("jellyseerr/user", any()) }
+			now += SeerrLinkManager.MISSING_NAME_TTL_MS
+			coEvery { fixture.api.get("jellyseerr/user", any()) } returns json.parseToJsonElement("""{"results":[{"id":7,"displayName":"tv-admin"}]}""")
+			fixture.manager.linkedDisplayName(state(linked, admin = true)) shouldBe "tv-admin"
+			// A found name stays
+			now += 10 * SeerrLinkManager.MISSING_NAME_TTL_MS
+			fixture.manager.linkedDisplayName(state(linked, admin = true)) shouldBe "tv-admin"
+			coVerify(exactly = 4) { fixture.api.get("jellyseerr/user", any()) }
+		}
 	}
 })
