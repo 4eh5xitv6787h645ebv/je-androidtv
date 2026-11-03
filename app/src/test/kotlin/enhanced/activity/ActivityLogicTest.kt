@@ -91,4 +91,21 @@ class ActivityLogicTest : FunSpec({
 		session.playState?.isPaused shouldBe true
 		session.playState?.playMethod shouldBe "Transcode"
 	}
+
+	test("lazy keys stay unique for identical sessions and entries") {
+		// The same user playing the same item on two devices with the same name: the API has no session id
+		val stream = ActiveSession(userId = "u", deviceName = "Living Room", client = "Android TV", nowPlaying = NowPlayingItem(id = "i"))
+		val other = stream.copy(deviceName = "Bedroom")
+		val keys = ActivityLogic.uniqueKeys(listOf(stream, other, stream.copy(), stream), ActivityLogic::sessionKey)
+		keys shouldContainExactly listOf(
+			"session-u-Living Room-Android TV-i",
+			"session-u-Bedroom-Android TV-i",
+			"session-u-Living Room-Android TV-i#2",
+			"session-u-Living Room-Android TV-i#3",
+		)
+
+		val entryKeys = ActivityLogic.uniqueKeys(listOf(watch, watch.copy(), review), ActivityLogic::entryKey)
+		entryKeys.toSet().size shouldBe 3
+		entryKeys[1] shouldBe "${entryKeys[0]}#2"
+	}
 })

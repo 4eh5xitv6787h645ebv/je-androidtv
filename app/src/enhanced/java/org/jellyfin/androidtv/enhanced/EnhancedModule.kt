@@ -19,7 +19,7 @@ val enhancedModule = module {
 	single(createdAtStart = true) { EnhancedRepository(get(), get()) }
 	single { EnhancedSettingsRepository(get(), get()) }
 	single { SpoilerGuardRepository(get()) }
-	single { HiddenContentRepository(get(), get()) }
+	single { HiddenContentRepository(get(), get(), get()) }
 	single { SeerrRepository(get(), get(), get()) }
 
 	includes(featureModules)

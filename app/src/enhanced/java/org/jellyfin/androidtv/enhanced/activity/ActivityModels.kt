@@ -150,6 +150,27 @@ object ActivityLogic {
 	/** Progress as a whole percentage (activity `Progress` is a fraction). */
 	fun percent(fraction: Double): Int = (fraction.coerceIn(0.0, 1.0) * 100).toInt()
 
+	/**
+	 * Lazy list keys for [values], unique even when two values give the same [base] key: repeats get `#2`, `#3`, … in
+	 * list order. Compose throws on duplicate keys, and `active-streams/sessions` has no session id (one user can
+	 * play the same item on two devices with the same name), so content keys alone can collide.
+	 */
+	fun <T> uniqueKeys(values: List<T>, base: (T) -> String): List<String> {
+		val seen = HashMap<String, Int>()
+		return values.map { value ->
+			val key = base(value)
+			val count = seen.merge(key, 1, Int::plus)!!
+			if (count == 1) key else "$key#$count"
+		}
+	}
+
+	/** A stream's content key: who plays what where. Not unique on its own, see [uniqueKeys]. */
+	fun sessionKey(session: ActiveSession) =
+		"session-${session.userId}-${session.deviceName}-${session.client}-${session.nowPlaying?.id}"
+
+	/** An activity entry's content key. Not unique on its own, see [uniqueKeys]. */
+	fun entryKey(entry: ActivityEntry) = "${entry.activityType}-${entry.userId}-${entry.item?.id}-${entry.timestampMs}"
+
 	/** Session progress percentage from ticks, or null when the runtime is unknown. */
 	fun sessionPercent(positionTicks: Long?, runTimeTicks: Long?): Int? {
 		if (positionTicks == null || runTimeTicks == null || runTimeTicks <= 0) return null

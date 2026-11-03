@@ -9,6 +9,9 @@ import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
@@ -16,6 +19,8 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
+import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.HomeSurface
 import org.jellyfin.androidtv.enhanced.management.hidden.HiddenEntries
@@ -104,12 +109,21 @@ class HiddenContentManagementTest : FunSpec({
 		snapshot.isHiddenTmdb(1, "3edb510e52d3dd02aac4211c045310d4") shouldBe false
 	}
 
-	fun repository(api: EnhancedApi, posted: io.mockk.CapturingSlot<JsonObject>): HiddenContentRepository {
+	val path = "user-settings/7ef882cd307344279240d0eca8333a9f/hidden-content.json"
+
+	fun mockApi(api: EnhancedApi) {
 		every { api.pinned() } returns api
+		every { api.accessToken } returns "token"
 		coEvery { api.currentUserId() } returns "7ef882cd-3073-4427-9240-d0eca8333a9f"
-		coEvery { api.get("user-settings/7ef882cd307344279240d0eca8333a9f/hidden-content.json", any()) } returns document
-		coEvery { api.post("user-settings/7ef882cd307344279240d0eca8333a9f/hidden-content.json", capture(posted), any()) } returns JsonObject(emptyMap())
-		return HiddenContentRepository(api, mockk<UserRepository>())
+	}
+
+	fun settingsRepository(api: EnhancedApi) = EnhancedSettingsRepository(api, mockk<EnhancedRepository>(relaxed = true))
+
+	fun repository(api: EnhancedApi, posted: io.mockk.CapturingSlot<JsonObject>): HiddenContentRepository {
+		mockApi(api)
+		coEvery { api.get(path, any()) } returns document
+		coEvery { api.post(path, capture(posted), any()) } returns JsonObject(emptyMap())
+		return HiddenContentRepository(api, mockk<UserRepository>(), settingsRepository(api))
 	}
 
 	test("removing entries by key keeps everything else, including unknown fields") {
@@ -161,5 +175,43 @@ class HiddenContentManagementTest : FunSpec({
 		runBlocking { repo.unhideTmdb(1, "3edb510e52d3dd02aac4211c045310d4") }
 		// The Continue Watching entry for that id is not a global hide and stays
 		posted.captured["Items"]!!.jsonObject.containsKey("3edb510e-52d3-dd02-aac4-211c045310d4") shouldBe true
+	}
+
+	test("overlapping settings toggles, hides and restores keep each other's changes") {
+		// A server whose GET suspends, so without one shared lock both edits would read the same version
+		val api = mockk<EnhancedApi>()
+		mockApi(api)
+		var stored = document
+		coEvery { api.get(path, any()) } coAnswers {
+			val snapshot = stored
+			delay(50)
+			snapshot
+		}
+		coEvery { api.post(path, any(), any()) } answers {
+			stored = secondArg()
+			JsonObject(emptyMap())
+		}
+		val settings = settingsRepository(api)
+		val repo = HiddenContentRepository(api, mockk<UserRepository>(), settings)
+
+		runBlocking {
+			coroutineScope {
+				launch {
+					settings.edit(EnhancedSettingsRepository.HIDDEN_CONTENT) { fields ->
+						val current = fields["Settings"]!!.jsonObject.toMutableMap()
+						current["FilterSearch"] = JsonPrimitive(false)
+						fields["Settings"] = JsonObject(current)
+					}
+				}
+				launch { repo.hideTmdb(1399, "tv", "Game of Thrones", null, null) }
+				launch { repo.removeEntries(listOf("tmdb-603")) }
+			}
+		}
+
+		stored["Settings"]!!.jsonObject["FilterSearch"] shouldBe JsonPrimitive(false)
+		val items = stored["Items"]!!.jsonObject
+		items.containsKey("tmdb-1399") shouldBe true
+		items.containsKey("tmdb-603") shouldBe false
+		stored["Unknown"] shouldBe document["Unknown"]
 	}
 })
