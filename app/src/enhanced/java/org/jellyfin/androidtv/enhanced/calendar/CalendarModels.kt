@@ -130,7 +130,8 @@ data class CalendarFilter(
 /**
  * The agenda: dated [days], plus the releases of Spoiler Guarded titles whose air dates are hidden for this user
  * ([undated]). Those are shown under one neutral heading with no date or time, ordered by title and episode, so
- * neither their grouping nor their order gives the date away.
+ * neither their grouping nor their order gives the date away. [undated] is the same for every window (see
+ * [CalendarLogic.agenda]), so paging through weeks doesn't reveal when they air either.
  */
 data class CalendarAgenda(
 	val days: List<Pair<LocalDate, List<CalendarEvent>>>,
@@ -189,6 +190,9 @@ object CalendarLogic {
 	/** How many days the agenda shows from its start date. */
 	const val WINDOW_DAYS = 14L
 
+	/** How far ahead the undated group looks, from today, independent of the window. */
+	const val UNDATED_HORIZON_DAYS = 90L
+
 	/** `CalendarFirstDayOfWeek` is a day name (`Monday`, `Sunday`, …); anything else falls back to Monday. */
 	fun firstDayOfWeek(value: String?): DayOfWeek =
 		DayOfWeek.entries.firstOrNull { it.name.equals(value?.trim(), ignoreCase = true) } ?: DayOfWeek.MONDAY
@@ -212,10 +216,22 @@ object CalendarLogic {
 
 	fun inWindow(day: LocalDate, start: LocalDate) = !day.isBefore(start) && day.isBefore(start.plusDays(WINDOW_DAYS))
 
+	/** Query bounds for the undated group: local midnight [today] to [UNDATED_HORIZON_DAYS] later. */
+	fun upcomingRange(today: LocalDate, zone: ZoneId): Pair<String, String> {
+		val from = today.atStartOfDay(zone).toInstant()
+		val to = today.plusDays(UNDATED_HORIZON_DAYS).atStartOfDay(zone).toInstant()
+		return from.toString() to to.toString()
+	}
+
 	/**
 	 * Monitored events of the window, filtered and grouped by day in date order, each day sorted by release time.
-	 * Unmonitored events are left out like the web calendar does by default. Events for which [hideDate] is true go
-	 * to [CalendarAgenda.undated] instead.
+	 * Unmonitored events are left out like the web calendar does by default.
+	 *
+	 * Events for which [hideDate] is true never appear in [CalendarAgenda.days]. [CalendarAgenda.undated] lists them
+	 * from [upcoming] instead, the releases of a fixed range from today ([upcomingRange]) rather than of the window:
+	 * picking them from the window would let a guarded title appear in the week it airs and vanish from the others.
+	 * Without [upcoming] (nothing could have its date hidden when it was loaded) the undated group is empty. The
+	 * chips and the request filter apply to both groups.
 	 */
 	fun agenda(
 		events: List<CalendarEvent>,
@@ -225,25 +241,41 @@ object CalendarLogic {
 		requested: Set<String>,
 		forceOnlyRequested: Boolean,
 		hideDate: (CalendarEvent) -> Boolean = { false },
+		upcoming: List<CalendarEvent>? = null,
 	): CalendarAgenda {
-		val inWindow = events
-			.asSequence()
+		fun Sequence<CalendarEvent>.shown() = this
 			.filter { it.monitored }
 			.filter { !forceOnlyRequested || it.requestKey in requested }
 			.filter { filter.matches(it, requested) }
+		val dated = events
+			.asSequence()
+			.shown()
+			.filterNot(hideDate)
 			.mapNotNull { event -> event.day(zone)?.takeIf { inWindow(it, start) }?.let { it to event } }
 			.toList()
-		val (undated, dated) = inWindow.partition { (_, event) -> hideDate(event) }
+		val undated = upcoming.orEmpty()
+			.asSequence()
+			.shown()
+			.filter(hideDate)
+			.distinctBy { listOf(it.source, it.instanceName, it.eventId) }
+			.toList()
 		return CalendarAgenda(
 			days = dated
 				.groupBy({ it.first }, { it.second })
 				.toSortedMap()
 				.map { (day, dayEvents) -> day to dayEvents.sortedWith(compareBy({ it.instant }, { it.title })) },
-			undated = undated.map { it.second }.sortedWith(
+			undated = undated.sortedWith(
 				compareBy({ it.title.lowercase(Locale.ROOT) }, { it.seasonNumber }, { it.episodeNumber }, { it.eventId })
 			),
 		)
 	}
+
+	/**
+	 * Whether any release could have its date hidden under [spoiler], so the undated group needs its own query:
+	 * Spoiler Guard is on and either its air date category is in effect or its lists are incomplete (unresolved
+	 * titles are fully protected).
+	 */
+	fun mayHideDates(spoiler: SpoilerSnapshot): Boolean = spoiler.enabled && (spoiler.policy.hideAirDate || !spoiler.complete)
 
 	/**
 	 * What to withhold for the event. Calendar data comes straight from Sonarr/Radarr (artwork, dates, titles), so

@@ -67,7 +67,8 @@ import java.util.Locale
  *
  * The plugin passes Sonarr/Radarr data through unfiltered, so this page applies Hidden Content's calendar filter and
  * Spoiler Guard itself: guarded titles get library artwork (or none), no finale marker, episode titles only when
- * the user's policy allows them, and, when air dates are protected, no date or time at all (see [CalendarAgenda]).
+ * the user's policy allows them, and, when air dates are protected, no date or time at all: they are listed apart,
+ * from a fixed range starting today, whichever week is shown (see [CalendarLogic.agenda]).
  */
 class CalendarFragment : Fragment() {
 	private val calendarRepository by inject<CalendarRepository>()
@@ -80,6 +81,8 @@ class CalendarFragment : Fragment() {
 	private data class Loaded(
 		val start: LocalDate,
 		val response: CalendarResponse,
+		/** Releases from today on, independent of the window, for the undated group; null when no date can be hidden. */
+		val upcoming: List<CalendarEvent>?,
 		val config: CalendarConfig,
 		/** Request keys; null when they couldn't be loaded (the highlight is optional unless it's enforced). */
 		val requested: Set<String>?,
@@ -114,6 +117,8 @@ class CalendarFragment : Fragment() {
 		loadJob = lifecycleScope.launch {
 			val result = attempt {
 				val state = enhancedRepository.ensureLoaded()
+				// Without the configuration neither Spoiler Guard nor Hidden Content can be applied
+				if (state.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
 				coroutineScope {
 					val eventsCall = async { calendarRepository.events(windowStart, zone) }
 					val configCall = async { calendarRepository.config() }
@@ -121,6 +126,9 @@ class CalendarFragment : Fragment() {
 						if (state.config.jellyseerrEnabled) attempt { calendarRepository.requestedKeys() }.getOrNull() else emptySet()
 					}
 					val spoilerCall = async { spoilerProtection.snapshot() }
+					val upcomingCall = async {
+						if (CalendarLogic.mayHideDates(spoilerCall.await())) calendarRepository.upcomingEvents(LocalDate.now(zone), zone).events else null
+					}
 					// A failed read is reported rather than showing titles the user hid
 					val hiddenCall = async { if (state.hiddenContent) CalendarHiddenFilter.of(hiddenContentRepository.get()) else null }
 					val config = configCall.await()
@@ -131,8 +139,10 @@ class CalendarFragment : Fragment() {
 					val response = eventsCall.await().let { response ->
 						if (hidden == null) response else response.copy(events = response.events.filterNot(hidden::isHidden))
 					}
+					val upcoming = upcomingCall.await()?.let { events -> if (hidden == null) events else events.filterNot(hidden::isHidden) }
 					val spoiler = spoilerCall.await()
-					val guardedIds = response.events
+					if (spoiler.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
+					val guardedIds = (response.events + upcoming.orEmpty())
 						.filter { CalendarLogic.protection(it, spoiler).hideArtwork }
 						.mapNotNull { it.libraryItemId?.takeIf(String::isNotBlank) }
 					val posters = if (guardedIds.isEmpty()) emptyMap() else {
@@ -143,6 +153,7 @@ class CalendarFragment : Fragment() {
 					Loaded(
 						start = windowStart,
 						response = response,
+						upcoming = upcoming,
 						config = config,
 						requested = requested,
 						seerrEnabled = state.config.jellyseerrEnabled,
@@ -228,6 +239,7 @@ class CalendarFragment : Fragment() {
 				requested = requested,
 				forceOnlyRequested = loaded.config.forceOnlyRequested,
 				hideDate = { CalendarLogic.protection(it, loaded.spoiler).hideAirDate },
+				upcoming = loaded.upcoming,
 			)
 		}
 		val firstEventFocus = remember { FocusRequester() }
@@ -280,7 +292,7 @@ class CalendarFragment : Fragment() {
 	@Composable
 	private fun Filters(loaded: Loaded, currentFilter: CalendarFilter) {
 		val sources = remember(loaded) {
-			(loaded.response.events.map { it.source } + loaded.response.errors.mapNotNull { it.source })
+			(loaded.response.events.map { it.source } + loaded.upcoming.orEmpty().map { it.source } + loaded.response.errors.mapNotNull { it.source })
 				.filter { it.isNotBlank() }
 				.distinctBy { it.lowercase() }
 				.sorted()

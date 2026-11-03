@@ -4,6 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -142,16 +144,24 @@ data class Protection(
 
 /**
  * The user's Spoiler Guard lists and policy at one moment, for checking many titles. [state] null means Spoiler
- * Guard is on but its lists couldn't be read; [collectionMovieIds] null means a guarded collection's movies couldn't
- * be listed. Both fail closed.
+ * Guard is on (or may be) but its lists couldn't be read; [collectionMovieIds] null means a guarded collection's
+ * movies couldn't be listed. Both fail closed.
  */
 class SpoilerSnapshot(
 	/** Spoiler Guard is on for this server. When false everything is [Protection.NONE]. */
 	val enabled: Boolean,
 	val state: SpoilerGuardState?,
 	val policy: SpoilerPolicy,
-	/** Movies of the guarded collections (dash-less, lower case); the server protects them like listed movies. */
+	/**
+	 * Movies of the guarded collections (dash-less, lower case); the server protects them like listed movies. May
+	 * include movies that aren't members (see [SpoilerProtection]), never misses one.
+	 */
 	val collectionMovieIds: Set<String>?,
+	/**
+	 * The plugin's configuration couldn't be read, so even whether Spoiler Guard is on is unknown: everything is
+	 * [Protection.FULL]. Pages should offer a retry rather than show external data with everything withheld.
+	 */
+	val configUnavailable: Boolean = false,
 ) {
 	/** False when protection is on but some of it couldn't be resolved, so some titles are withheld blindly. */
 	val complete get() = !enabled || (state != null && collectionMovieIds != null)
@@ -223,23 +233,61 @@ class SpoilerSnapshot(
 	companion object {
 		val DISABLED = SpoilerSnapshot(enabled = false, state = null, policy = SpoilerPolicy.STRICT, collectionMovieIds = emptySet())
 
+		/** Configuration unknown: protect everything. */
+		val UNKNOWN = SpoilerSnapshot(
+			enabled = true,
+			state = null,
+			policy = SpoilerPolicy.STRICT,
+			collectionMovieIds = null,
+			configUnavailable = true,
+		)
+
 		fun normalize(id: String) = id.replace("-", "").lowercase()
 	}
 }
 
 /**
  * Resolves Spoiler Guard protection for content the plugin doesn't filter itself. Membership comes from the user's
- * Spoiler Guard document, the policy from the public config and the document's `Prefs`. Every failure fails closed.
+ * Spoiler Guard document, the policy from the public config and the document's `Prefs`. Every failure fails closed,
+ * including an unreadable plugin configuration ([EnhancedState.configUnavailable]).
+ *
+ * A complete snapshot is reused for [CACHE_TTL_MS] so the contributors of one details screen share it. It is only
+ * reused while [SpoilerGuardRepository] still holds the same state object: every Spoiler Guard write in this client
+ * clears that, so a title the user just guarded is never checked against an older list.
  */
 class SpoilerProtection(
 	private val enhancedRepository: EnhancedRepository,
 	private val spoilerGuardRepository: SpoilerGuardRepository,
 	private val enhancedApi: EnhancedApi,
+	private val clock: () -> Long = System::currentTimeMillis,
 ) {
+	private class Cached(val token: String?, val enhanced: EnhancedState, val at: Long, val snapshot: SpoilerSnapshot)
+
+	private val mutex = Mutex()
+	private var cached: Cached? = null
+
 	/** The user's lists and policy now. Never throws (except for cancellation): failures give a fail-closed snapshot. */
 	suspend fun snapshot(): SpoilerSnapshot {
 		val enhanced = enhancedRepository.ensureLoaded()
+		if (enhanced.configUnavailable) return SpoilerSnapshot.UNKNOWN
 		if (!enhanced.spoilerGuard) return SpoilerSnapshot.DISABLED
+		// Concurrent callers (one details screen's contributors) wait for one load instead of each starting their own
+		return mutex.withLock {
+			val token = enhancedApi.accessToken
+			cached?.takeIf {
+				it.token == token &&
+					it.enhanced == enhanced &&
+					clock() - it.at in 0 until CACHE_TTL_MS &&
+					spoilerGuardRepository.cachedState() === it.snapshot.state
+			}?.let { return@withLock it.snapshot }
+
+			load(enhanced).also { snapshot ->
+				cached = if (snapshot.complete) Cached(token, enhanced, clock(), snapshot) else null
+			}
+		}
+	}
+
+	private suspend fun load(enhanced: EnhancedState): SpoilerSnapshot {
 		val state = try {
 			spoilerGuardRepository.getState()
 		} catch (err: CancellationException) {
@@ -248,7 +296,7 @@ class SpoilerProtection(
 			Timber.w(err, "Failed to read Spoiler Guard state; withholding protected data")
 			null
 		}
-		val members = if (state == null || state.collections.isEmpty()) emptySet() else collectionMovieIds(state)
+		val members = if (state == null || state.collections.isEmpty()) emptySet() else collectionMovieIds(state, enhanced)
 		return SpoilerSnapshot(
 			enabled = true,
 			state = state,
@@ -261,28 +309,67 @@ class SpoilerProtection(
 	/** The effective protection of one library item. */
 	suspend fun effectiveFor(item: BaseItemDto): Protection = snapshot().forItem(item)
 
-	/** The movies in the user's guarded collections, or null when any of them couldn't be listed. */
-	private suspend fun collectionMovieIds(state: SpoilerGuardState): Set<String>? = try {
+	/**
+	 * The movies in the user's guarded collections, or null when membership couldn't be established.
+	 *
+	 * The collections are listed as the user, and the plugin's Hidden Content filter drops hidden items from that
+	 * listing (`GET /Items` is a "library" surface), although the server's Spoiler Guard still protects them as members.
+	 * No unfiltered route lists a collection's children, so every item in the user's Hidden Content document is
+	 * counted as a possible member too. That over-protects hidden movies outside the collections, which the user
+	 * doesn't see in the library anyway, and never misses a member. The plugin drops its own copy of the document
+	 * on every write, so the listing and the document can't disagree after a hide or unhide.
+	 */
+	private suspend fun collectionMovieIds(state: SpoilerGuardState, enhanced: EnhancedState): Set<String>? = try {
 		val api = enhancedApi.pinned()
-		val userId = api.currentUserId()
+		val userId = api.currentUserId() ?: error("No signed-in user")
 		val ids = SpoilerGuardRepository.entries(state)
 			.filter { it.kind == SpoilerGuardRepository.Kind.COLLECTION }
 			.map { entry -> entry.itemId?.toString() ?: entry.key }
 		coroutineScope {
-			ids.map { collectionId ->
+			val hiddenCall = async { if (enhanced.hiddenContent) hiddenItemIds(api, userId) else emptySet() }
+			val listed = ids.map { collectionId ->
 				async {
 					val response = api.get("/Items", mapOf("parentId" to collectionId, "userId" to userId, "enableImages" to false, "enableUserData" to false))
 					((response as? JsonObject)?.get("Items") as? JsonArray).orEmpty().mapNotNull { element ->
 						((element as? JsonObject)?.get("Id") as? JsonPrimitive)?.contentOrNull?.let(SpoilerSnapshot::normalize)
 					}
 				}
-			}.awaitAll().flatten().toSet()
+			}.awaitAll().flatten()
+			listed.toSet() + hiddenCall.await()
 		}
 	} catch (err: CancellationException) {
 		throw err
 	} catch (err: Exception) {
 		Timber.w(err, "Failed to list guarded collections; withholding data for every movie")
 		null
+	}
+
+	/**
+	 * Every item id in the user's Hidden Content document (any scope), or nothing when the user's settings don't filter
+	 * library lists. A read failure is thrown: membership is then unknown.
+	 */
+	private suspend fun hiddenItemIds(api: EnhancedApi, userId: String): Set<String> {
+		val document = api.get("user-settings/${normalize(userId)}/hidden-content.json") as? JsonObject
+			?: error("Unexpected Hidden Content response")
+		return hiddenLibraryItemIds(HiddenContentRepository.Snapshot(document))
+	}
+
+	companion object {
+		/** How long a complete snapshot is reused: about one details screen load. */
+		const val CACHE_TTL_MS = 10_000L
+
+		/**
+		 * The ids the plugin's Hidden Content filter may drop from a collection listing: none when the user's settings
+		 * leave library lists unfiltered, otherwise every entry's item id regardless of scope (the conservative
+		 * superset of the `global` and `library` scopes the filter applies there).
+		 */
+		fun hiddenLibraryItemIds(snapshot: HiddenContentRepository.Snapshot): Set<String> {
+			if (!snapshot.settings.enabled || !snapshot.settings.filterLibrary) return emptySet()
+			return snapshot.entries
+				.mapNotNull { (it["ItemId"] as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+				.map(::normalize)
+				.toSet()
+		}
 	}
 }
 

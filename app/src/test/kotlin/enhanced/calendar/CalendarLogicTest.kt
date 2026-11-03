@@ -135,24 +135,55 @@ class CalendarLogicTest : FunSpec({
 		CalendarLogic.subtitle(episode, titlesKept) shouldBe "S02E01 · My First Time in a While"
 	}
 
-	test("protected air dates move releases out of the dated days") {
+	test("protected air dates never depend on the window") {
 		val guarded = snapshot(SpoilerGuardState(series = mapOf("326d7084082700b220b683fc0dc0ae78" to JsonPrimitive(true))))
-		val agenda = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
-			CalendarLogic.protection(it, guarded).hideAirDate
-		}
-		agenda.days.flatMap { it.second } shouldContainExactly listOf(movie)
-		agenda.undated shouldContainExactly listOf(episode)
+		val hideDate = { event: CalendarEvent -> CalendarLogic.protection(event, guarded).hideAirDate }
+		// The episode airs on 1 October; the fixed range from today has it whichever week is shown
+		val upcoming = listOf(episode, movie)
+		val airing = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, hideDate, upcoming)
+		airing.days.flatMap { it.second } shouldContainExactly listOf(movie)
+		airing.undated shouldContainExactly listOf(episode)
+		val otherWeek = CalendarLogic.agenda(emptyList(), LocalDate.of(2026, 10, 29), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, hideDate, upcoming)
+		otherWeek.days shouldBe emptyList()
+		otherWeek.undated shouldBe airing.undated
+
+		// Without the upcoming list a protected release is left out, never dated
+		val notLoaded = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, hideDate)
+		notLoaded.days.flatMap { it.second } shouldContainExactly listOf(movie)
+		notLoaded.undated shouldBe emptyList()
+
+		// Listed once, and the chips apply to the undated group too
+		CalendarLogic.agenda(emptyList(), LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, hideDate, listOf(episode, episode.copy()))
+			.undated shouldContainExactly listOf(episode)
+		CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(kinds = setOf(CalendarFilter.Kind.MOVIE)), emptySet(), false, hideDate, upcoming)
+			.undated shouldBe emptyList()
+
 		// Kept on its day when the user lets air dates through
 		val datesShown = snapshot(guarded.state, SpoilerGuardPrefs(hideAirDate = false))
-		CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
-			CalendarLogic.protection(it, datesShown).hideAirDate
-		}.undated shouldBe emptyList()
-		// Unknown state: everything is undated, out-of-window releases still dropped
-		val unknown = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 2), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
+		CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, { CalendarLogic.protection(it, datesShown).hideAirDate }, upcoming)
+			.let { agenda ->
+				agenda.days.flatMap { it.second } shouldContainExactly listOf(episode, movie)
+				agenda.undated shouldBe emptyList()
+			}
+
+		// Unknown state: nothing is dated, everything upcoming and monitored is listed without dates
+		val unknown = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 2), ZoneOffset.UTC, CalendarFilter(), emptySet(), false, {
 			CalendarLogic.protection(it, snapshot(null)).hideAirDate
-		}
+		}, response.events)
 		unknown.days shouldBe emptyList()
-		unknown.undated shouldContainExactly listOf(movie)
+		unknown.undated shouldContainExactly listOf(movie, episode)
+	}
+
+	test("the undated group is only loaded when a date can be hidden, from a fixed range") {
+		val guarded = SpoilerGuardState(series = mapOf("326d7084082700b220b683fc0dc0ae78" to JsonPrimitive(true)))
+		CalendarLogic.mayHideDates(SpoilerSnapshot.DISABLED) shouldBe false
+		CalendarLogic.mayHideDates(snapshot(guarded)) shouldBe true
+		CalendarLogic.mayHideDates(snapshot(guarded, SpoilerGuardPrefs(hideAirDate = false))) shouldBe false
+		// Lists unknown: unresolved titles are fully protected whatever the policy
+		CalendarLogic.mayHideDates(snapshot(null, SpoilerGuardPrefs(hideAirDate = false))) shouldBe true
+		CalendarLogic.mayHideDates(snapshot(guarded, SpoilerGuardPrefs(hideAirDate = false), members = null)) shouldBe true
+		CalendarLogic.mayHideDates(SpoilerSnapshot.UNKNOWN) shouldBe true
+		CalendarLogic.upcomingRange(LocalDate.of(2026, 10, 1), ZoneOffset.UTC) shouldBe ("2026-10-01T00:00:00Z" to "2026-12-30T00:00:00Z")
 	}
 
 	test("hidden content drops releases by TMDB id, library ids or name, like the web") {

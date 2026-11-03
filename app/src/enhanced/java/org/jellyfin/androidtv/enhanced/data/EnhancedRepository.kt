@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.data
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,14 +53,33 @@ class EnhancedRepository(
 			.launchIn(scope)
 	}
 
-	/** Load the state for the current user if it has not been loaded yet, then return it. */
+	/**
+	 * Load the state for the current user if it has not been loaded yet, then return it.
+	 *
+	 * Only a 404 from `public-config` means "no plugin" and is cached like a successful load. Any other failure leaves
+	 * the configuration unknown: a state loaded earlier for this user is kept, otherwise
+	 * [EnhancedState.configUnavailable] is returned and nothing is cached, so the next call retries.
+	 */
 	suspend fun ensureLoaded(force: Boolean = false): EnhancedState = mutex.withLock {
 		val userId = userRepository.currentUser.value?.id ?: return@withLock _state.value
 		if (!force && loadedFor == userId) return@withLock _state.value
 
-		val newState = runCatching { load(userId) }
-			.onFailure { Timber.i(it, "Jellyfin Enhanced not available") }
-			.getOrDefault(EnhancedState())
+		val newState = try {
+			load(userId)
+		} catch (err: CancellationException) {
+			throw err
+		} catch (err: Exception) {
+			if (isPluginAbsent(err)) {
+				Timber.i(err, "Jellyfin Enhanced not available")
+				EnhancedState()
+			} else {
+				Timber.w(err, "Jellyfin Enhanced configuration unavailable")
+				if (loadedFor == userId) return@withLock _state.value
+				val unknown = EnhancedState(configUnavailable = true)
+				if (userRepository.currentUser.value?.id == userId) _state.value = unknown
+				return@withLock unknown
+			}
+		}
 
 		// Don't publish if the user changed while loading
 		if (userRepository.currentUser.value?.id == userId) {
@@ -86,24 +106,24 @@ class EnhancedRepository(
 	private suspend fun load(userId: UUID): EnhancedState = kotlinx.coroutines.coroutineScope {
 		val userKey = userId.toString().replace("-", "")
 		val configCall = async { enhancedApi.get("public-config") }
-		val settingsCall = async { runCatching { enhancedApi.get("user-settings/$userKey/settings.json") }.getOrNull() }
-		val versionCall = async { runCatching { enhancedApi.getText("version").text.trim().ifEmpty { null } }.getOrNull() }
+		val settingsCall = async { orNull { enhancedApi.get("user-settings/$userKey/settings.json") } }
+		val versionCall = async { orNull { enhancedApi.getText("version").text.trim().ifEmpty { null } } }
 
 		val config = EnhancedApi.json.decodeFromJsonElement<EnhancedPublicConfig>(configCall.await())
 		val settings = settingsCall.await()
-			?.let { runCatching { EnhancedApi.json.decodeFromJsonElement<EnhancedUserSettings>(it) }.getOrNull() }
+			?.let { orNull { EnhancedApi.json.decodeFromJsonElement<EnhancedUserSettings>(it) } }
 			?: EnhancedUserSettings()
 
 		val seerr = if (config.jellyseerrEnabled) {
-			runCatching {
+			orNull {
 				EnhancedApi.json.decodeFromJsonElement<SeerrUserStatus>(enhancedApi.get("jellyseerr/user-status"))
-			}.getOrDefault(SeerrUserStatus())
+			} ?: SeerrUserStatus()
 		} else SeerrUserStatus()
 
 		val hiddenSettings = if (config.hiddenContentEnabled) {
-			runCatching {
+			orNull {
 				HiddenContentRepository.Snapshot(enhancedApi.get("user-settings/$userKey/hidden-content.json").jsonObject).settings
-			}.getOrNull()
+			}
 		} else null
 
 		EnhancedState(
@@ -116,4 +136,17 @@ class EnhancedRepository(
 			isAdmin = userRepository.currentUser.value?.policy?.isAdministrator == true,
 		)
 	}
+}
+
+/** A 404 for `public-config` is the only sign that the server has no Jellyfin Enhanced plugin. */
+private fun isPluginAbsent(err: Exception) = err is EnhancedApi.EnhancedApiException && err.status == 404
+
+/** For optional parts of the state: null on failure, but cancellation still cancels. */
+private inline fun <T> orNull(block: () -> T): T? = try {
+	block()
+} catch (err: CancellationException) {
+	throw err
+} catch (err: Exception) {
+	Timber.d(err, "Optional Jellyfin Enhanced state unavailable")
+	null
 }
