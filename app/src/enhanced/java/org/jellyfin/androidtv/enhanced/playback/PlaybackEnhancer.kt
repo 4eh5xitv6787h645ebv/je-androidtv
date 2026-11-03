@@ -134,8 +134,8 @@ internal class PlaybackEnhancer(
 		}
 		if (item != null && features.bookmarks && playbackBookmarks.supports(item) && item.id != prefetchedItemId) {
 			prefetchedItemId = item.id
-			// Read once per item so the player's Bookmark action can offer the list without waiting
-			fragment.viewLifecycleOwner.lifecycleScope.launch { attempt { playbackBookmarks.forItem(item.id) } }
+			// Read afresh once per item and player so the Bookmark action can offer the current list without waiting
+			fragment.viewLifecycleOwner.lifecycleScope.launch { attempt { playbackBookmarks.refresh(item.id) } }
 		}
 
 		updatePauseScreen(controller, item, features)

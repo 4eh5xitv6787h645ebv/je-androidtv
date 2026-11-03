@@ -52,7 +52,8 @@ session token. Moving them into `EnhancedPublicConfig` later is optional.
 ## Routes
 
 - `GET public-config` (extra fields above).
-- `GET user-settings/{uid}/bookmark.json` (through `BookmarksRepository.list()`, once per item per session).
+- `GET user-settings/{uid}/bookmark.json` (through `BookmarksRepository.list()`, once per item per player session, and
+  again after any add/delete through `BookmarksRepository`, which bumps its `revision` flow).
 - `POST user-settings/{uid}/bookmark.json/add` (through `BookmarksRepository.add()`), body `ItemId, MediaType
   (movie|tv), Name, Timestamp (seconds), Label (formatted time), TmdbId/TvdbId (the show's for episodes),
   SeasonNumber/EpisodeNumber`. No `SyncedFrom`: on the web that field means "migrated from item X" and makes the

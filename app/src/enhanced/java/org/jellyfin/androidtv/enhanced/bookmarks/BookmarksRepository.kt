@@ -1,5 +1,9 @@
 package org.jellyfin.androidtv.enhanced.bookmarks
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -41,18 +45,28 @@ class BookmarksRepository(
 		val episodeNumber: Int?,
 	)
 
+	private val _revision = MutableStateFlow(0L)
+
+	/**
+	 * Goes up after every add or delete made through this repository (even a failed one, which may still have
+	 * reached the server), so copies of `bookmark.json` kept elsewhere, like the player's, know to read it again.
+	 */
+	val revision: StateFlow<Long> = _revision.asStateFlow()
+
 	suspend fun list(): List<BookmarkEntry> {
 		val document = settingsRepository.read(EnhancedSettingsRepository.BOOKMARKS)
 		return BookmarkLogic.sorted(EnhancedApi.json.decodeFromJsonElement<BookmarkDocument>(document.json))
 	}
 
 	suspend fun delete(bookmarkId: String) {
-		val api = enhancedApi.pinned()
-		api.delete("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/$bookmarkId")
+		changing {
+			val api = enhancedApi.pinned()
+			api.delete("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/$bookmarkId")
+		}
 	}
 
 	/** Saves a bookmark and returns its id. */
-	suspend fun add(bookmark: NewBookmark): String? {
+	suspend fun add(bookmark: NewBookmark): String? = changing {
 		val api = enhancedApi.pinned()
 		val body = buildJsonObject {
 			put("ItemId", key(bookmark.itemId))
@@ -66,7 +80,13 @@ class BookmarksRepository(
 			bookmark.episodeNumber?.let { put("EpisodeNumber", it) }
 		}
 		val response = api.post("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/add", body)
-		return ((response as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull
+		((response as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull
+	}
+
+	private inline fun <T> changing(block: () -> T): T = try {
+		block()
+	} finally {
+		_revision.update { it + 1 }
 	}
 
 	/**
