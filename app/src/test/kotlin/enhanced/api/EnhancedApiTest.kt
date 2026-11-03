@@ -8,6 +8,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.JsonNull
@@ -20,6 +21,7 @@ import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
@@ -67,10 +69,10 @@ private class LocalServer(private val respond: (String) -> String?) : AutoClosea
 private fun http(status: String, body: String) =
 	"HTTP/1.1 $status\r\nContent-Type: application/json\r\nContent-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n$body"
 
-private fun enhancedApi(port: Int): EnhancedApi {
+private fun enhancedApi(port: Int, token: String = "token"): EnhancedApi {
 	val client = mockk<ApiClient> {
 		every { baseUrl } returns "http://127.0.0.1:$port"
-		every { accessToken } returns "token"
+		every { accessToken } returns token
 		every { clientInfo } returns ClientInfo("test", "1")
 		every { deviceInfo } returns DeviceInfo("device", "Device")
 		every { createUrl(any(), any(), any(), any()) } answers {
@@ -117,5 +119,72 @@ class EnhancedApiTest : FunSpec({
 				runInterruptible(Dispatchers.IO) { server.closedByClient.await(10, TimeUnit.SECONDS) } shouldBe true
 			}
 		}
+	}
+
+	test("public-config is fetched once per session and shared; a fresh read replaces it") {
+		val requests = AtomicInteger()
+		LocalServer { http("200 OK", """{"n":${requests.incrementAndGet()}}""") }.use { server ->
+			val api = enhancedApi(server.port)
+			api.get("public-config").jsonObject["n"] shouldBe JsonPrimitive(1)
+			// Another instance for the same session (a pinned copy) shares it
+			enhancedApi(server.port).get("public-config").jsonObject["n"] shouldBe JsonPrimitive(1)
+			api.publicConfig(fresh = true).jsonObject["n"] shouldBe JsonPrimitive(2)
+			api.get("public-config").jsonObject["n"] shouldBe JsonPrimitive(2)
+			// Another account never sees it
+			enhancedApi(server.port, token = "other").get("public-config").jsonObject["n"] shouldBe JsonPrimitive(3)
+			requests.get() shouldBe 3
+		}
+	}
+})
+
+/** [PublicConfigCache]: lifetime, session keys, coalescing and failures. */
+class PublicConfigCacheTest : FunSpec({
+	test("an entry is reused within its lifetime for the same key only") {
+		var now = 0L
+		val cache = PublicConfigCache(ttlMs = 60_000) { now }
+		var fetches = 0
+		suspend fun read(key: String, fresh: Boolean = false) = cache.get({ key }, fresh) { JsonPrimitive(++fetches) }
+
+		read("a") shouldBe JsonPrimitive(1)
+		now += 59_999
+		read("a") shouldBe JsonPrimitive(1)
+		read("b") shouldBe JsonPrimitive(2)
+		read("a") shouldBe JsonPrimitive(3)
+		read("a", fresh = true) shouldBe JsonPrimitive(4)
+		now += 60_000
+		read("a") shouldBe JsonPrimitive(5)
+	}
+
+	test("concurrent reads share one fetch") {
+		val cache = PublicConfigCache(ttlMs = 60_000) { 0L }
+		val fetches = AtomicInteger()
+		val release = CompletableDeferred<Unit>()
+		coroutineScope {
+			val reads = List(5) {
+				async {
+					cache.get({ "a" }, fresh = false) {
+						release.await()
+						JsonPrimitive(fetches.incrementAndGet())
+					}
+				}
+			}
+			release.complete(Unit)
+			reads.awaitAll().toSet() shouldBe setOf(JsonPrimitive(1))
+		}
+		fetches.get() shouldBe 1
+	}
+
+	test("a failure is not cached, and a fetch across an account switch is not kept") {
+		val cache = PublicConfigCache(ttlMs = 60_000) { 0L }
+		shouldThrow<IllegalStateException> { cache.get({ "a" }, fresh = false) { error("offline") } }
+		cache.get({ "a" }, fresh = false) { JsonPrimitive(1) } shouldBe JsonPrimitive(1)
+
+		var key = "b"
+		cache.get({ key }, fresh = false) {
+			key = "c"
+			JsonPrimitive(2)
+		} shouldBe JsonPrimitive(2)
+		key = "b"
+		cache.get({ key }, fresh = false) { JsonPrimitive(3) } shouldBe JsonPrimitive(3)
 	}
 })
