@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -190,6 +190,8 @@ class ActivityFragment : Fragment() {
 		val categories = feed.config.categories
 		val firstFocus = remember { FocusRequester() }
 		val sessions = (currentStreams as? Streams.Ready)?.sessions.orEmpty()
+		val sessionKeys = remember(sessions) { ActivityLogic.uniqueKeys(sessions, ActivityLogic::sessionKey) }
+		val entryKeys = remember(entries) { entries?.let { ActivityLogic.uniqueKeys(it, ActivityLogic::entryKey) } }
 
 		LazyColumn(
 			contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 48.dp),
@@ -203,13 +205,13 @@ class ActivityFragment : Fragment() {
 				is Streams.Ready -> {
 					item(key = "streams-header") { SectionHeader(stringResource(R.string.je_activity_streams_title, sessions.size)) }
 					if (sessions.isEmpty()) item(key = "streams-none") { PageNotice(stringResource(R.string.je_activity_streams_none)) }
-					items(sessions, key = { "session-${it.userId}-${it.deviceName}-${it.nowPlaying?.id}" }) { session ->
-						SessionRow(feed, session, if (session === sessions.first()) Modifier.focusRequester(firstFocus) else Modifier)
+					itemsIndexed(sessions, key = { index, _ -> sessionKeys[index] }) { index, session ->
+						SessionRow(feed, session, if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
 					}
 				}
 			}
 
-			if (entries == null) {
+			if (entries == null || entryKeys == null) {
 				if (currentStreams !is Streams.Ready) item(key = "feed-off") { PageNotice(stringResource(R.string.je_activity_feed_off)) }
 				return@LazyColumn
 			}
@@ -235,8 +237,8 @@ class ActivityFragment : Fragment() {
 					PageNotice(stringResource(if (currentSelection.isEmpty()) R.string.je_activity_empty else R.string.je_activity_empty_filtered))
 				}
 			}
-			items(entries, key = { "${it.activityType}-${it.userId}-${it.item?.id}-${it.timestampMs}" }) { entry ->
-				val focusFirst = sessions.isEmpty() && categories.size <= 1 && entry === entries.first()
+			itemsIndexed(entries, key = { index, _ -> entryKeys[index] }) { index, entry ->
+				val focusFirst = sessions.isEmpty() && categories.size <= 1 && index == 0
 				EntryRow(feed, entry, nowMs, if (focusFirst) Modifier.focusRequester(firstFocus) else Modifier)
 			}
 		}

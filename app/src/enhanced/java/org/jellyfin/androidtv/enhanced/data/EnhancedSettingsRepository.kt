@@ -13,8 +13,10 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
  * The user's Jellyfin Enhanced documents under `user-settings/{userId}/…`.
  *
  * Every document is saved as a whole (the plugin has no PATCH), and a partial `settings.json` resets the fields it
- * doesn't contain to defaults, so edits are always GET → modify → POST of the complete document, serialised per
- * document, through an API client pinned to the user who started the edit.
+ * doesn't contain to defaults, so edits are always GET → modify → POST of the complete document, through an API
+ * client pinned to the user who started the edit. All edits share one lock, and every client-side write of a
+ * document must go through [edit] (or run under [withDocumentLock]): two writers with their own locks would read the
+ * same version and the later POST would drop the earlier change.
  */
 class EnhancedSettingsRepository(
 	private val enhancedApi: EnhancedApi,
@@ -35,8 +37,9 @@ class EnhancedSettingsRepository(
 	}
 
 	/** Read one of the user's documents (`settings.json`, `elsewhere.json`, `ddd-triggers.json`, …). */
-	suspend fun read(file: String): Document {
-		val api = enhancedApi.pinned()
+	suspend fun read(file: String): Document = read(file, enhancedApi.pinned())
+
+	private suspend fun read(file: String, api: EnhancedApi): Document {
 		val userKey = requireNotNull(api.currentUserId()) { "No signed-in user" }.replace("-", "").lowercase()
 		val json = api.get("user-settings/$userKey/$file").jsonObject
 		return Document(api, userKey, file, json)
@@ -44,10 +47,18 @@ class EnhancedSettingsRepository(
 
 	/**
 	 * Change fields of a document and save it. [edit] receives the current fields and returns the new ones; keys
-	 * mapped to null are removed. `IsAdmin` is never written back.
+	 * mapped to null are removed. `IsAdmin` is never written back. The client is pinned when the edit is called, so
+	 * an edit queued behind the lock still saves for the user who started it.
 	 */
-	suspend fun edit(file: String, edit: (MutableMap<String, JsonElement>) -> Unit): Document = mutex.withLock {
-		val document = read(file)
+	suspend fun edit(file: String, edit: (MutableMap<String, JsonElement>) -> Unit): Document =
+		edit(file, enhancedApi.pinned(), edit)
+
+	/**
+	 * [edit] through [api], an [EnhancedApi.pinned] client of a multi-call operation, so its other requests and the
+	 * save belong to the same user.
+	 */
+	suspend fun edit(file: String, api: EnhancedApi, edit: (MutableMap<String, JsonElement>) -> Unit): Document = mutex.withLock {
+		val document = read(file, api)
 		val fields = document.json.toMutableMap()
 		edit(fields)
 		fields.remove("IsAdmin")
@@ -66,6 +77,13 @@ class EnhancedSettingsRepository(
 		}
 		saved
 	}
+
+	/**
+	 * Run [block] under the lock of [edit], for writes the plugin applies to a document itself (such as the scoped
+	 * Hidden Content routes) so they can't land between the GET and POST of a client-side edit. The lock isn't
+	 * reentrant: [block] must not call [edit].
+	 */
+	suspend fun <T> withDocumentLock(block: suspend () -> T): T = mutex.withLock { block() }
 
 	/** Convenience for `settings.json` booleans and strings. */
 	suspend fun setSetting(key: String, value: Boolean) = edit(SETTINGS) { it[key] = JsonPrimitive(value) }

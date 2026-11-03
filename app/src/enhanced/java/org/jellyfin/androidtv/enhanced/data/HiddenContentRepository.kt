@@ -1,9 +1,8 @@
 package org.jellyfin.androidtv.enhanced.data
 
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -54,13 +53,17 @@ enum class HomeSurface(val path: String) {
  * Hidden Content for the signed-in user. The document is edited as raw JSON so fields this client doesn't know
  * about survive a save. The plugin filters hidden items out of the normal Jellyfin list endpoints itself; the
  * client only needs to write the document and filter the Seerr results it renders.
+ *
+ * Every write of the document goes through [EnhancedSettingsRepository] (its [EnhancedSettingsRepository.edit] or,
+ * for the plugin's scoped routes, [EnhancedSettingsRepository.withDocumentLock]), the same lock the Hidden Content
+ * settings screen saves through, so a hide, a restore and a settings toggle never read the same version and
+ * overwrite each other.
  */
 class HiddenContentRepository(
 	private val enhancedApi: EnhancedApi,
 	private val userRepository: UserRepository,
+	private val settingsRepository: EnhancedSettingsRepository,
 ) {
-	private val mutex = Mutex()
-
 	class Snapshot(val document: JsonObject) {
 		val settings: HiddenContentSettings = document["Settings"]
 			?.let { runCatching { EnhancedApi.json.decodeFromJsonElement<HiddenContentSettings>(it) }.getOrNull() }
@@ -100,42 +103,28 @@ class HiddenContentRepository(
 	private fun userKey(): String =
 		requireNotNull(userRepository.currentUser.value?.id) { "No signed-in user" }.toString().replace("-", "")
 
-	/**
-	 * The session an edit belongs to. The access token changes before the new user is published when switching
-	 * accounts, so both are compared.
-	 */
-	private class Session(val userKey: String, val api: EnhancedApi)
-
-	/**
-	 * Pin an API client to the current token, then ask the server whose token it is. Every request of the operation
-	 * goes through that client, so the user id and credentials can't come from different accounts.
-	 */
-	private suspend fun session(): Session {
-		val api = enhancedApi.pinned()
-		val me = api.currentUserId()
-		return Session(requireNotNull(me) { "Could not resolve the signed-in user" }.replace("-", "").lowercase(), api)
-	}
-
 	suspend fun get(): Snapshot =
 		Snapshot(enhancedApi.get("user-settings/${userKey()}/hidden-content.json").jsonObject)
 
 	/** Hide [item] everywhere. With [wholeSeries] an episode or season hides its parent show instead. */
 	suspend fun hide(item: BaseItemDto, wholeSeries: Boolean = false) {
-		val session = session()
+		// The lookup and the save go through one pinned client, so they can't belong to different accounts
+		val api = enhancedApi.pinned()
 		val seriesId = item.seriesId
 		// Keep the show's TMDB id so Seerr rows can filter it too
-		val seriesTmdbId = if (wholeSeries && seriesId != null) seriesTmdbId(seriesId, session) else ""
-		edit(session) { items -> hideInto(items, item, wholeSeries, seriesTmdbId) }
+		val seriesTmdbId = if (wholeSeries && seriesId != null) seriesTmdbId(seriesId, api) else ""
+		edit(api) { items -> hideInto(items, item, wholeSeries, seriesTmdbId) }
 	}
 
-	private suspend fun seriesTmdbId(seriesId: UUID, session: Session): String = runCatching {
-		val series = session.api.get("/Items/$seriesId", mapOf("userId" to session.userKey)).jsonObject
+	private suspend fun seriesTmdbId(seriesId: UUID, api: EnhancedApi): String = runCatching {
+		val userKey = requireNotNull(api.currentUserId()) { "Could not resolve the signed-in user" }.replace("-", "").lowercase()
+		val series = api.get("/Items/$seriesId", mapOf("userId" to userKey)).jsonObject
 		(series["ProviderIds"] as? JsonObject)?.entries
 			?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }
 			?.let { (it.value as? JsonPrimitive)?.contentOrNull }
 	}.getOrNull().orEmpty()
 
-	private fun hideInto(items: MutableMap<String, kotlinx.serialization.json.JsonElement>, item: BaseItemDto, wholeSeries: Boolean, seriesTmdbId: String) {
+	private fun hideInto(items: MutableMap<String, JsonElement>, item: BaseItemDto, wholeSeries: Boolean, seriesTmdbId: String) {
 		val seriesId = item.seriesId
 		val entry = if (wholeSeries && seriesId != null) {
 			buildEntry(
@@ -163,7 +152,7 @@ class HiddenContentRepository(
 	}
 
 	/** Remove every global hide entry for [id]. Scoped home-surface entries are left alone. */
-	suspend fun unhide(id: UUID) = edit(session()) { items ->
+	suspend fun unhide(id: UUID) = edit { items ->
 		val key = normalize(id.toString())
 		items.entries
 			.filter { (k, v) ->
@@ -180,7 +169,7 @@ class HiddenContentRepository(
 	 * Hide a Seerr title everywhere, as the web's Hide button on Seerr cards does: keyed by its Jellyfin id when it's
 	 * in the library ([jellyfinId]), otherwise by `tmdb-<id>` with an empty `ItemId`.
 	 */
-	suspend fun hideTmdb(tmdbId: Int, mediaType: String, name: String, posterPath: String?, jellyfinId: String?) = edit(session()) { items ->
+	suspend fun hideTmdb(tmdbId: Int, mediaType: String, name: String, posterPath: String?, jellyfinId: String?) = edit { items ->
 		val itemId = jellyfinId?.let(::normalize).orEmpty()
 		val key = itemId.ifEmpty { "tmdb-$tmdbId" }
 		val entry = buildJsonObject {
@@ -202,7 +191,7 @@ class HiddenContentRepository(
 	}
 
 	/** Remove every global entry that hides this Seerr title (by TMDB id or, when given, by Jellyfin id). */
-	suspend fun unhideTmdb(tmdbId: Int, jellyfinId: String?) = edit(session()) { items ->
+	suspend fun unhideTmdb(tmdbId: Int, jellyfinId: String?) = edit { items ->
 		val wantedItem = jellyfinId?.let(::normalize)?.takeIf { it.isNotEmpty() }
 		items.entries
 			.filter { (key, value) ->
@@ -222,37 +211,38 @@ class HiddenContentRepository(
 	 */
 	suspend fun removeEntries(keys: Collection<String>): Int {
 		var removed = 0
-		edit(session()) { items ->
+		edit { items ->
 			for (key in keys) if (items.remove(key) != null) removed++
 		}
 		return removed
 	}
 
-	/** Hide [id] from Continue Watching or Next Up only (the plugin's "Remove from …" action). */
-	suspend fun removeFromHome(id: UUID, surface: HomeSurface) = mutex.withLock {
+	/**
+	 * Hide [id] from Continue Watching or Next Up only (the plugin's "Remove from …" action). The plugin edits the
+	 * document itself, so the call waits for (and blocks) client-side edits.
+	 */
+	suspend fun removeFromHome(id: UUID, surface: HomeSurface) = settingsRepository.withDocumentLock {
 		enhancedApi.post("${surface.path}/hide/$id")
 		Unit
 	}
 
-	suspend fun undoRemoveFromHome(id: UUID, surface: HomeSurface) = mutex.withLock {
+	suspend fun undoRemoveFromHome(id: UUID, surface: HomeSurface) = settingsRepository.withDocumentLock {
 		enhancedApi.delete("${surface.path}/hide/$id")
 		Unit
 	}
 
 	/**
-	 * Read-modify-write of the whole document, as the web client does. The plugin has no per-entry API for global
-	 * hides, so a save from another client between our GET and POST can still be overwritten.
+	 * Read-modify-write of the `Items` of the whole document, as the web client does, under the shared document
+	 * lock. The plugin has no per-entry API for global hides, so a save from another client between our GET and POST
+	 * can still be overwritten. [api] is the pinned client both requests go through, so switching accounts meanwhile
+	 * can't send this user's document with someone else's credentials.
 	 */
-	private suspend fun edit(session: Session, block: (MutableMap<String, kotlinx.serialization.json.JsonElement>) -> Unit) = mutex.withLock {
-		// Both requests go through the client pinned to the user who started the edit, so switching accounts
-		// meanwhile can't send this user's document with someone else's credentials
-		val path = "user-settings/${session.userKey}/hidden-content.json"
-		val document = session.api.get(path).jsonObject
-		val items = (document["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
-		block(items)
-		val updated = JsonObject(document.toMutableMap().apply { put("Items", JsonObject(items)) })
-		session.api.post(path, updated)
-		Unit
+	private suspend fun edit(api: EnhancedApi = enhancedApi.pinned(), block: (MutableMap<String, JsonElement>) -> Unit) {
+		settingsRepository.edit(EnhancedSettingsRepository.HIDDEN_CONTENT, api) { fields ->
+			val items = (fields["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+			block(items)
+			fields["Items"] = JsonObject(items)
+		}
 	}
 
 	private fun buildEntry(
