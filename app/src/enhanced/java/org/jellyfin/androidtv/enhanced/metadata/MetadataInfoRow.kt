@@ -6,6 +6,16 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.foundation.layout.FlowRowScope
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -68,15 +78,27 @@ internal fun formatDate(date: LocalDate): String = date.format(dateFormatter)
 
 internal fun formatDate(value: String?): String? = parseCalendarDate(value)?.let(::formatDate)
 
-/** A horizontally scrolling line of chips; focus moving along it scrolls it. */
+/** A line of chips that wraps onto further lines, so every fact is visible at a glance (nothing cut at the edge). */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ChipLine(content: @Composable RowScope.() -> Unit) {
-	Row(
+private fun ChipLine(content: @Composable FlowRowScope.() -> Unit) {
+	val focusManager = LocalFocusManager.current
+	FlowRow(
+		// Left/Right move between chips only: at the end of a wrapped line there is nothing beside the chip, and the
+		// view system would otherwise jump to the toolbar (Down reaches the next line)
 		modifier = Modifier
 			.fillMaxWidth()
-			.horizontalScroll(rememberScrollState()),
+			.onPreviewKeyEvent { event ->
+				val direction = when (event.key) {
+					Key.DirectionRight -> FocusDirection.Right
+					Key.DirectionLeft -> FocusDirection.Left
+					else -> return@onPreviewKeyEvent false
+				}
+				if (event.type == KeyEventType.KeyDown) focusManager.moveFocus(direction)
+				true
+			},
 		horizontalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
-		verticalAlignment = Alignment.CenterVertically,
+		verticalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
 		content = content,
 	)
 }
