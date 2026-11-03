@@ -22,4 +22,7 @@
     <string name="je_bookmarks_save">Save</string>
     <string name="je_bookmarks_added">Bookmark saved at %1$s</string>
     <string name="je_bookmarks_add_failed">Couldn\'t save the bookmark: %1$s</string>
+    <string name="je_bookmarks_episode_numbered">Season %1$d, Episode %2$d</string>
+    <string name="je_bookmarks_episode_number">Episode %1$d</string>
+    <string name="je_bookmarks_episode">Episode</string>
 </resources>

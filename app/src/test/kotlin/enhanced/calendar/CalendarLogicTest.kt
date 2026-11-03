@@ -3,13 +3,24 @@ package org.jellyfin.androidtv.enhanced.calendar
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
+import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
+import org.jellyfin.androidtv.enhanced.data.Protection
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardPrefs
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.SpoilerPolicy
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+
+private fun snapshot(state: SpoilerGuardState?, prefs: SpoilerGuardPrefs = SpoilerGuardPrefs(), members: Set<String>? = emptySet()) =
+	SpoilerSnapshot(enabled = true, state = state, policy = SpoilerPolicy.of(EnhancedPublicConfig(spoilerBlurEnabled = true), prefs), collectionMovieIds = members)
+
+private fun hiddenEntry(vararg fields: Pair<String, String>) = JsonObject(fields.associate { (key, value) -> key to JsonPrimitive(value) })
 
 class CalendarLogicTest : FunSpec({
 	// Trimmed from a live `arr/calendar` response
@@ -56,9 +67,10 @@ class CalendarLogicTest : FunSpec({
 
 	test("agenda groups by day, drops unmonitored and out-of-window events") {
 		val agenda = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false)
-		agenda.map { it.first } shouldContainExactly listOf(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 9))
+		agenda.days.map { it.first } shouldContainExactly listOf(LocalDate.of(2026, 10, 1), LocalDate.of(2026, 10, 9))
+		agenda.undated shouldBe emptyList()
 		CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 2), ZoneOffset.UTC, CalendarFilter(), emptySet(), false)
-			.flatMap { it.second } shouldContainExactly listOf(movie)
+			.days.flatMap { it.second } shouldContainExactly listOf(movie)
 	}
 
 	test("filters combine across groups and treat empty groups as any") {
@@ -73,7 +85,7 @@ class CalendarLogicTest : FunSpec({
 
 	test("forced only-requested keeps just requested titles") {
 		val agenda = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), setOf("movie:1361955"), true)
-		agenda.flatMap { it.second } shouldContainExactly listOf(movie)
+		agenda.days.flatMap { it.second } shouldContainExactly listOf(movie)
 	}
 
 	test("requests decode into type:tmdb keys") {
@@ -99,20 +111,67 @@ class CalendarLogicTest : FunSpec({
 		CalendarLogic.queryRange(LocalDate.of(2026, 11, 3), ZoneOffset.UTC) shouldBe ("2026-11-02T00:00:00Z" to "2026-11-18T00:00:00Z")
 	}
 
-	test("guarded shows lose episode titles; unknown guard state withholds every episode") {
+	test("guarded titles follow the category policy; unknown guard state withholds everything") {
 		val guarded = SpoilerGuardState(series = mapOf("326D7084-0827-00B2-20B6-83FC0DC0AE78" to JsonPrimitive(true)))
-		CalendarLogic.isSpoilerGuarded(episode, true, guarded) shouldBe true
-		CalendarLogic.isSpoilerGuarded(episode, true, SpoilerGuardState()) shouldBe false
-		CalendarLogic.isSpoilerGuarded(episode, false, guarded) shouldBe false
-		CalendarLogic.isSpoilerGuarded(episode, true, null) shouldBe true
-		CalendarLogic.isSpoilerGuarded(movie, true, null) shouldBe false
+		CalendarLogic.protection(episode, snapshot(guarded)).guarded shouldBe true
+		CalendarLogic.protection(episode, snapshot(SpoilerGuardState())) shouldBe Protection.NONE
+		CalendarLogic.protection(episode, SpoilerSnapshot.DISABLED) shouldBe Protection.NONE
+		CalendarLogic.protection(episode, snapshot(null)) shouldBe Protection.FULL
+		// Movies are covered too, including when the guard state is unknown
+		CalendarLogic.protection(movie, snapshot(null)) shouldBe Protection.FULL
+		val pendingMovie = SpoilerGuardState(pendingTmdb = mapOf("movie:1361955" to JsonPrimitive(true)))
+		CalendarLogic.protection(movie, snapshot(pendingMovie)).hideArtwork shouldBe true
 		val pending = SpoilerGuardState(pendingTmdb = mapOf("tv:295778" to JsonPrimitive(true)))
-		CalendarLogic.isSpoilerGuarded(episode.copy(libraryItemId = null), true, pending) shouldBe true
+		CalendarLogic.protection(episode.copy(libraryItemId = null), snapshot(pending)).guarded shouldBe true
 
-		CalendarLogic.subtitle(episode, guarded = true) shouldBe "S02E01"
-		CalendarLogic.subtitle(episode, guarded = false) shouldBe "S02E01 · My First Time in a While"
-		CalendarLogic.subtitle(unmonitored, guarded = false) shouldBe "S03E15"
-		CalendarLogic.subtitle(movie, guarded = true) shouldBe "2024"
+		val full = CalendarLogic.protection(episode, snapshot(guarded))
+		CalendarLogic.subtitle(episode, full) shouldBe "S02E01"
+		CalendarLogic.subtitle(episode, Protection.NONE) shouldBe "S02E01 · My First Time in a While"
+		CalendarLogic.subtitle(unmonitored, Protection.NONE) shouldBe "S03E15"
+		CalendarLogic.subtitle(movie, Protection.FULL) shouldBe "2024"
+		// The user kept real episode titles but still hides air dates
+		val titlesKept = CalendarLogic.protection(episode, snapshot(guarded, SpoilerGuardPrefs(replaceEpisodeTitles = false)))
+		titlesKept.hideAirDate shouldBe true
+		CalendarLogic.subtitle(episode, titlesKept) shouldBe "S02E01 · My First Time in a While"
+	}
+
+	test("protected air dates move releases out of the dated days") {
+		val guarded = snapshot(SpoilerGuardState(series = mapOf("326d7084082700b220b683fc0dc0ae78" to JsonPrimitive(true))))
+		val agenda = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
+			CalendarLogic.protection(it, guarded).hideAirDate
+		}
+		agenda.days.flatMap { it.second } shouldContainExactly listOf(movie)
+		agenda.undated shouldContainExactly listOf(episode)
+		// Kept on its day when the user lets air dates through
+		val datesShown = snapshot(guarded.state, SpoilerGuardPrefs(hideAirDate = false))
+		CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 1), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
+			CalendarLogic.protection(it, datesShown).hideAirDate
+		}.undated shouldBe emptyList()
+		// Unknown state: everything is undated, out-of-window releases still dropped
+		val unknown = CalendarLogic.agenda(response.events, LocalDate.of(2026, 10, 2), ZoneOffset.UTC, CalendarFilter(), emptySet(), false) {
+			CalendarLogic.protection(it, snapshot(null)).hideAirDate
+		}
+		unknown.days shouldBe emptyList()
+		unknown.undated shouldContainExactly listOf(movie)
+	}
+
+	test("hidden content drops releases by TMDB id, library ids or name, like the web") {
+		val filter = CalendarHiddenFilter.fromEntries(listOf(
+			hiddenEntry("ItemId" to "", "TmdbId" to "1361955", "Name" to "Other", "HideScope" to "global"),
+			// Scoped (home row) hides don't match by id, but their names count, as on the web
+			hiddenEntry("ItemId" to "326d7084082700b220b683fc0dc0ae78", "TmdbId" to "", "Name" to "Love Island VIP", "HideScope" to "nextup"),
+		))
+		filter.isHidden(movie) shouldBe true
+		filter.isHidden(episode) shouldBe false
+		// "Love Island VIP" matches "Love Island VIP (DE)" only the other way round: the qualifier is stripped from entries
+		filter.isHidden(unmonitored) shouldBe false
+		CalendarHiddenFilter.fromEntries(listOf(hiddenEntry("Name" to "love island vip (de)"))).isHidden(unmonitored) shouldBe true
+		CalendarHiddenFilter.fromEntries(listOf(hiddenEntry("Name" to "Scrubs (2026)"))).isHidden(episode.copy(title = "Scrubs")) shouldBe true
+
+		CalendarHiddenFilter.fromEntries(listOf(hiddenEntry("ItemId" to "326D7084-0827-00B2-20B6-83FC0DC0AE78"))).isHidden(episode) shouldBe true
+		CalendarHiddenFilter.fromEntries(listOf(hiddenEntry("ItemId" to "fd8067ea9ef35106714e66075a2df7ae", "HideScope" to "global"))).isHidden(episode) shouldBe true
+		// TMDB id 0 means unknown and never matches
+		CalendarHiddenFilter.fromEntries(listOf(hiddenEntry("TmdbId" to "0"))).isHidden(unmonitored) shouldBe false
 	}
 
 	test("time format follows the plugin's option") {

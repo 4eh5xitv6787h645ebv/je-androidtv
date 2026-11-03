@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
-import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import java.time.LocalDate
@@ -68,20 +67,6 @@ data class TmdbTarget(
 			item.providerIds?.entries?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }?.value?.toIntOrNull()
 	}
 }
-
-/** The overview the plugin substitutes for a protected item. */
-const val SPOILER_GUARD_OVERVIEW = "Spoiler Guard activated"
-
-private val GUARDABLE_TYPES = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES, BaseItemKind.SEASON, BaseItemKind.EPISODE)
-
-/**
- * Whether external, story-related data (ratings, reviews, air dates) must be withheld for [item]. The plugin strips
- * ratings and overviews from protected items server side, so their absence while Spoiler Guard is on is treated as
- * "protected". Fail-closed: an item that simply has no community rating is withheld too.
- */
-fun isSpoilerGuarded(state: EnhancedState, item: BaseItemDto): Boolean =
-	item.overview == SPOILER_GUARD_OVERVIEW ||
-		(state.spoilerGuard && item.communityRating == null && item.type in GUARDABLE_TYPES)
 
 // Sizes and progress
 

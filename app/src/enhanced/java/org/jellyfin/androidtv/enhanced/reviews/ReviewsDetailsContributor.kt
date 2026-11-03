@@ -11,9 +11,9 @@ import androidx.leanback.widget.Row
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.metadata.MetadataRepository
 import org.jellyfin.androidtv.enhanced.metadata.TmdbTarget
-import org.jellyfin.androidtv.enhanced.metadata.isSpoilerGuarded
 import org.jellyfin.androidtv.enhanced.metadata.showComposeDialog
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsAction
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContext
@@ -26,13 +26,14 @@ import java.util.WeakHashMap
 
 /**
  * JE user reviews and TMDB reviews on the details screen: a "Rate" button (half-star picker plus optional text) and
- * a "Reviews" row whose cards open [ReviewsReaderFragment]. The row is withheld when the title is Spoiler Guarded and
- * the server strips reviews for protected titles.
+ * a "Reviews" row whose cards open [ReviewsReaderFragment]. The row is withheld when the title (or, for seasons and
+ * episodes, its series) is Spoiler Guarded and reviews are hidden for this user, or when that can't be ruled out.
  */
 class ReviewsDetailsContributor(
 	private val repository: ReviewsRepository,
 	private val metadataRepository: MetadataRepository,
 	private val navigationRepository: NavigationRepository,
+	private val spoilerProtection: SpoilerProtection,
 ) : DetailsContributor {
 	companion object {
 		private const val ACTION_PRIORITY = 55
@@ -93,7 +94,7 @@ class ReviewsDetailsContributor(
 
 	override suspend fun rows(context: DetailsContext): List<Row> {
 		val state = context.state
-		if (state.config.spoilerStripReviews && isSpoilerGuarded(state, context.item)) return emptyList()
+		if (spoilerProtection.effectiveFor(context.item).hideReviews) return emptyList()
 		val target = target(context) ?: return emptyList()
 		val initial = repository.load(target)
 		val hasContent = initial.entries.isNotEmpty() || (initial.summary?.count ?: 0) > 0 ||

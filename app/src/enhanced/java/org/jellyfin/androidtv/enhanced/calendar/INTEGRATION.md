@@ -9,3 +9,4 @@
   another feature wants them.
 - `PageSupport.kt` in this package holds small helpers (`attempt`, `canOpen`, `PageChip`, `PageListRow`, `PageImage`,
   `PageNotice`) that the bookmarks, activity and about packages also use.
+- Needs `SpoilerProtection` (bound in `metadataModule`) and `HiddenContentRepository` (shared module).

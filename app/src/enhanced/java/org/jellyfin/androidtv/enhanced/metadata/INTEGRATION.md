@@ -58,3 +58,15 @@ If you want the "Enhanced info" row directly under the overview, a positional hi
 `WatchProgressTimeFormat`, `ShowAudioLanguages`, `PeopleTagsEnabled`, `ReviewsExpandedByDefault` (public defaults of
 user settings), `DEFAULT_REGION`, `DEFAULT_PROVIDERS`, `IGNORE_PROVIDERS`, `MdblistRatingsSources`. Consider moving
 them into `EnhancedPublicConfig` later; nothing else needs changing.
+
+## Spoiler protection (`data/SpoilerProtection.kt`)
+
+`SpoilerProtection` resolves, per title, which Spoiler Guard categories apply to data the plugin doesn't filter
+(TMDB/MDBList/Seerr ratings, release dates, reviews, content warnings, Sonarr/Radarr calendar data, saved bookmark
+names). It is bound in `metadataModule` (`single { SpoilerProtection(get(), get(), get()) }`) and injected by the
+metadata, reviews, calendar and bookmarks features, so `metadataModule` must be loaded whenever any of those is. When
+convenient, move that one binding to the shared `enhancedModule` next to `SpoilerGuardRepository`; nothing else
+changes.
+
+`reviewsModule`'s `ReviewsDetailsContributor` takes it as a fourth constructor argument (already updated in
+`ReviewsModule.kt`).

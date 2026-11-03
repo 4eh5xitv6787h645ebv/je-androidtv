@@ -42,6 +42,7 @@ import org.jellyfin.androidtv.enhanced.calendar.PageListRow
 import org.jellyfin.androidtv.enhanced.calendar.PageNotice
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
@@ -61,12 +62,14 @@ import java.util.UUID
 
 /**
  * The user's JE timestamp bookmarks, newest first. OK plays the item from the saved moment; long-press OK (or Menu)
- * offers Open details and Delete. Bookmarks whose item is gone are marked and offer deletion.
+ * offers Open details and Delete. Bookmarks whose item is gone are marked and offer deletion. Episode names follow
+ * Spoiler Guard ([BookmarkLogic.name]): the name saved with a bookmark is never shown for a possibly guarded episode.
  */
 class BookmarksFragment : Fragment() {
 	private val bookmarksRepository by inject<BookmarksRepository>()
 	private val navigationRepository by inject<NavigationRepository>()
 	private val playbackHelper by inject<PlaybackHelper>()
+	private val spoilerProtection by inject<SpoilerProtection>()
 
 	private class BookmarkRow(
 		val entry: BookmarkEntry,
@@ -75,6 +78,7 @@ class BookmarksFragment : Fragment() {
 		val item: BookmarkedItem?,
 		/** True only when the server answered and the item wasn't there. */
 		val stale: Boolean,
+		val name: BookmarkName,
 	)
 
 	private class Loaded(val rows: List<BookmarkRow>, val resolveFailed: Boolean)
@@ -97,11 +101,12 @@ class BookmarksFragment : Fragment() {
 				val resolved = attempt { bookmarksRepository.resolve(ids) }
 					.onFailure { Timber.w(it, "Failed to look up bookmarked items") }
 					.getOrNull()
+				val spoiler = spoilerProtection.snapshot()
 				Loaded(
 					rows = entries.map { entry ->
 						val itemId = entry.bookmark.itemId.toUUIDOrNull()
 						val item = itemId?.let { resolved?.get(it) }
-						BookmarkRow(entry, itemId, item, stale = resolved != null && item == null)
+						BookmarkRow(entry, itemId, item, stale = resolved != null && item == null, name = BookmarkLogic.name(entry.bookmark, item, spoiler))
 					},
 					resolveFailed = resolved == null,
 				)
@@ -147,9 +152,7 @@ class BookmarksFragment : Fragment() {
 	@androidx.compose.runtime.Composable
 	private fun BookmarkItem(row: BookmarkRow, modifier: Modifier) {
 		val bookmark = row.entry.bookmark
-		val name = row.item?.displayName?.takeIf { it.isNotBlank() }
-			?: bookmark.name?.takeIf { it.isNotBlank() }
-			?: stringResource(R.string.je_bookmarks_untitled)
+		val name = displayName(row)
 		val label = bookmark.label?.takeIf { it.isNotBlank() }
 		val savedOn = remember(bookmark) { savedDate(bookmark) }
 		val details = listOfNotNull(
@@ -175,6 +178,18 @@ class BookmarksFragment : Fragment() {
 				if (row.stale) Text(stringResource(R.string.je_bookmarks_stale), fontSize = 13.sp, color = Tokens.Color.colorRed300)
 			}
 		}
+	}
+
+	private fun displayName(row: BookmarkRow): String {
+		val neutral = row.name.neutral ?: return row.name.text ?: getString(R.string.je_bookmarks_untitled)
+		val season = neutral.seasonNumber
+		val episode = neutral.episodeNumber
+		val numbers = when {
+			season != null && episode != null -> getString(R.string.je_bookmarks_episode_numbered, season, episode)
+			episode != null -> getString(R.string.je_bookmarks_episode_number, episode)
+			else -> getString(R.string.je_bookmarks_episode)
+		}
+		return listOfNotNull(neutral.seriesName, numbers).joinToString(" · ")
 	}
 
 	private fun savedDate(bookmark: Bookmark): String? = (bookmark.updatedAt ?: bookmark.createdAt)
@@ -203,7 +218,7 @@ class BookmarksFragment : Fragment() {
 			add(getString(R.string.je_bookmarks_delete) to { delete(row) })
 		}
 		AlertDialog.Builder(context)
-			.setTitle(row.entry.bookmark.label?.takeIf { it.isNotBlank() } ?: row.item?.displayName ?: row.entry.bookmark.name)
+			.setTitle(row.entry.bookmark.label?.takeIf { it.isNotBlank() } ?: displayName(row))
 			.setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
 			.setNegativeButton(android.R.string.cancel, null)
 			.show()

@@ -6,8 +6,6 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import kotlinx.serialization.json.decodeFromJsonElement
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
-import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
-import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import java.time.LocalDate
@@ -38,16 +36,6 @@ class MetadataLogicTest : FunSpec({
 		TmdbTarget.of(item(BaseItemKind.EPISODE, tmdb = "63056", season = 1, episode = 2), 1399)!!.reviewKey shouldBe "1399:s1:e2"
 		TmdbTarget.of(item(BaseItemKind.PERSON, "3894"))!!.mediaType shouldBe "person"
 		TmdbTarget(TmdbTarget.TV, 1399).providerKey shouldBe "tv:1399"
-	}
-
-	test("spoiler guard withholds when the plugin stripped the rating or overview") {
-		val on = EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = true))
-		val off = EnhancedState(available = true)
-		isSpoilerGuarded(on, item(BaseItemKind.SERIES)) shouldBe true
-		isSpoilerGuarded(on, item(BaseItemKind.SERIES, communityRating = 8.5f)) shouldBe false
-		isSpoilerGuarded(off, item(BaseItemKind.SERIES)) shouldBe false
-		isSpoilerGuarded(off, item(BaseItemKind.MOVIE, communityRating = 7f, overview = SPOILER_GUARD_OVERVIEW)) shouldBe true
-		isSpoilerGuarded(on, item(BaseItemKind.PERSON)) shouldBe false
 	}
 
 	test("sizes are 1024-based with two decimals") {
