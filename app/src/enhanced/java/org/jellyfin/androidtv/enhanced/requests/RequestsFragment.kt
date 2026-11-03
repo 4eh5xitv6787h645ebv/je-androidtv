@@ -45,6 +45,8 @@ import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
@@ -79,6 +81,7 @@ import org.jellyfin.androidtv.enhanced.ui.design.StatusBadgeSpec
 import org.jellyfin.androidtv.enhanced.ui.design.TabSpec
 import org.jellyfin.androidtv.enhanced.ui.design.WarningLine
 import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
+import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardMenu
@@ -121,6 +124,9 @@ class RequestsFragment : Fragment() {
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val navigationRepository by inject<NavigationRepository>()
+	private val enhancedApi by inject<EnhancedApi>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
+	private val hiddenContentRepository by inject<HiddenContentRepository>()
 
 	private val tab = MutableStateFlow(RequestsTab.REQUESTS)
 
@@ -153,11 +159,13 @@ class RequestsFragment : Fragment() {
 	private val queue = MutableStateFlow<LoadState<RequestsRepository.QueueResult>>(LoadState.Loading)
 	private val queueRefreshError = MutableStateFlow<String?>(null)
 	private var queueJob: Job? = null
+	// Set when the queue rows were neutralized: until it is read again, a failure replaces them (see neutralizeAll)
+	private var queueWithheld = false
 
 	// History
 	private val historyVisible = MutableStateFlow(true)
 	// Lazy list keys must be Bundle-storable, so a string rather than the item itself
-	private val history = PagedLoader(lifecycleScope, ::describe, key = { item: HistoryItem -> listOf(item.source, item.instanceName, item.title, item.subtitle, item.eventType, item.date).joinToString("|") }) { page ->
+	private val history = PagedLoader(lifecycleScope, ::describe, key = RequestsNeutral::historyKey) { page ->
 		val result = requestsRepository.history(page, HISTORY_PAGE_SIZE)
 		historyVisible.value = result.visible
 		PagedLoader.Page(result.items, result.totalPages)
@@ -178,6 +186,8 @@ class RequestsFragment : Fragment() {
 	private val dialog = MutableStateFlow<RequestDialog?>(null)
 
 	private var shownBefore = false
+	// The protections the rows were last shown with; a change while the page was away neutralizes them at once
+	private var shownProtection: ProtectionStamp? = null
 	// Set when the page comes back from another screen: the focused card is focused again instead of the first tab
 	private var restoreCardFocus = false
 	private val linkRecovery = SeerrLinkRecovery()
@@ -209,11 +219,38 @@ class RequestsFragment : Fragment() {
 		super.onStart()
 		// Back from a details screen: a request, watchlist change, issue, hide or Spoiler Guard change there may have
 		// changed any tab. The current one refreshes now (keeping its rows and focus), the others when opened
+		val protection = protectionStamp()
 		if (shownBefore) {
+			if (protection != shownProtection) neutralizeAll()
 			listOf(requests, watchlist, history, issues).forEach { it.invalidate() }
 			open(tab.value)
 		}
+		shownProtection = protection
 		shownBefore = true
+	}
+
+	private fun protectionStamp() = ProtectionStamp(
+		spoilerGeneration = spoilerGuardRepository.generation,
+		hiddenGeneration = hiddenContentRepository.generation,
+		hiddenSettings = enhancedRepository.current.hiddenSettings,
+	)
+
+	/**
+	 * Spoiler Guard or Hidden Content changed in this client while the page was away: every tab's rows lose their
+	 * artwork, years, dates and episode titles before anything is drawn, and are dropped for an error if they can't be
+	 * read again (they may still list a title hidden meanwhile).
+	 */
+	private fun neutralizeAll() {
+		requests.neutralize(RequestsNeutral::request)
+		watchlist.neutralize(RequestsNeutral::watchlist)
+		history.neutralize(RequestsNeutral::history)
+		issues.neutralize(RequestsNeutral::issue)
+		(queue.value as? LoadState.Ready)?.let { ready ->
+			// A refresh in flight may have read the queue before the change
+			queueJob?.cancel()
+			queue.value = LoadState.Ready(RequestsNeutral.queue(ready.value))
+			queueWithheld = true
+		}
 	}
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
@@ -542,7 +579,11 @@ class RequestsFragment : Fragment() {
 	@Composable
 	private fun RequestDialogs() {
 		val current by dialog.collectAsState()
-		val dismiss = { dialog.value = null }
+		val dismiss = {
+			// Back on the card the dialog was opened from (its key survives a refresh meanwhile)
+			dialog.value?.let { requests.focusCard(requests.key(it.card)) }
+			dialog.value = null
+		}
 		val menuOpen = current is RequestDialog.Menu
 		val menu = rememberLastNonNull(current as? RequestDialog.Menu)
 		JeDialog(
@@ -555,7 +596,7 @@ class RequestsFragment : Fragment() {
 			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
 				if (card.request.tmdbId != null) {
 					JeButton(text = stringResource(R.string.je_requests_open_details), onClick = {
-						dismiss()
+						dialog.value = null
 						openDetails(card.request.type, card.request.tmdbId)
 					})
 				}
@@ -595,18 +636,23 @@ class RequestsFragment : Fragment() {
 		val appContext = context?.applicationContext ?: return
 		busyRequests.value += requestId
 		val title = card.request.title.orEmpty()
+		val session = session()
 		writeScope.launch {
-			val message = try {
+			val failure = try {
 				if (approve) requestsRepository.approve(requestId) else requestsRepository.decline(requestId)
-				appContext.getString(if (approve) R.string.je_requests_approved_toast else R.string.je_requests_declined_toast, title)
+				null
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Request %d action failed", requestId)
-				appContext.getString(R.string.je_requests_action_failed, describe(appContext, err))
+				err
 			} finally {
 				busyRequests.value -= requestId
 			}
+			// Signed in as someone else meanwhile: the outcome belongs to the previous account, so say and refresh nothing
+			if (session() != session) return@launch
+			val message = if (failure == null) appContext.getString(if (approve) R.string.je_requests_approved_toast else R.string.je_requests_declined_toast, title)
+			else appContext.getString(R.string.je_requests_action_failed, describe(appContext, failure))
 			Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
 			// Never retry: refresh to show what the server now has (keeping the focused card), and the queue and
 			// history an approval may have started. Nothing to refresh once the page is gone
@@ -662,7 +708,10 @@ class RequestsFragment : Fragment() {
 				onMenu = {
 					context?.let { context ->
 						SeerrCardMenu.show(context, view, result, enhancedRepository.current) {
+							// Hidden from the menu: the focus moves on to the next card instead of leaving the grid
+							val order = watchlist.state.value.items.map { it.dedupeKey }
 							watchlist.update { list -> list.filterNot { it.dedupeKey == result.dedupeKey } }
+							ListFocus.neighbour(order, listOf(result.dedupeKey))?.let(watchlist::focusCard)
 						}
 					}
 				},
@@ -675,25 +724,35 @@ class RequestsFragment : Fragment() {
 		if (syncing.value) return
 		val appContext = context?.applicationContext ?: return
 		syncing.value = true
+		val session = session()
 		writeScope.launch {
-			val (message, synced) = try {
-				val result = requestsRepository.syncWatchlist()
-				val failedUsers = result.errors?.size ?: 0
-				val text = if (failedUsers > 0) appContext.getString(R.string.je_requests_sync_result_errors, result.itemsProcessed, result.itemsAdded, failedUsers)
-				else appContext.getString(R.string.je_requests_sync_result, result.itemsProcessed, result.itemsAdded)
-				text to true
+			val result = try {
+				Result.success(requestsRepository.syncWatchlist())
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Watchlist sync failed")
-				appContext.getString(R.string.je_requests_sync_failed, describe(appContext, err)) to false
+				Result.failure(err)
 			} finally {
 				syncing.value = false
 			}
+			// Signed in as someone else meanwhile: the outcome belongs to the previous account
+			if (session() != session) return@launch
+			val message = result.fold(
+				onSuccess = { synced ->
+					val failedUsers = synced.errors?.size ?: 0
+					if (failedUsers > 0) appContext.getString(R.string.je_requests_sync_result_errors, synced.itemsProcessed, synced.itemsAdded, failedUsers)
+					else appContext.getString(R.string.je_requests_sync_result, synced.itemsProcessed, synced.itemsAdded)
+				},
+				onFailure = { err -> appContext.getString(R.string.je_requests_sync_failed, describe(appContext, err)) },
+			)
 			Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
-			if (synced && lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) watchlist.refresh()
+			if (result.isSuccess && lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) watchlist.refresh()
 		}
 	}
+
+	/** The server and account a write started with: its feedback is only shown while the app is still on them. */
+	private fun session() = enhancedApi.baseUrl to enhancedApi.accessToken
 
 	// Queue
 
@@ -704,13 +763,19 @@ class RequestsFragment : Fragment() {
 			try {
 				queue.value = LoadState.Ready(requestsRepository.queue())
 				queueRefreshError.value = null
+				queueWithheld = false
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Queue refresh failed")
-				// Keep the rows we have; only a queue that never loaded turns into an error page
-				if (queue.value is LoadState.Ready) queueRefreshError.value = describe(err)
-				else queue.value = LoadState.Error(describe(err)) { refreshQueue(silent = false) }
+				// Keep the rows we have, unless they were neutralized after a protection change (they may list a title
+				// hidden meanwhile); a queue that never loaded turns into an error page
+				if (queue.value is LoadState.Ready && !queueWithheld) queueRefreshError.value = describe(err)
+				else {
+					queueWithheld = false
+					queueRefreshError.value = null
+					queue.value = LoadState.Error(describe(err)) { refreshQueue(silent = false) }
+				}
 			}
 		}
 	}

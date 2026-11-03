@@ -2,16 +2,22 @@ package org.jellyfin.androidtv.enhanced.ui.design
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,10 +30,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.ui.base.JellyfinTheme
+import org.jellyfin.androidtv.ui.base.LocalTextStyle
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.dialog.DialogBase
 import org.jellyfin.androidtv.ui.base.form.Checkbox
@@ -119,7 +132,8 @@ fun JeConfirmDialog(
  * Pick one or several of [options] (season pickers, the TVDB pick, translation language, hide scope) as upstream
  * list buttons with radio buttons or checkboxes. Single choice ([multi] false) confirms on the first press;
  * multiple choice toggles and confirms with Done. [selected] is the initial selection; the focus starts on its first
- * entry. [captions] (same size as [options]) adds a line under each option.
+ * entry. [captions] (same size as [options]) adds a line under each option. Without [indicators] the single-choice
+ * options carry no radio buttons, for a menu of actions (a row's "⋯" menu) rather than a setting.
  */
 @Composable
 fun JeChoiceDialog(
@@ -134,6 +148,7 @@ fun JeChoiceDialog(
 	body: String? = null,
 	captions: List<String?>? = null,
 	confirmLabel: String = stringResource(R.string.je_design_done),
+	indicators: Boolean = true,
 ) {
 	var checked by remember(visible, selected) { mutableStateOf(selected) }
 	val initialFocus = remember { FocusRequester() }
@@ -176,12 +191,84 @@ fun JeChoiceDialog(
 					},
 					headingContent = { Text(option) },
 					captionContent = captions?.getOrNull(index)?.let { caption -> { Text(caption, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
-					trailingContent = { if (multi) Checkbox(checked = isChecked) else RadioButton(checked = isChecked) },
+					trailingContent = if (multi || indicators) {
+						{ if (multi) Checkbox(checked = isChecked) else RadioButton(checked = isChecked) }
+					} else null,
 					modifier = if (index == focusIndex) Modifier.focusRequester(initialFocus) else Modifier,
 				)
 			}
 		}
 		LaunchedEffect(Unit) { focusAfterDialog(initialFocus) }
+	}
+}
+
+/**
+ * Ask for a line of text (a rename): a single-line field with [initialValue] (the cursor at its end) and a [hint]
+ * shown while it is empty, then Cancel and [confirmLabel]. The field takes the focus, which opens the keyboard like
+ * upstream's search field; the keyboard's action key confirms too. [maxLength] caps the input. [onConfirm] gets the
+ * text as typed and runs before the dialog is dismissed.
+ */
+@Composable
+fun JeTextInputDialog(
+	visible: Boolean,
+	title: String,
+	initialValue: String,
+	confirmLabel: String,
+	onConfirm: (String) -> Unit,
+	onDismissRequest: () -> Unit,
+	modifier: Modifier = Modifier,
+	body: String? = null,
+	hint: String? = null,
+	maxLength: Int = Int.MAX_VALUE,
+	keyboardCapitalization: KeyboardCapitalization = KeyboardCapitalization.Sentences,
+) {
+	var value by remember(visible, initialValue) {
+		mutableStateOf(TextFieldValue(initialValue.take(maxLength), selection = TextRange(initialValue.take(maxLength).length)))
+	}
+	val fieldFocus = remember { FocusRequester() }
+	val confirm = {
+		onConfirm(value.text)
+		onDismissRequest()
+	}
+	JeDialog(
+		visible = visible,
+		onDismissRequest = onDismissRequest,
+		title = title,
+		body = body,
+		modifier = modifier,
+		actions = {
+			JeButton(text = stringResource(R.string.je_design_cancel), onClick = onDismissRequest)
+			JeButton(text = confirmLabel, onClick = confirm)
+		},
+	) {
+		val focus = rememberFocusedState()
+		val color = if (focus.focused) JellyfinTheme.colorScheme.inputFocused else JellyfinTheme.colorScheme.input
+		Box(
+			modifier = Modifier
+				.fillMaxWidth()
+				.border(2.dp, color, JeShapes.container)
+				.padding(12.dp),
+		) {
+			if (value.text.isEmpty() && hint != null) Text(text = hint, style = JeType.body, color = JeColors.textTertiary, maxLines = 1)
+			BasicTextField(
+				value = value,
+				onValueChange = { value = if (it.text.length <= maxLength) it else value },
+				interactionSource = focus.interactionSource,
+				textStyle = LocalTextStyle.current.merge(JeType.body).copy(color = JeColors.onSurface),
+				cursorBrush = SolidColor(color),
+				singleLine = true,
+				keyboardOptions = KeyboardOptions.Default.copy(
+					capitalization = keyboardCapitalization,
+					imeAction = ImeAction.Done,
+					showKeyboardOnFocus = true,
+				),
+				keyboardActions = KeyboardActions(onDone = { confirm() }),
+				modifier = Modifier
+					.fillMaxWidth()
+					.focusRequester(fieldFocus),
+			)
+		}
+		LaunchedEffect(Unit) { focusAfterDialog(fieldFocus) }
 	}
 }
 

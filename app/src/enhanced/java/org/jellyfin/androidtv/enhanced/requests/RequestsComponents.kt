@@ -15,6 +15,8 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
@@ -73,15 +75,24 @@ internal fun <T> PagedGrid(
 			loading = SkeletonShape.Grid(columns = columns, height = RowDensity.Large.height),
 		) { items ->
 			val gridState = rememberLazyGridState()
-			// Back from another screen: bring the card that had the focus into view and focus it again
-			val restoreKey = remember(loader) { loader.takeFocusRestore() }
-			val restoreFocus = remember { FocusRequester() }
-			LaunchedEffect(restoreKey) {
-				val index = restoreKey?.let { key -> items.indexOfFirst { loader.key(it) == key } } ?: -1
-				if (index < 0) return@LaunchedEffect
-				gridState.scrollToItem(index)
-				withFrameNanos { }
-				runCatching { restoreFocus.requestFocus() }
+			// Back from another screen: bring the card that had the focus into view and focus it again. Back from a
+			// card's dialog: focus the card again unless the focus is still inside it
+			LaunchedEffect(loader) {
+				// A grid that was just composed has no focused card yet (a destroyed view never reported losing it)
+				loader.focusedNow = null
+				loader.takeFocusRestore()?.let(loader::focusCard)
+			}
+			val target by loader.focusTarget.collectAsState()
+			val targetFocus = remember { FocusRequester() }
+			LaunchedEffect(target) {
+				val key = target ?: return@LaunchedEffect
+				val index = items.indexOfFirst { loader.key(it) == key }
+				if (index >= 0 && loader.focusedNow != key) {
+					if (gridState.layoutInfo.visibleItemsInfo.none { it.key == key }) gridState.scrollToItem(index)
+					withFrameNanos { }
+					runCatching { targetFocus.requestFocus() }
+				}
+				loader.focusHandled(key)
 			}
 			LaunchedEffect(gridState, loader) {
 				snapshotFlow {
@@ -102,8 +113,15 @@ internal fun <T> PagedGrid(
 					Box(
 						propagateMinConstraints = true,
 						modifier = Modifier
-							.then(if (key == restoreKey) Modifier.focusRequester(restoreFocus) else Modifier)
-							.onFocusChanged { if (it.hasFocus) loader.focusedKey = key },
+							.then(if (key == target) Modifier.focusRequester(targetFocus) else Modifier)
+							.onFocusChanged {
+								if (it.hasFocus) {
+									loader.focusedKey = key
+									loader.focusedNow = key
+								} else if (loader.focusedNow == key) {
+									loader.focusedNow = null
+								}
+							},
 					) {
 						item(value)
 					}

@@ -194,6 +194,7 @@ class HiddenContentFragment : Fragment() {
 						JeButton(
 							text = stringResource(R.string.je_management_hc_restore_all, visible.size),
 							onClick = { restoreAllPending.value = visible },
+							modifier = Modifier.focusRequester(listFocus.requester(RESTORE_ALL_FOCUS)),
 						)
 					}
 				}
@@ -248,7 +249,11 @@ class HiddenContentFragment : Fragment() {
 				body = stringResource(R.string.je_management_hc_restore_all_message),
 				confirmLabel = stringResource(R.string.je_management_hc_restore),
 				onConfirm = { restoring?.let { restoreAll(it) } },
-				onDismissRequest = { restoreAllPending.value = null },
+				onDismissRequest = {
+					// Back on the button (restoreAll() moves the focus on once the rows go)
+					restoreAllPending.value = null
+					listFocus.moveTo(RESTORE_ALL_FOCUS)
+				},
 			)
 		}
 	}
@@ -389,6 +394,7 @@ class HiddenContentFragment : Fragment() {
 
 	private companion object {
 		const val HEADER_FOCUS = "header-scope-filter"
+		const val RESTORE_ALL_FOCUS = "header-restore-all"
 
 		@StringRes
 		fun HiddenScopeFilter.label() = when (this) {
