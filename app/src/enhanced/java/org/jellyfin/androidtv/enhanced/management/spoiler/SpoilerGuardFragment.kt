@@ -224,7 +224,11 @@ class SpoilerGuardFragment : Fragment() {
 				confirmLabel = stringResource(R.string.je_spoiler_disable_confirm),
 				destructive = true,
 				onConfirm = { removal?.let { applyRemove(it) } },
-				onDismissRequest = { confirming.value = null },
+				onDismissRequest = {
+					// Back on the row's "Turn off" (applyRemove() moves the focus on once the row goes)
+					removal?.let { listFocus.moveTo(actionFocusKey(it.key)) }
+					confirming.value = null
+				},
 			)
 		}
 	}
