@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Reporting problems (Seerr issues) -->
+    <string name="je_issues_report">Report a problem</string>
+    <string name="je_issues_report_title">Report a problem with %1$s</string>
+    <string name="je_issues_type_video">Video</string>
+    <string name="je_issues_type_audio">Audio</string>
+    <string name="je_issues_type_subtitles">Subtitles</string>
+    <string name="je_issues_type_other">Other</string>
+    <string name="je_issues_scope_title">Which part?</string>
+    <string name="je_issues_scope_this_episode">This episode (S%1$d E%2$d)</string>
+    <string name="je_issues_scope_whole_season">All of season %1$d</string>
+    <string name="je_issues_scope_whole_show">The whole show</string>
+    <string name="je_issues_scope_other">Another season or episode…</string>
+    <string name="je_issues_season">Season %1$d</string>
+    <string name="je_issues_season_episode">S%1$d E%2$d</string>
+    <string name="je_issues_episode">Episode %1$d</string>
+    <string name="je_issues_episode_named">Episode %1$d · %2$s</string>
+    <string name="je_issues_message_label">Describe the problem (optional). You can use the keyboard\'s microphone.</string>
+    <string name="je_issues_message_hint">What\'s wrong?</string>
+    <string name="je_issues_submit">Report</string>
+    <string name="je_issues_reported">Problem reported. Thanks!</string>
+    <string name="je_issues_report_failed">Couldn\'t report the problem: %1$s</string>
+    <string name="je_issues_unknown_title">Seerr doesn\'t know this title yet, so there\'s nothing to report the problem against.</string>
+    <string name="je_issues_no_permission">You don\'t have permission to report problems in Seerr.</string>
+    <string name="je_issues_seerr_unreachable">Seerr isn\'t reachable right now.</string>
+
+    <!-- Existing issues -->
+    <plurals name="je_issues_open_count">
+        <item quantity="one">%1$s open issue</item>
+        <item quantity="other">%1$s open issues</item>
+    </plurals>
+    <plurals name="je_issues_resolved_count">
+        <item quantity="one">%1$s resolved issue</item>
+        <item quantity="other">%1$s resolved issues</item>
+    </plurals>
+    <string name="je_issues_load_failed">Couldn\'t load reported problems.</string>
+    <string name="je_issues_list_title">Problems with %1$s</string>
+    <string name="je_issues_status_open">Open</string>
+    <string name="je_issues_status_resolved">Resolved</string>
+    <string name="je_issues_no_message">No description.</string>
+    <string name="je_issues_close">Close</string>
+</resources>
