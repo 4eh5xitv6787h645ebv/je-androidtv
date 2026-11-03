@@ -110,7 +110,7 @@ class HiddenContentFragment : Fragment() {
 				val document = settingsRepository.read(EnhancedSettingsRepository.HIDDEN_CONTENT).json
 				val entries = HiddenEntries.parse(document)
 
-				val spoiler = if (enhanced.spoilerGuard) {
+				val spoiler = if (enhanced.spoilerGuardMayApply) {
 					try {
 						spoilerGuardRepository.getState()
 					} catch (err: CancellationException) {
@@ -121,7 +121,7 @@ class HiddenContentFragment : Fragment() {
 					}
 				} else null
 				val guardedSeries = when {
-					!enhanced.spoilerGuard -> emptySet()
+					!enhanced.spoilerGuardMayApply -> emptySet()
 					spoiler == null -> null
 					else -> SpoilerGuardRepository.entries(spoiler)
 						.filter { it.kind == SpoilerGuardRepository.Kind.SERIES }
@@ -129,7 +129,7 @@ class HiddenContentFragment : Fragment() {
 						.toSet()
 				}
 				val pendingGuarded = when {
-					!enhanced.spoilerGuard -> emptySet()
+					!enhanced.spoilerGuardMayApply -> emptySet()
 					spoiler == null -> null
 					else -> spoiler.pendingTmdb.keys
 				}

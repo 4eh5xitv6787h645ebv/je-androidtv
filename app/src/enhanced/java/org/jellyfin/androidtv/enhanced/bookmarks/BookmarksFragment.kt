@@ -43,6 +43,7 @@ import org.jellyfin.androidtv.enhanced.calendar.PageListRow
 import org.jellyfin.androidtv.enhanced.calendar.PageNotice
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
+import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
@@ -71,6 +72,7 @@ class BookmarksFragment : Fragment() {
 	private val navigationRepository by inject<NavigationRepository>()
 	private val playbackHelper by inject<PlaybackHelper>()
 	private val spoilerProtection by inject<SpoilerProtection>()
+	private val enhancedRepository by inject<EnhancedRepository>()
 
 	private class BookmarkRow(
 		val entry: BookmarkEntry,
@@ -92,11 +94,13 @@ class BookmarksFragment : Fragment() {
 		reload()
 	}
 
-	private fun reload() {
+	private fun reload(retry: Boolean = false) {
 		loadJob?.cancel()
 		loadState.value = LoadState.Loading
 		loadJob = lifecycleScope.launch {
 			attempt {
+				// Retry must not wait out the unknown-config backoff
+				if (retry && enhancedRepository.current.configUnavailable) enhancedRepository.ensureLoaded(force = true)
 				val entries = bookmarksRepository.list()
 				val ids = entries.mapNotNull { it.bookmark.itemId.toUUIDOrNull() }.distinct()
 				val resolved = attempt { bookmarksRepository.resolve(ids) }
@@ -117,7 +121,7 @@ class BookmarksFragment : Fragment() {
 				loadState.value = LoadState.Ready(it)
 			}.onFailure { err ->
 				Timber.w(err, "Failed to load bookmarks")
-				loadState.value = LoadState.Error(err.serverMessage) { reload() }
+				loadState.value = LoadState.Error(err.serverMessage) { reload(retry = true) }
 			}
 		}
 	}

@@ -124,11 +124,11 @@ class ActivityFragment : Fragment() {
 				coroutineScope {
 					val configCall = async { activityRepository.config() }
 					val feedCall = async { if (state.activity) activityRepository.feed().items else null }
-					val spoilerCall = async { if (state.spoilerGuard) attempt { spoilerGuardRepository.getState() }.getOrNull() else null }
+					val spoilerCall = async { if (state.spoilerGuardMayApply) attempt { spoilerGuardRepository.getState() }.getOrNull() else null }
 					Feed(
 						entries = feedCall.await(),
 						config = configCall.await(),
-						spoilerGuard = state.spoilerGuard,
+						spoilerGuard = state.spoilerGuardMayApply,
 						spoilerState = spoilerCall.await(),
 						stripReviews = state.config.spoilerStripReviews,
 					)
