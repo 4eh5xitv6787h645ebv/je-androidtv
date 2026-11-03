@@ -437,6 +437,16 @@ object EnhancedDetails {
 			if (!state.available || !fragment.isAlive) return@launch
 			val config = state.config
 
+			// Feature contributions first (info chips, reviews…), then the Seerr rows
+			val detailsContext = DetailsContext(fragment, item, state) { reload.run() }
+			for (contributor in contributors) {
+				val rows = runCatching { contributor.rows(detailsContext) }
+					.onFailure { Timber.w(it, "Details rows from %s failed", contributor::class.simpleName) }
+					.getOrDefault(emptyList())
+				if (!fragment.isAlive) return@launch
+				rows.forEach(rowsAdapter::add)
+			}
+
 			if (state.seerrUsable) when (item.type) {
 				BaseItemKind.MOVIE, BaseItemKind.SERIES -> tmdbId(item)?.let { id ->
 					val type = mediaType(item)
@@ -464,15 +474,6 @@ object EnhancedDetails {
 				else -> Unit
 			}
 
-			// Feature contributions
-			val detailsContext = DetailsContext(fragment, item, state) { reload.run() }
-			for (contributor in contributors) {
-				val rows = runCatching { contributor.rows(detailsContext) }
-					.onFailure { Timber.w(it, "Details rows from %s failed", contributor::class.simpleName) }
-					.getOrDefault(emptyList())
-				if (!fragment.isAlive) return@launch
-				rows.forEach(rowsAdapter::add)
-			}
 		}
 	}
 

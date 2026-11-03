@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.painterResource
@@ -114,7 +115,8 @@ class EnhancedHubFragment : Fragment() {
 							Icon(painter = painterResource(entry.icon), contentDescription = null, modifier = Modifier.size(32.dp))
 							Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
 								Text(text = stringResource(entry.title), fontSize = 18.sp)
-								Text(text = stringResource(entry.description), fontSize = 13.sp, color = Tokens.Color.colorGrey300)
+								// Inherits the button's content colour so it stays readable when focused
+								Text(text = stringResource(entry.description), fontSize = 13.sp, modifier = Modifier.alpha(0.75f))
 							}
 						}
 					}
