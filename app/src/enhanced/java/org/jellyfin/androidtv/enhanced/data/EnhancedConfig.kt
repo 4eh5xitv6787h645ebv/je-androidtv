@@ -65,7 +65,7 @@ data class EnhancedPublicConfig(
 	@SerialName("DownloadsPagePollingEnabled") val downloadsPagePollingEnabled: Boolean = false,
 	@SerialName("DownloadsPollIntervalSeconds") val downloadsPollIntervalSeconds: Int = 30,
 	@SerialName("CalendarPageEnabled") val calendarPageEnabled: Boolean = false,
-	@SerialName("CalendarFirstDayOfWeek") val calendarFirstDayOfWeek: Int? = null,
+	@SerialName("CalendarFirstDayOfWeek") val calendarFirstDayOfWeek: String? = null,
 	@SerialName("CalendarTimeFormat") val calendarTimeFormat: String? = null,
 	@SerialName("SyncJellyseerrWatchlist") val syncJellyseerrWatchlist: Boolean = false,
 
