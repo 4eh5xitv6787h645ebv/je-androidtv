@@ -103,6 +103,8 @@ class ActivityFragment : Fragment() {
 	private val now = MutableStateFlow(System.currentTimeMillis())
 	private var loadJob: Job? = null
 	private var opening = false
+	/** Focus is placed once per view, so the 30-second stream refresh never moves it. */
+	private var initialFocusDone = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -166,7 +168,12 @@ class ActivityFragment : Fragment() {
 		}
 	}
 
-	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
+	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): ViewGroup {
+		initialFocusDone = false
+		return createContent()
+	}
+
+	private fun createContent() = content {
 		val state by loadState.collectAsState()
 
 		EnhancedScreen(title = stringResource(R.string.je_activity_title)) {
@@ -234,7 +241,11 @@ class ActivityFragment : Fragment() {
 			}
 		}
 
-		LaunchedEffect(feed, currentStreams is Streams.Ready) { runCatching { firstFocus.requestFocus() } }
+		// Wait for the first streams answer so the list doesn't shift under the focus right after it's placed
+		val streamsSettled = currentStreams != Streams.Loading
+		LaunchedEffect(feed, streamsSettled) {
+			if (streamsSettled && !initialFocusDone) initialFocusDone = runCatching { firstFocus.requestFocus() }.isSuccess
+		}
 	}
 
 	@Composable

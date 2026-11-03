@@ -91,6 +91,8 @@ class CalendarFragment : Fragment() {
 	private var filterInitialised = false
 	private var loadJob: Job? = null
 	private var opening = false
+	/** Focus goes to the agenda once per view; after that, week navigation keeps focus on its buttons. */
+	private var initialFocusDone = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -143,13 +145,23 @@ class CalendarFragment : Fragment() {
 		}
 	}
 
+	private fun requestInitialFocus(target: FocusRequester) {
+		if (initialFocusDone) return
+		initialFocusDone = runCatching { target.requestFocus() }.isSuccess
+	}
+
 	private fun moveTo(newStart: LocalDate) {
 		if (newStart == start.value) return
 		start.value = newStart
 		reload()
 	}
 
-	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
+	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): ViewGroup {
+		initialFocusDone = false
+		return createContent()
+	}
+
+	private fun createContent() = content {
 		val state by loadState.collectAsState()
 		val windowStart by start.collectAsState()
 		val currentFilter by filter.collectAsState()
@@ -216,7 +228,7 @@ class CalendarFragment : Fragment() {
 					fontSize = 18.sp,
 					modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
 				)
-				LaunchedEffect(loaded) { runCatching { fallbackFocus.requestFocus() } }
+				LaunchedEffect(loaded) { requestInitialFocus(fallbackFocus) }
 				return@Column
 			}
 
@@ -232,7 +244,7 @@ class CalendarFragment : Fragment() {
 					}
 				}
 			}
-			LaunchedEffect(loaded) { runCatching { firstEventFocus.requestFocus() } }
+			LaunchedEffect(loaded) { requestInitialFocus(firstEventFocus) }
 		}
 	}
 
