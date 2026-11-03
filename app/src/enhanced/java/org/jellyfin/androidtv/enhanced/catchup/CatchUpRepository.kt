@@ -73,7 +73,8 @@ class CatchUpSession internal constructor(
 	}
 
 	/** Poster URL; the tag is kept as returned, since the plugin encodes Spoiler Guard state in it. */
-	fun posterUrl(item: CatchUpItem): String? = item.primaryTag?.let { api.imageUrl("/Items/${item.id}/Images/Primary", it, 400) }
+	fun posterUrl(item: CatchUpItem, maxWidth: Int = 400): String? =
+		item.primaryTag?.let { api.imageUrl("/Items/${item.id}/Images/Primary", it, maxWidth) }
 
 	fun backdropUrl(item: CatchUpItem): String? = item.backdropTag?.let { api.imageUrl("/Items/${item.id}/Images/Backdrop/0", it, 1280) }
 
@@ -81,8 +82,11 @@ class CatchUpSession internal constructor(
 
 	fun saveDismissed(ids: Set<String>) = dismissStore.save(serverId, userId, ids)
 
-	/** A random batch of unwatched titles. The server applies Hidden Content and Spoiler Guard to this query. */
-	suspend fun batch(filter: CatchUpFilter, limit: Int = CatchUpDeck.BATCH_SIZE): List<CatchUpItem> =
+	/**
+	 * A random batch of unwatched titles, with the number of unwatched titles of that kind. The server applies Hidden
+	 * Content and Spoiler Guard to this query.
+	 */
+	suspend fun batch(filter: CatchUpFilter, limit: Int = CatchUpDeck.BATCH_SIZE): CatchUpItemsPage =
 		EnhancedApi.json.decodeFromJsonElement<CatchUpItemsPage>(
 			api.get(
 				"/Items",
@@ -99,7 +103,7 @@ class CatchUpSession internal constructor(
 					"EnableUserData" to true,
 				),
 			)
-		).items
+		)
 
 	/** The title as the user sees it now, or null when it's gone (deleted, hidden or no longer accessible). */
 	suspend fun item(itemId: String): CatchUpItem? =
