@@ -183,7 +183,18 @@ class CalendarLogicTest : FunSpec({
 		CalendarLogic.mayHideDates(snapshot(null, SpoilerGuardPrefs(hideAirDate = false))) shouldBe true
 		CalendarLogic.mayHideDates(snapshot(guarded, SpoilerGuardPrefs(hideAirDate = false), members = null)) shouldBe true
 		CalendarLogic.mayHideDates(SpoilerSnapshot.UNKNOWN) shouldBe true
+		// Nothing guarded (pending opt-ins count): no date can be hidden, so no extra query
+		CalendarLogic.mayHideDates(snapshot(SpoilerGuardState())) shouldBe false
+		CalendarLogic.mayHideDates(snapshot(SpoilerGuardState(pendingTmdb = mapOf("tv:1399" to JsonPrimitive(true))))) shouldBe true
 		CalendarLogic.upcomingRange(LocalDate.of(2026, 10, 1), ZoneOffset.UTC) shouldBe ("2026-10-01T00:00:00Z" to "2026-12-30T00:00:00Z")
+	}
+
+	test("failed sources are named once each, by instance") {
+		CalendarLogic.sourceNames(listOf(
+			CalendarSourceError(instanceName = "Sonarr 4K", source = "Sonarr", reason = "timeout"),
+			CalendarSourceError(instanceName = "Sonarr 4K", source = "Sonarr", reason = "again"),
+			CalendarSourceError(instanceName = "", source = "Radarr"),
+		)) shouldContainExactly listOf("Sonarr 4K", "Radarr")
 	}
 
 	test("hidden content drops releases by TMDB id, library ids or name, like the web") {

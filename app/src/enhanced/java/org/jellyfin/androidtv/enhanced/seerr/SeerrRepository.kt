@@ -294,12 +294,14 @@ class SeerrRepository(
 	}
 
 	suspend fun filterResults(results: List<SeerrResult>, recommendations: Boolean = false): List<SeerrResult> {
-		val state = enhancedRepository.current
+		// Loaded, not `current`: a screen restored after process death can get here before the state is loaded, and
+		// the unloaded state reads as "no plugin" (Spoiler Guard off)
+		val state = enhancedRepository.ensureLoaded()
 		val hidden = if (state.hiddenContent) runCatching { hiddenContentRepository.get() }.getOrNull() else null
 		val filterHidden = hidden != null && hidden.settings.enabled &&
 			(if (recommendations) hidden.settings.filterRecommendations else hidden.settings.filterDiscovery)
-		val hiddenIds = if (filterHidden) hidden!!.hiddenTmdbIds else emptySet()
-		val hiddenItemIds = if (filterHidden) hidden!!.hiddenItemIds else emptySet()
+		val hiddenIds = if (filterHidden) hidden.hiddenTmdbIds else emptySet()
+		val hiddenItemIds = if (filterHidden) hidden.hiddenItemIds else emptySet()
 
 		val seen = HashSet<String>()
 		val filtered = results.filter { item ->
@@ -309,19 +311,19 @@ class SeerrRepository(
 				!(state.config.jellyseerrExcludeLibraryItems && item.mediaInfo?.jellyfinMediaId != null) &&
 				!(state.config.jellyseerrExcludeBlocklistedItems && item.mediaInfo?.status == SeerrMediaStatus.BLOCKLISTED)
 		}
-		return if (state.spoilerGuard) withLibraryArtwork(filtered) else filtered
+		return if (state.spoilerGuardMayApply) withLibraryArtwork(filtered) else filtered
 	}
 
 	private fun SeerrResult.libraryId() = (mediaInfo?.jellyfinMediaId ?: mediaInfo?.jellyfinMediaId4k)?.replace("-", "")?.lowercase()
 
 	/**
-	 * While Spoiler Guard is on, library titles load their poster through the server so its artwork rules apply.
+	 * While Spoiler Guard is on (or its configuration is unknown), library titles load their poster through the server so its artwork rules apply.
 	 * The URL carries the server's current image tag, which changes with the protection state, so a poster cached
 	 * before protection was turned on is never reused. If the tags can't be loaded the poster is withheld.
 	 */
 	/** Re-resolve library posters (current tags) for results that are about to be shown again. */
 	suspend fun refreshLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> =
-		if (enhancedRepository.current.spoilerGuard) withLibraryArtwork(results)
+		if (enhancedRepository.ensureLoaded().spoilerGuardMayApply) withLibraryArtwork(results)
 		else results.map { if (it.libraryArtwork) it.copy(libraryArtwork = false, libraryPosterUrl = null) else it }
 
 	private suspend fun withLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> {

@@ -27,5 +27,6 @@
     <string name="je_calendar_marker_requested">★ Requested</string>
     <string name="je_calendar_not_in_library">Not in your library, and Seerr isn\'t available to show details.</string>
     <string name="je_calendar_undated">Protected by Spoiler Guard · dates hidden</string>
+    <string name="je_calendar_upcoming_failed">Some releases protected by Spoiler Guard may be missing: %1$s failed.</string>
     <string name="je_calendar_spoiler_unavailable">Spoiler Guard couldn\'t be checked, so release details are withheld.</string>
 </resources>
