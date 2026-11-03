@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -372,7 +373,15 @@ internal fun GridStatus(
 	onLoadMore: () -> Unit,
 ) {
 	val navigationRepository = koinInject<NavigationRepository>()
-	status?.let { Notice(kind = if (failed) NoticeKind.Error else NoticeKind.Info, title = it, inline = true) }
+	// Bounded, so a long server error wraps instead of pushing Retry / Load more / Back off the header
+	status?.let {
+		Notice(
+			kind = if (failed) NoticeKind.Error else NoticeKind.Info,
+			title = it,
+			inline = true,
+			modifier = Modifier.widthIn(max = 480.dp),
+		)
+	}
 	if (failed) {
 		val focus = remember { FocusRequester() }
 		JeButton(text = stringResource(R.string.je_retry), onClick = onLoadMore, modifier = Modifier.focusRequester(focus))

@@ -17,6 +17,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -90,7 +92,10 @@ fun JeIconButton(
 		interactionSource = interactionSource,
 		modifier = modifier,
 	) {
-		if (busy) CircularProgressIndicator(modifier = Modifier.size(iconSize))
+		// The spinner keeps the button's name for accessibility services while it replaces the icon
+		if (busy) CircularProgressIndicator(
+			modifier = Modifier.size(iconSize).semantics { contentDescription?.let { this.contentDescription = it } },
+		)
 		else Icon(painterResource(icon), contentDescription = contentDescription, modifier = Modifier.size(iconSize))
 	}
 }

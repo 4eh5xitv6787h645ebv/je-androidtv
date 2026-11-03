@@ -224,7 +224,10 @@ class IssueReportFlow(
 		showDialogHost(fragment) { visible, dismiss ->
 			var message by remember { mutableStateOf("") }
 			val submitFocus = remember { FocusRequester() }
+			// Submit and IME Done both stay actionable while the dialog fades out: send once
+			val sent = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
 			fun send() {
+				if (!sent.compareAndSet(false, true)) return
 				dismiss()
 				submit(mediaId, type, scope, message)
 			}

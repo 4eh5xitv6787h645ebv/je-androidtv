@@ -11,9 +11,11 @@ data class CatchUpTally(
 	val unwatchedTotal: Int? = null,
 	val watchedSinceRead: Set<String> = emptySet(),
 	val watchlisted: Set<String> = emptySet(),
+	/** Titles whose watched mark was undone after a count that already left them out, so they count again. */
+	val restoredSinceRead: Set<String> = emptySet(),
 ) {
 	/** A batch came back with the server's current count. */
-	fun read(total: Int) = copy(unwatchedTotal = total, watchedSinceRead = emptySet())
+	fun read(total: Int) = copy(unwatchedTotal = total, watchedSinceRead = emptySet(), restoredSinceRead = emptySet())
 
 	/** [item] left the deck through [action]. */
 	fun handled(item: CatchUpItem, action: CatchUpAction) = when (action) {
@@ -24,7 +26,11 @@ data class CatchUpTally(
 
 	/** [item]'s [action] was undone: it's back on top of the deck. */
 	fun undone(item: CatchUpItem, action: CatchUpAction) = when (action) {
-		is CatchUpAction.Watched -> copy(watchedSinceRead = watchedSinceRead - item.key)
+		// Marked after the last count: just forget the mark. Marked before it: the server's count no longer includes
+		// the title, so it has to be added back
+		is CatchUpAction.Watched ->
+			if (item.key in watchedSinceRead) copy(watchedSinceRead = watchedSinceRead - item.key)
+			else copy(restoredSinceRead = restoredSinceRead + item.key)
 		is CatchUpAction.Watchlist -> copy(watchlisted = watchlisted - item.key)
 		CatchUpAction.Dismiss -> this
 	}
@@ -33,6 +39,6 @@ data class CatchUpTally(
 	fun left(deck: CatchUpDeck): Int? {
 		val total = unwatchedTotal ?: return null
 		if (deck.exhausted) return deck.cards.size
-		return (total - deck.dismissed.size - watchlisted.size - watchedSinceRead.size).coerceAtLeast(deck.cards.size)
+		return (total + restoredSinceRead.size - deck.dismissed.size - watchlisted.size - watchedSinceRead.size).coerceAtLeast(deck.cards.size)
 	}
 }

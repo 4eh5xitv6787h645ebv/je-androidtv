@@ -31,6 +31,13 @@ class CatchUpTallyTest : FunSpec({
 		CatchUpTally().read(10).handled(movie("a"), watched).undone(movie("a"), watched).left(deck) shouldBe 10
 	}
 
+	test("undoing a watched mark after a refill that already left the title out counts it again") {
+		// Read 50, mark watched, the refill reads 49 (server already excludes it), then Undo: 50 left again
+		val watched = CatchUpAction.Watched(listOf("a"), seasonNumbers = null)
+		val tally = CatchUpTally().read(50).handled(movie("a"), watched).read(49).undone(movie("a"), watched)
+		tally.left(deck) shouldBe 50
+	}
+
 	test("never less than the cards already dealt, and exactly those once the deck is exhausted") {
 		CatchUpTally().read(1).left(deck) shouldBe 3
 		CatchUpTally().read(47).left(deck.copy(exhausted = true)) shouldBe 3
