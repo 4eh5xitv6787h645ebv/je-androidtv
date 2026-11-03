@@ -1,5 +1,8 @@
 package org.jellyfin.androidtv.enhanced
 
+import org.jellyfin.androidtv.enhanced.requests.requestsHubEntry
+import org.jellyfin.androidtv.enhanced.requests.requestsModule
+import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedHub
 import org.koin.core.module.Module
 
 /**
@@ -8,4 +11,9 @@ import org.koin.core.module.Module
  * presence in the hub follows its module.
  */
 val featureModules: List<Module> = listOf(
-)
+	requestsModule,
+).also {
+	EnhancedHub.register(
+		requestsHubEntry,
+	)
+}
