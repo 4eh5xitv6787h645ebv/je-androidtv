@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="je_about_title">About Jellyfin Enhanced</string>
+    <!-- Section overline above the plugin and server versions -->
+    <string name="je_about_section_versions">Versions</string>
     <string name="je_about_caption">Versions, Seerr link and enabled features</string>
     <string name="je_about_plugin_version">Plugin version</string>
     <string name="je_about_server_version">Server version</string>
