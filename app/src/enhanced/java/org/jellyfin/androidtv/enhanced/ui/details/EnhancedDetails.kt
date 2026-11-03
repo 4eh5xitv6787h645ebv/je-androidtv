@@ -523,9 +523,12 @@ object EnhancedDetails {
 	) {
 		lateinit var row: ListRow
 		fun titles(cards: ArrayObjectAdapter) = (0 until cards.size()).mapNotNull { cards.get(it) as? SeerrResult }
-		// A card hidden from its menu leaves the row at once; the row goes when no title is left in it
+		// A card hidden from its menu leaves the row at once; the row goes when no title is left in it. Its key is
+		// remembered so a revalidation that started before can't bring the card back
+		val removedKeys = HashSet<String>()
 		val adapter = ArrayObjectAdapter(SeerrCardPresenter { removed ->
 			val cards = row.adapter as ArrayObjectAdapter
+			removedKeys += removed.dedupeKey
 			cards.remove(removed)
 			if (titles(cards).isEmpty()) rowsAdapter.remove(row)
 		})
@@ -552,7 +555,7 @@ object EnhancedDetails {
 				fragment.lifecycleScope.launch {
 					val shown = titles(adapter)
 					val filtered = try {
-						seerrRepository.filterResults(shown, recommendations)
+						seerrRepository.filterResults(shown, recommendations).filterNot { it.dedupeKey in removedKeys }
 					} catch (err: CancellationException) {
 						throw err
 					} catch (err: Exception) {
