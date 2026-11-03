@@ -20,6 +20,7 @@ import org.jellyfin.androidtv.enhanced.requests.requestsModule
 import org.jellyfin.androidtv.enhanced.reviews.reviewsModule
 import org.jellyfin.androidtv.enhanced.search.searchModule
 import org.jellyfin.androidtv.enhanced.seerrdetails.seerrDetailsModule
+import org.jellyfin.androidtv.enhanced.subtitles.subtitlesModule
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedHub
 import org.koin.core.module.Module
 
@@ -41,6 +42,7 @@ val featureModules: List<Module> = listOf(
 	playbackModule,
 	activityModule,
 	catchUpModule,
+	subtitlesModule,
 	aboutModule,
 ).also {
 	EnhancedHub.register(
