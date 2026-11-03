@@ -14,6 +14,7 @@ import org.jellyfin.androidtv.enhanced.discover.discoverModule
 import org.jellyfin.androidtv.enhanced.management.ManagementEntries
 import org.jellyfin.androidtv.enhanced.management.managementModule
 import org.jellyfin.androidtv.enhanced.metadata.metadataModule
+import org.jellyfin.androidtv.enhanced.playback.playbackModule
 import org.jellyfin.androidtv.enhanced.requests.requestsHubEntry
 import org.jellyfin.androidtv.enhanced.requests.requestsModule
 import org.jellyfin.androidtv.enhanced.reviews.reviewsModule
@@ -37,6 +38,7 @@ val featureModules: List<Module> = listOf(
 	reviewsModule,
 	calendarModule,
 	bookmarksModule,
+	playbackModule,
 	activityModule,
 	catchUpModule,
 	aboutModule,
