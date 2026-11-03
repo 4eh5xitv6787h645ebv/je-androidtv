@@ -17,7 +17,8 @@
     <string name="je_activity_empty">No activity yet.</string>
     <string name="je_activity_empty_filtered">No activity of this kind yet.</string>
     <string name="je_activity_feed_off">The activity feed is turned off on this server.</string>
-    <string name="je_activity_streams_title">Watching now (%1$d)</string>
+    <string name="je_activity_streams_title">Watching now</string>
+    <string name="je_activity_feed_title">Recent activity</string>
     <string name="je_activity_streams_none">Nobody is watching anything right now.</string>
     <string name="je_activity_streams_failed">Couldn\'t load who\'s watching: %1$s</string>
     <string name="je_activity_streams_paused">Paused</string>
