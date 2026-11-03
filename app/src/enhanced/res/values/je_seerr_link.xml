@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Seerr account link states (full sentences; shown on pages, cards, toasts and the About page) -->
+    <string name="je_seerr_link_off">Seerr isn\'t set up on this server.</string>
+    <string name="je_seerr_link_linked">Your account is linked to Seerr.</string>
+    <string name="je_seerr_link_unlinked">Your account isn\'t in Seerr yet. Ask an administrator to import Jellyfin users into Seerr (Jellyfin Enhanced › Seerr).</string>
+    <string name="je_seerr_link_unlinked_admin">Your account isn\'t in Seerr yet. Import Jellyfin users into Seerr to add it, here or in Jellyfin Enhanced › Seerr.</string>
+    <string name="je_seerr_link_blocked">Your administrator has disabled Seerr for your account.</string>
+    <string name="je_seerr_link_unreachable">Can\'t reach Seerr right now. Please try again in a moment.</string>
+    <string name="je_seerr_link_no_user">Couldn\'t load your Seerr account. Try signing out and back in.</string>
+    <string name="je_seerr_link_no_user_admin">Couldn\'t load your Seerr account. Try signing out and back in, or import Jellyfin users into Seerr.</string>
+    <string name="je_seerr_link_unknown">Couldn\'t check your Seerr account. Please try again in a moment.</string>
+    <string name="je_seerr_link_parental_block">Your parental controls block this title.</string>
+    <string name="je_seerr_link_no_request_permission">You don\'t have permission to make requests in Seerr.</string>
+    <string name="je_seerr_link_no_issue_permission">You don\'t have permission to report or view issues in Seerr.</string>
+    <!-- One-line versions for cards -->
+    <string name="je_seerr_link_unlinked_short">Your account isn\'t in Seerr yet</string>
+    <string name="je_seerr_link_unlinked_short_admin">Not in Seerr yet: select to import users</string>
+    <string name="je_seerr_link_still_unlinked">Still not linked. %1$s</string>
+    <string name="je_seerr_link_now_linked">Your account is linked to Seerr now.</string>
+
+    <!-- Actions -->
+    <string name="je_seerr_link_check_again">Check again</string>
+    <string name="je_seerr_link_checking">Checking…</string>
+    <string name="je_seerr_link_import">Import Jellyfin users into Seerr</string>
+    <string name="je_seerr_link_import_caption">Adds every Jellyfin user to Seerr, so nobody has to sign in to Seerr to request.</string>
+    <string name="je_seerr_link_importing">Importing Jellyfin users into Seerr…</string>
+    <plurals name="je_seerr_link_imported">
+        <item quantity="one">%1$d user imported into Seerr.</item>
+        <item quantity="other">%1$d users imported into Seerr.</item>
+    </plurals>
+    <string name="je_seerr_link_imported_none">No new users to import. Everyone is already in Seerr.</string>
+    <plurals name="je_seerr_link_import_errors">
+        <item quantity="one">%1$d user couldn\'t be imported: %2$s</item>
+        <item quantity="other">%1$d users couldn\'t be imported, first: %2$s</item>
+    </plurals>
+    <string name="je_seerr_link_import_failed">Import failed. %1$s</string>
+    <string name="je_seerr_link_import_failed_status">The server answered %1$d.</string>
+    <string name="je_seerr_link_import_forbidden">Only administrators can import users into Seerr.</string>
+</resources>

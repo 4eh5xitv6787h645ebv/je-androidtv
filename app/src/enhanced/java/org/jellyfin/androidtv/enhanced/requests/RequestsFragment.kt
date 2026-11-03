@@ -51,7 +51,10 @@ import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
@@ -59,6 +62,8 @@ import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardMenu
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkNotice
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrStatusBadge
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
@@ -89,6 +94,7 @@ class RequestsFragment : Fragment() {
 
 	private val requestsRepository by inject<RequestsRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
+	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val navigationRepository by inject<NavigationRepository>()
 
 	private val tab = MutableStateFlow(RequestsTab.REQUESTS)
@@ -171,7 +177,13 @@ class RequestsFragment : Fragment() {
 			},
 		) {
 			if (!state.requests) {
-				PageMessage(stringResource(if (state.available) R.string.je_seerr_unavailable else R.string.je_loading))
+				if (SeerrLink.blocksPage(state, state.config.downloadsPageEnabled)) {
+					Box(modifier = Modifier.fillMaxSize()) {
+						SeerrLinkNotice(modifier = Modifier.align(Alignment.Center), onLinked = ::reloadAfterLink)
+					}
+				} else {
+					PageMessage(stringResource(if (state.available) R.string.je_seerr_unavailable else R.string.je_loading))
+				}
 				return@EnhancedScreen
 			}
 			when (currentTab) {
@@ -221,11 +233,26 @@ class RequestsFragment : Fragment() {
 		}
 	}
 
-	/** The server's message when it sent one, otherwise a generic one with the HTTP status. */
-	private fun describe(err: Throwable): String =
-		RequestsRepository.serverMessage(err)
+	/**
+	 * The server's message when it sent one (as a full sentence; "not linked" as the TV's own text), otherwise a
+	 * generic one with the HTTP status. A call that says the account isn't in Seerr reloads a state that still says
+	 * linked, so the page turns into the link notice.
+	 */
+	private fun describe(err: Throwable): String {
+		if (SeerrErrors.isUnlinked(err)) seerrLinkManager.onUnlinkedError()
+		val context = context ?: return RequestsRepository.serverMessage(err).orEmpty()
+		return SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin)
+			?: RequestsRepository.serverMessage(err)
 			?: (err as? EnhancedApi.EnhancedApiException)?.let { getString(R.string.je_requests_load_failed, it.status) }
 			?: getString(R.string.je_error_generic)
+	}
+
+	/** The Seerr link works now: whatever the tabs loaded before failed, so load them again. */
+	private fun reloadAfterLink() {
+		listOf(requests, watchlist, history, issues).forEach { if (it.state.value.started) it.reload() }
+		// Opening the current tab again refreshes the queue when that's the one on screen
+		open(tab.value)
+	}
 
 	private fun toast(text: String) {
 		val context = context ?: return

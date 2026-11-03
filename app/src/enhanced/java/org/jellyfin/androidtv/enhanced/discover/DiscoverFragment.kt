@@ -41,15 +41,19 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
-import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkNotice
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrViewAllCard
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
@@ -74,12 +78,18 @@ class DiscoverFragment : Fragment() {
 	private val discoverRepository by inject<DiscoverRepository>()
 	private val seerrRepository by inject<SeerrRepository>()
 	private val navigationRepository by inject<NavigationRepository>()
+	private val seerrLinkManager by inject<SeerrLinkManager>()
 
 	private val rowsAdapter = ArrayObjectAdapter(CustomListRowPresenter())
 	private val sections = mutableListOf<Section>()
 
 	/** Null until the gate is known, then whether the page applies to this server/user. */
 	private val available = MutableStateFlow<Boolean?>(null)
+
+	/** Why the page is unavailable when that's the user's Seerr link (then it shows the link notice). */
+	private enum class LinkNotice { NONE, STATE, CALL }
+
+	private val linkNotice = MutableStateFlow(LinkNotice.NONE)
 	private val randomEnabled = MutableStateFlow(false)
 	private val picking = MutableStateFlow(false)
 
@@ -106,6 +116,10 @@ class DiscoverFragment : Fragment() {
 		val row = ListRow(HeaderItem(title), adapter)
 		private var job: Job? = null
 
+		fun cancel() {
+			job?.cancel()
+		}
+
 		init {
 			adapter.setItems(items, null)
 		}
@@ -121,8 +135,16 @@ class DiscoverFragment : Fragment() {
 					throw err
 				} catch (err: Exception) {
 					Timber.w(err, "Discover row failed")
-					// The server's own message when it sent one (Seerr down, not linked, parental block…)
-					val message = (err as? EnhancedApi.EnhancedApiException)?.serverMessage
+					// The account isn't in Seerr (any more): the whole page says so, with the import for admins
+					if (SeerrErrors.isUnlinked(err)) {
+						seerrLinkManager.onUnlinkedError()
+						linkNotice.value = LinkNotice.CALL
+						available.value = false
+						return@launch
+					}
+					// The server's own message when it sent one (Seerr down, parental block…), as a full sentence
+					val context = context ?: return@launch
+					val message = SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin)
 					adapter.setItems(listOf(DiscoverRowStatus.Error(message) { load() }), null)
 					return@launch
 				}
@@ -181,23 +203,38 @@ class DiscoverFragment : Fragment() {
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 
-		lifecycleScope.launch {
-			val state = enhancedRepository.ensureLoaded()
-			if (!state.discover) {
-				available.value = false
-				return@launch
-			}
-			buildRows()
-			available.value = true
-			randomEnabled.value = try {
-				discoverRepository.randomSettings().enabled
-			} catch (err: CancellationException) {
-				throw err
-			} catch (err: Exception) {
-				Timber.w(err, "Failed to resolve the random pick settings")
-				false
-			}
+		lifecycleScope.launch { open() }
+	}
+
+	/** Check the gate and, when the page applies, build and load the rows. */
+	private suspend fun open() {
+		val state = enhancedRepository.ensureLoaded()
+		if (!state.discover) {
+			if (SeerrLink.blocksPage(state, state.config.recommendationsPageEnabled)) linkNotice.value = LinkNotice.STATE
+			available.value = false
+			return
 		}
+		linkNotice.value = LinkNotice.NONE
+		buildRows()
+		available.value = true
+		randomEnabled.value = try {
+			discoverRepository.randomSettings().enabled
+		} catch (err: CancellationException) {
+			throw err
+		} catch (err: Exception) {
+			Timber.w(err, "Failed to resolve the random pick settings")
+			false
+		}
+	}
+
+	/** The Seerr link works now (imported, or checked again): start over with fresh rows. */
+	private fun reopen() {
+		sections.forEach { it.cancel() }
+		sections.clear()
+		rowsAdapter.clear()
+		available.value = null
+		linkNotice.value = LinkNotice.NONE
+		lifecycleScope.launch { open() }
 	}
 
 	private fun buildRows() {
@@ -291,6 +328,7 @@ class DiscoverFragment : Fragment() {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val isAvailable by available.collectAsState()
+		val notice by linkNotice.collectAsState()
 		val showRandom by randomEnabled.collectAsState()
 		val isPicking by picking.collectAsState()
 		val rowsFocus = remember { FocusRequester() }
@@ -318,12 +356,20 @@ class DiscoverFragment : Fragment() {
 					modifier = Modifier.padding(horizontal = 48.dp),
 				)
 
-				false -> Text(
-					text = stringResource(R.string.je_discover_unavailable),
-					color = secondaryTextColor(),
-					fontSize = 18.sp,
-					modifier = Modifier.padding(horizontal = 48.dp),
-				)
+				false -> if (notice != LinkNotice.NONE) {
+					SeerrLinkNotice(
+						modifier = Modifier.padding(horizontal = 48.dp),
+						unlinkedCall = notice == LinkNotice.CALL,
+						onLinked = ::reopen,
+					)
+				} else {
+					Text(
+						text = stringResource(R.string.je_discover_unavailable),
+						color = secondaryTextColor(),
+						fontSize = 18.sp,
+						modifier = Modifier.padding(horizontal = 48.dp),
+					)
+				}
 
 				true -> {
 					LaunchedEffect(Unit) { runCatching { rowsFocus.requestFocus() } }
