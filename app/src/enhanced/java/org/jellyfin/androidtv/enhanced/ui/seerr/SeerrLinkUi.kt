@@ -13,15 +13,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -38,13 +36,12 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkKind
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrText
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.design.Tokens
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberBackAction
 import org.koin.compose.koinInject
 import timber.log.Timber
-import java.util.concurrent.atomic.AtomicBoolean
 
 /** [SeerrText] as a string. */
 fun SeerrText.resolve(context: Context): String = when (this) {
@@ -173,17 +170,19 @@ fun SeerrLinkNotice(
 		if (unlinkedCall && !everNotLinked && SeerrLink.kind(enhancedRepository.current) == SeerrLinkKind.LINKED) onLinked()
 	}
 
+	val back = rememberBackAction()
 	Column(
 		modifier = modifier.widthIn(max = 720.dp),
-		horizontalAlignment = Alignment.CenterHorizontally,
 		verticalArrangement = Arrangement.spacedBy(16.dp),
 	) {
-		Text(text = problem.text.resolve(), color = Tokens.Color.colorGrey100, fontSize = 18.sp, textAlign = TextAlign.Center)
+		Notice(kind = NoticeKind.Warning, title = problem.text.resolve())
 
 		when {
-			problem.offerImport -> Button(
+			// Busy rather than disabled while it works, so the focus doesn't jump away
+			problem.offerImport -> JeButton(
+				text = stringResource(if (busy) R.string.je_seerr_link_importing else R.string.je_seerr_link_import),
+				busy = busy,
 				onClick = {
-					if (busy) return@Button
 					busy = true
 					outcome = null
 					scope.launch {
@@ -198,15 +197,13 @@ fun SeerrLinkNotice(
 						finish()
 					}
 				},
-				// Stays enabled while busy (clicks are ignored then) so the focus doesn't jump away
 				modifier = Modifier.focusRequester(focus),
-			) {
-				Text(stringResource(if (busy) R.string.je_seerr_link_importing else R.string.je_seerr_link_import))
-			}
+			)
 
-			canCheck -> Button(
+			canCheck -> JeButton(
+				text = stringResource(if (busy) R.string.je_seerr_link_checking else R.string.je_seerr_link_check_again),
+				busy = busy,
 				onClick = {
-					if (busy) return@Button
 					busy = true
 					outcome = null
 					scope.launch {
@@ -219,17 +216,15 @@ fun SeerrLinkNotice(
 						finish()
 					}
 				},
-				// Stays enabled while busy (clicks are ignored then) so the focus doesn't jump away
 				modifier = Modifier.focusRequester(focus),
-			) {
-				Text(stringResource(if (busy) R.string.je_seerr_link_checking else R.string.je_seerr_link_check_again))
-			}
+			)
+
+			// Nothing on this TV can fix it (Seerr off, account blocked): still leave the user somewhere to go
+			else -> JeButton(text = back.label, onClick = back.onClick, modifier = Modifier.focusRequester(focus))
 		}
 
-		outcome?.let { Text(text = it, color = secondaryTextColor(), fontSize = 14.sp, textAlign = TextAlign.Center) }
+		outcome?.let { Notice(kind = NoticeKind.Info, title = it, inline = true) }
 	}
 
-	if (problem.offerImport || canCheck) {
-		LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
-	}
+	LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
 }

@@ -18,9 +18,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.koin.android.ext.android.inject
@@ -65,8 +66,8 @@ class RandomPickFragment : Fragment() {
 		val current by state.collectAsState()
 		LaunchedEffect(Unit) { if (current is LoadState.Loading) pick() }
 
-		EnhancedScreen(title = stringResource(R.string.je_discover_random_title)) {
-			LoadStateContent(current) { }
+		PageScaffold(title = stringResource(R.string.je_discover_random_title)) {
+			LoadStateContent(current, loading = SkeletonShape.Hero) { }
 		}
 	}
 

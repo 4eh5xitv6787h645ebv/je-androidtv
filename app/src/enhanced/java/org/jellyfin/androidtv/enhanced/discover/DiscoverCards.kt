@@ -18,7 +18,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.findViewTreeCompositionContext
@@ -27,7 +26,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.leanback.widget.Presenter
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -38,8 +36,12 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.StatusRibbon
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardMenu
-import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrStatusBadge
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.composable.AsyncImage
@@ -79,12 +81,9 @@ private fun DiscoverUpcomingContent(card: DiscoverUpcomingCard, focused: Boolean
 					}
 				},
 				overlay = {
-					SeerrStatusBadge(
-						status = item.status,
-						modifier = Modifier
-							.align(Alignment.TopEnd)
-							.padding(Tokens.Space.spaceXs),
-					)
+					JeStatuses.seerrMedia(item.status)?.let { spec ->
+						StatusRibbon(spec, Modifier.align(Alignment.BottomCenter))
+					}
 				},
 			)
 		},
@@ -113,11 +112,7 @@ private fun DiscoverTileContent(tile: DiscoverTile, focused: Boolean) {
 				modifier = Modifier.size(192.dp, 108.dp),
 				image = {
 					when {
-						tile.imageUrl == null -> Box(
-							modifier = Modifier
-								.fillMaxSize()
-								.background(Brush.linearGradient(listOf(Color(0xFF2B3A55), Color(0xFF14161C)))),
-						)
+						tile.imageUrl == null -> Box(modifier = Modifier.fillMaxSize().background(JeColors.surfaceRaised))
 
 						tile.logo -> AsyncImage(
 							url = tile.imageUrl,
@@ -145,8 +140,7 @@ private fun DiscoverTileContent(tile: DiscoverTile, focused: Boolean) {
 						)
 						Text(
 							text = tile.title,
-							color = Color.White,
-							fontSize = 18.sp,
+							style = JeType.cardTitle,
 							maxLines = 2,
 							textAlign = TextAlign.Center,
 							modifier = Modifier
@@ -190,13 +184,13 @@ private fun DiscoverStatusContent(status: DiscoverRowStatus, focused: Boolean) {
 					DiscoverRowStatus.Empty -> stringResource(R.string.je_nothing_found)
 					is DiscoverRowStatus.Error -> status.message ?: stringResource(R.string.je_error_generic)
 				}
-				Text(text = text, color = Tokens.Color.colorGrey100, fontSize = 14.sp, maxLines = 4, textAlign = TextAlign.Center)
+				Text(text = text, style = JeType.caption, maxLines = 4, textAlign = TextAlign.Center)
 				if (status is DiscoverRowStatus.Error) {
 					Box(
 						modifier = Modifier
 							.background(
 								if (focused) JellyfinTheme.colorScheme.buttonFocused else JellyfinTheme.colorScheme.button,
-								JellyfinTheme.shapes.small,
+								JeShapes.pill,
 							)
 							.padding(horizontal = 16.dp, vertical = 6.dp),
 					) {

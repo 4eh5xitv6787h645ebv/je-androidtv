@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.discover
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -19,10 +18,8 @@ import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.AndroidFragment
 import androidx.fragment.compose.content
@@ -51,18 +48,19 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingSkeleton
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkNotice
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrViewAllCard
-import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.presentation.CustomListRowPresenter
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 
@@ -343,41 +341,31 @@ class DiscoverFragment : Fragment() {
 		val rowsFocus = remember { FocusRequester() }
 		val rowsFragment = remember { arrayOfNulls<RowsSupportFragment>(1) }
 
-		EnhancedScreen(
+		PageScaffold(
 			title = stringResource(R.string.je_discover_title),
-			headerActions = if (showRandom && isAvailable == true) {
+			actions = if (showRandom && isAvailable == true) {
 				{
-					Button(onClick = ::pickRandom, enabled = !isPicking) {
-						Icon(painter = painterResource(R.drawable.je_ic_discover_casino), contentDescription = null, modifier = Modifier.size(20.dp))
-						Text(
-							text = stringResource(if (isPicking) R.string.je_discover_random_picking else R.string.je_discover_random),
-							modifier = Modifier.padding(start = 8.dp),
-						)
-					}
+					// Busy rather than disabled, so the focus stays on it while it picks
+					JeButton(
+						text = stringResource(if (isPicking) R.string.je_discover_random_picking else R.string.je_discover_random),
+						icon = R.drawable.je_ic_discover_casino,
+						busy = isPicking,
+						onClick = ::pickRandom,
+					)
 				}
 			} else null,
 		) {
 			when (isAvailable) {
-				null -> Text(
-					text = stringResource(R.string.je_loading),
-					color = secondaryTextColor(),
-					fontSize = 18.sp,
-					modifier = Modifier.padding(horizontal = 48.dp),
-				)
+				null -> LoadingSkeleton(SkeletonShape.Grid(columns = 6, rows = 2, height = 150.dp))
 
 				false -> if (notice != LinkNotice.NONE) {
 					SeerrLinkNotice(
-						modifier = Modifier.padding(horizontal = 48.dp),
+						modifier = Modifier.padding(horizontal = JeSpace.pageHorizontal),
 						unlinkedCall = notice == LinkNotice.CALL,
 						onLinked = ::reopen,
 					)
 				} else {
-					Text(
-						text = stringResource(R.string.je_discover_unavailable),
-						color = secondaryTextColor(),
-						fontSize = 18.sp,
-						modifier = Modifier.padding(horizontal = 48.dp),
-					)
+					EmptyState(title = stringResource(R.string.je_discover_unavailable))
 				}
 
 				true -> {

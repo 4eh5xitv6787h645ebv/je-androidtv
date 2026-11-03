@@ -3,13 +3,9 @@ package org.jellyfin.androidtv.enhanced.ui.seerr
 import android.view.KeyEvent
 import android.view.ViewGroup
 import android.widget.ImageView
-import androidx.annotation.StringRes
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -24,7 +20,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.leanback.widget.DiffCallback
 import androidx.leanback.widget.Presenter
 import androidx.lifecycle.findViewTreeLifecycleOwner
@@ -34,38 +29,25 @@ import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
-import org.jellyfin.androidtv.enhanced.seerr.SeerrMediaStatus
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
-import org.jellyfin.androidtv.ui.base.JellyfinTheme
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.StatusBadge
+import org.jellyfin.androidtv.enhanced.ui.design.StatusRibbon
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.ui.composable.item.ItemCard
 import org.jellyfin.androidtv.ui.composable.item.ItemPreview
 import org.jellyfin.design.Tokens
 
-/** Status label and colour for a Seerr media status, or null when the title has not been requested. */
-data class SeerrStatusLabel(@StringRes val text: Int, val color: Color)
-
-fun seerrStatusLabel(status: Int?): SeerrStatusLabel? = when (status) {
-	SeerrMediaStatus.AVAILABLE -> SeerrStatusLabel(R.string.je_status_available, Color(0xFF22A06B))
-	SeerrMediaStatus.PARTIALLY_AVAILABLE -> SeerrStatusLabel(R.string.je_status_partial, Color(0xFF2D9CDB))
-	SeerrMediaStatus.PROCESSING -> SeerrStatusLabel(R.string.je_status_processing, Color(0xFF6366F1))
-	SeerrMediaStatus.PENDING -> SeerrStatusLabel(R.string.je_status_pending, Color(0xFFD97706))
-	SeerrMediaStatus.BLOCKLISTED -> SeerrStatusLabel(R.string.je_status_blocklisted, Color(0xFFB91C1C))
-	else -> null
-}
-
+/**
+ * A Seerr media status as a [StatusBadge] in the shared palette; nothing for titles that were never requested.
+ * Cards use [StatusRibbon] on the poster instead.
+ */
 @Composable
 fun SeerrStatusBadge(status: Int?, modifier: Modifier = Modifier) {
-	val label = seerrStatusLabel(status) ?: return
-	Box(
-		modifier = modifier
-			.background(label.color.copy(alpha = 0.9f), JellyfinTheme.shapes.extraSmall)
-			.padding(horizontal = 6.dp, vertical = 2.dp),
-	) {
-		Text(text = stringResource(label.text), color = Color.White, fontSize = 10.sp, maxLines = 1)
-	}
+	val spec = JeStatuses.seerrMedia(status) ?: return
+	StatusBadge(spec, modifier)
 }
 
 /** A poster card for a Seerr result, styled like the app's own item cards. */
@@ -106,12 +88,9 @@ fun SeerrCard(
 					}
 				},
 				overlay = {
-					SeerrStatusBadge(
-						status = item.status,
-						modifier = Modifier
-							.align(Alignment.TopEnd)
-							.padding(Tokens.Space.spaceXs),
-					)
+					JeStatuses.seerrMedia(item.status)?.let { spec ->
+						StatusRibbon(spec, Modifier.align(Alignment.BottomCenter))
+					}
 				},
 			)
 		},
