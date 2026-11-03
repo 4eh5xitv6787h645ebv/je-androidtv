@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_about_title">About Jellyfin Enhanced</string>
+    <string name="je_about_caption">Versions, Seerr link and enabled features</string>
+    <string name="je_about_plugin_version">Plugin version</string>
+    <string name="je_about_server_version">Server version</string>
+    <string name="je_about_unknown">Unknown</string>
+    <string name="je_about_seerr">Seerr</string>
+    <string name="je_about_seerr_off">Not set up on this server</string>
+    <string name="je_about_seerr_linked">Linked to your account</string>
+    <string name="je_about_seerr_linked_advanced">Linked to your account, advanced requests allowed</string>
+    <string name="je_about_seerr_not_linked">Not linked (%1$s)</string>
+    <string name="je_about_features">Enabled features</string>
+    <string name="je_about_features_none">None</string>
+    <string name="je_about_feature_spoiler_guard">Spoiler Guard</string>
+    <string name="je_about_feature_hidden_content">Hidden Content</string>
+    <string name="je_about_feature_remove_from_home">Remove from Continue Watching</string>
+    <string name="je_about_feature_seerr">Seerr requests</string>
+    <string name="je_about_feature_discover">Discover</string>
+    <string name="je_about_feature_requests">Requests and downloads</string>
+    <string name="je_about_feature_calendar">Calendar</string>
+    <string name="je_about_feature_bookmarks">Bookmarks</string>
+    <string name="je_about_feature_activity">Activity feed</string>
+    <string name="je_about_feature_active_streams">Active streams</string>
+    <string name="je_about_feature_reviews">User reviews</string>
+    <string name="je_about_feature_elsewhere">Streaming elsewhere</string>
+    <string name="je_about_feature_catch_up">Catch Up</string>
+    <string name="je_about_admin">Administrator</string>
+    <string name="je_about_compat">Plugin build</string>
+    <string name="je_about_compat_ok">Built for %1$s, server %2$s</string>
+    <string name="je_about_compat_mismatch">Wrong build for this server: install %1$s</string>
+    <string name="je_about_compat_stale">A server restart is needed to finish updating the plugin</string>
+    <string name="je_about_whats_new">New plugin settings</string>
+    <string name="je_about_whats_new_none">Nothing new since you last checked the plugin settings</string>
+    <string name="je_about_whats_new_count">%1$d new since you last checked: %2$s</string>
+    <string name="je_about_release_notes">Latest release notes</string>
+    <string name="je_about_release_unavailable">Couldn\'t reach GitHub</string>
+    <string name="je_about_loading">Loading…</string>
+    <string name="je_about_failed">Couldn\'t load: %1$s. Select to retry.</string>
+</resources>
