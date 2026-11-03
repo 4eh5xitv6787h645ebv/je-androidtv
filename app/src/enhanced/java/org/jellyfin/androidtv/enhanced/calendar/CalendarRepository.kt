@@ -27,6 +27,15 @@ class CalendarRepository(
 	}
 
 	/**
+	 * Releases from [today] over the next [CalendarLogic.UNDATED_HORIZON_DAYS], whatever window the agenda shows: the
+	 * source of the undated group, so whether a guarded title appears never depends on the week being looked at.
+	 */
+	suspend fun upcomingEvents(today: LocalDate, zone: ZoneId): CalendarResponse {
+		val (from, to) = CalendarLogic.upcomingRange(today, zone)
+		return EnhancedApi.json.decodeFromJsonElement(enhancedApi.get("arr/calendar", mapOf("start" to from, "end" to to)))
+	}
+
+	/**
 	 * Library posters for [itemIds] (series or movies), keyed by dash-less lower-case id, as the server serves them to
 	 * this user: its image tags carry Spoiler Guard's protection, unlike the calendar's external artwork. Items the user
 	 * can't see, or without a poster, are left out.

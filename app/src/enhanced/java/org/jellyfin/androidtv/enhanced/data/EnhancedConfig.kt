@@ -150,6 +150,13 @@ data class SeerrUserStatus(
  */
 data class EnhancedState(
 	val available: Boolean = false,
+	/**
+	 * The plugin's configuration couldn't be read (network error, server error, timeout), so whether it is installed
+	 * and what it protects is unknown. [available] is false, which hides the JE UI like on a stock server, but
+	 * Spoiler Guard must treat this as "everything protected", not as "off". Never cached: the next
+	 * [EnhancedRepository.ensureLoaded] tries again.
+	 */
+	val configUnavailable: Boolean = false,
 	val config: EnhancedPublicConfig = EnhancedPublicConfig(),
 	val userSettings: EnhancedUserSettings = EnhancedUserSettings(),
 	val seerr: SeerrUserStatus = SeerrUserStatus(),

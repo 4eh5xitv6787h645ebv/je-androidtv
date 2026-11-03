@@ -103,6 +103,8 @@ class BookmarksFragment : Fragment() {
 					.onFailure { Timber.w(it, "Failed to look up bookmarked items") }
 					.getOrNull()
 				val spoiler = spoilerProtection.snapshot()
+				// Every name would be withheld: offer a retry instead of a list of neutral labels
+				if (spoiler.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
 				Loaded(
 					rows = entries.map { entry ->
 						val itemId = entry.bookmark.itemId.toUUIDOrNull()
