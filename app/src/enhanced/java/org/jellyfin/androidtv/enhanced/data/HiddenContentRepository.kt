@@ -18,6 +18,7 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 /** `hidden-content.json` → `Settings`. Defaults match the plugin's model defaults. */
 @Serializable
@@ -99,6 +100,15 @@ class HiddenContentRepository(
 				.toSet()
 		}
 	}
+
+	private val writes = AtomicLong()
+
+	/**
+	 * Increases when a write of the hidden list in this client starts and again when it ends (successful or not: a
+	 * failed write may still have landed), like [SpoilerGuardRepository.generation]. Pages that keep rows while they
+	 * are off screen compare it to know a title may have been hidden meanwhile.
+	 */
+	val generation: Long get() = writes.get()
 
 	private fun userKey(): String =
 		requireNotNull(userRepository.currentUser.value?.id) { "No signed-in user" }.toString().replace("-", "")
@@ -240,10 +250,15 @@ class HiddenContentRepository(
 	 * can't send this user's document with someone else's credentials.
 	 */
 	private suspend fun edit(api: EnhancedApi = enhancedApi.pinned(), block: (MutableMap<String, JsonElement>) -> Unit) {
-		settingsRepository.edit(EnhancedSettingsRepository.HIDDEN_CONTENT, api) { fields ->
-			val items = (fields["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
-			block(items)
-			fields["Items"] = JsonObject(items)
+		writes.incrementAndGet()
+		try {
+			settingsRepository.edit(EnhancedSettingsRepository.HIDDEN_CONTENT, api) { fields ->
+				val items = (fields["Items"] as? JsonObject)?.toMutableMap() ?: mutableMapOf()
+				block(items)
+				fields["Items"] = JsonObject(items)
+			}
+		} finally {
+			writes.incrementAndGet()
 		}
 	}
 

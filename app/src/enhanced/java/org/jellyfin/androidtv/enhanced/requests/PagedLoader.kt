@@ -12,8 +12,10 @@ import timber.log.Timber
  * Loads a paged list one page at a time as the user scrolls. A failed page keeps what was already loaded and is
  * tried again by [loadMore]; [reload] starts over (and drops any load in flight, so a late page from the previous
  * filter can't land in the new list); [refresh] fetches the loaded pages again and swaps the rows only once they are
- * all in, so the focused row survives. Rows are unique by [key]: when the server's list shifts between two page
- * loads (a new request arrives), a row seen on an earlier page is skipped. Must be driven from the main thread.
+ * all in, so the focused row survives. After a protection change, [neutralize] withholds what it may cover at once
+ * and the rows are dropped if they can't be revalidated. Rows are unique by [key]: when the server's list shifts
+ * between two page loads (a new request arrives), a row seen on an earlier page is skipped. Must be driven from the
+ * main thread.
  */
 internal class PagedLoader<T>(
 	private val scope: CoroutineScope,
@@ -51,6 +53,9 @@ internal class PagedLoader<T>(
 	var stale = false
 		private set
 
+	/** Set by [neutralize] until the rows are read again: they may show a title hidden meanwhile. */
+	private var withheld = false
+
 	/** The key of the row that last had the focus, so the page can put it back there when it is shown again. */
 	var focusedKey: Any? = null
 
@@ -66,12 +71,29 @@ internal class PagedLoader<T>(
 	/** The key to focus again, once (switching tabs later must not pull the focus back into the grid). */
 	fun takeFocusRestore(): Any? = focusedKey.takeIf { focusRestorePending }.also { focusRestorePending = false }
 
+	/** The key of the card that has the focus right now, if any (unlike [focusedKey], cleared when it leaves). */
+	var focusedNow: Any? = null
+
+	private val _focusTarget = MutableStateFlow<Any?>(null)
+
+	/** A card the grid should focus (see [focusCard]); the grid clears it with [focusHandled]. */
+	val focusTarget: StateFlow<Any?> = _focusTarget
+
+	/** Put the focus on the card with [key] (back from its dialog) unless it is already in it, e.g. on its button. */
+	fun focusCard(key: Any) {
+		_focusTarget.value = key
+	}
+
+	fun focusHandled(key: Any) {
+		_focusTarget.compareAndSet(key, null)
+	}
+
 	/** Load the first page unless that already happened. */
 	fun ensureStarted() {
 		if (!_state.value.started) reload()
 	}
 
-	/** Load the first page, or refresh the rows when they were [invalidate]d while off screen. */
+	/** Load the first page, or refresh the rows when they were [invalidate]d or [neutralize]d while off screen. */
 	fun show() {
 		if (!_state.value.started) reload()
 		else if (stale) refresh()
@@ -86,6 +108,7 @@ internal class PagedLoader<T>(
 		job?.cancel()
 		job = null
 		stale = false
+		withheld = false
 		focusedKey = null
 		nextPage = 1
 		_state.value = State(started = true)
@@ -94,7 +117,8 @@ internal class PagedLoader<T>(
 
 	/**
 	 * Fetch the pages loaded so far again and replace the rows in one go. The old rows stay on screen meanwhile
-	 * (rows keep their keys, so focus stays on the same card); a failure keeps them and shows the error under them.
+	 * (rows keep their keys, so focus stays on the same card); a failure keeps them and shows the error under them,
+	 * except after [neutralize]: those rows may show a title hidden meanwhile, so the error (with Retry) replaces them.
 	 */
 	fun refresh() {
 		if (!_state.value.started) return reload()
@@ -118,6 +142,7 @@ internal class PagedLoader<T>(
 					page++
 				}
 				nextPage = page
+				withheld = false
 				_state.value = State(
 					items = items.values.toList(),
 					started = true,
@@ -128,7 +153,13 @@ internal class PagedLoader<T>(
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Page refresh failed")
-				_state.value = _state.value.copy(loading = false, error = errorMessage(err))
+				if (withheld) {
+					withheld = false
+					nextPage = 1
+					_state.value = State(started = true, error = errorMessage(err))
+				} else {
+					_state.value = _state.value.copy(loading = false, error = errorMessage(err))
+				}
 			}
 		}
 	}
@@ -164,6 +195,26 @@ internal class PagedLoader<T>(
 				_state.value = _state.value.copy(loading = false, error = errorMessage(err))
 			}
 		}
+	}
+
+	/**
+	 * Withhold, in place and at once, what a Spoiler Guard or Hidden Content change may now cover ([transform] keeps
+	 * each row's [key], so the focus stays put), and revalidate the rows when they are next shown. A load in flight
+	 * may have read the list before the change, so it is dropped.
+	 */
+	fun neutralize(transform: (T) -> T) {
+		if (!_state.value.started) return
+		job?.cancel()
+		job = null
+		if (_state.value.items.isEmpty()) {
+			// Nothing to keep on screen: start over the next time the list is shown
+			_state.value = State()
+			stale = false
+			return
+		}
+		_state.value = _state.value.copy(items = _state.value.items.map(transform), loading = false)
+		stale = true
+		withheld = true
 	}
 
 	/** Change the loaded rows in place (drop a removed card, patch artwork) without reloading. */
