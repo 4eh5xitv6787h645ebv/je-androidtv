@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_subtitles_title">Subtitle style</string>
+    <string name="je_subtitles_caption">Use your Jellyfin Enhanced subtitle appearance on this device</string>
+    <string name="je_subtitles_page_caption">Your subtitle appearance from the Jellyfin Enhanced settings in the web client, translated to this app\'s subtitle settings</string>
+
+    <string name="je_subtitles_sync">Use my Jellyfin Enhanced subtitle style on this device</string>
+    <string name="je_subtitles_sync_off">Off: this device\'s own subtitle settings are used</string>
+    <string name="je_subtitles_sync_on">On: replaces this device\'s subtitle colours, size and position. Your own settings come back when you turn this off.</string>
+    <string name="je_subtitles_sync_paused">Paused: custom subtitle styles are turned off in your Jellyfin Enhanced settings, so nothing is changed</string>
+    <string name="je_subtitles_disabled_note">Custom subtitle styles are turned off in your Jellyfin Enhanced settings. Turn them on in the web client to use this style.</string>
+
+    <string name="je_subtitles_mapping">What this device uses</string>
+    <string name="je_subtitles_mapping_caption">Translated from your Jellyfin Enhanced choices; some web effects have no equivalent in the player</string>
+    <string name="je_subtitles_preview">Subtitles look like this</string>
+    <string name="je_subtitles_size">Text size</string>
+    <string name="je_subtitles_size_value">%1$s on the web, %2$d here</string>
+    <string name="je_subtitles_size_clamped">%1$s on the web, %2$d here (the largest size the player allows)</string>
+    <string name="je_subtitles_text_color">Text colour</string>
+    <string name="je_subtitles_background_color">Background colour</string>
+    <string name="je_subtitles_transparent">Transparent</string>
+    <string name="je_subtitles_effect">Text effect</string>
+    <string name="je_subtitles_effect_outline">%1$s on the web, black outline here</string>
+    <string name="je_subtitles_effect_outline_approx">%1$s on the web, black outline here (the player can\'t draw shadows)</string>
+    <string name="je_subtitles_effect_none">%1$s on the web, no outline here</string>
+    <string name="je_subtitles_position">Vertical position</string>
+    <string name="je_subtitles_position_value">Bottom edge %1$d%% down the screen on the web, %2$d%% above the bottom here</string>
+    <string name="je_subtitles_horizontal">Horizontal position</string>
+    <string name="je_subtitles_horizontal_centered">Centred</string>
+    <string name="je_subtitles_horizontal_unmapped">%1$d%% across on the web, always centred here</string>
+    <string name="je_subtitles_font">Font</string>
+    <string name="je_subtitles_font_unmapped">%1$s on the web, the app\'s own font here</string>
+    <string name="je_subtitles_open_native">This device\'s subtitle settings</string>
+    <string name="je_subtitles_open_native_caption">Text weight and everything else this app offers</string>
+
+    <string name="je_subtitles_size_tiny">Tiny</string>
+    <string name="je_subtitles_size_small">Small</string>
+    <string name="je_subtitles_size_normal">Normal</string>
+    <string name="je_subtitles_size_large">Large</string>
+    <string name="je_subtitles_size_extra_large">Extra large</string>
+    <string name="je_subtitles_size_gigantic">Gigantic</string>
+
+    <string name="je_subtitles_font_default">Default</string>
+    <string name="je_subtitles_font_noto_sans">Noto Sans</string>
+    <string name="je_subtitles_font_sans_serif">Sans Serif</string>
+    <string name="je_subtitles_font_typewriter">Typewriter</string>
+    <string name="je_subtitles_font_roboto">Roboto</string>
+
+    <string name="je_subtitles_effect_auto">Auto</string>
+    <string name="je_subtitles_effect_none_name">None</string>
+    <string name="je_subtitles_effect_shadow">Shadow</string>
+    <string name="je_subtitles_effect_outline_name">Outline</string>
+    <string name="je_subtitles_effect_outline_shadow">Outline + shadow</string>
+</resources>
