@@ -56,6 +56,8 @@ internal class PlaybackEnhancer(
 	private var pause by mutableStateOf<PauseScreenModel?>(null)
 	private var badge by mutableStateOf<RatingBadgeModel?>(null)
 	private var osdRating by mutableStateOf<OsdRatingModel?>(null)
+	/** The upstream OSD is up: the badge hides so it never covers the title area. */
+	private var osdShowing by mutableStateOf(false)
 
 	private var lastBadgeItemId: UUID? = null
 	private var badgeJob: Job? = null
@@ -68,7 +70,7 @@ internal class PlaybackEnhancer(
 	fun attach() {
 		val context = root.context
 		root.addView(nonFocusable(ComposeView(context).apply {
-			setContent { JellyfinTheme { PlaybackOverlay(pause, badge) } }
+			setContent { JellyfinTheme { PlaybackOverlay(pause, badge, osdShowing) } }
 		}), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
 		// The OSD title area (logo or title, then the episode line); the ratings go on a line of their own below it
@@ -145,6 +147,7 @@ internal class PlaybackEnhancer(
 	private fun updatePauseScreen(controller: PlaybackController, item: BaseItemDto?, features: PlaybackFeatures) {
 		val now = SystemClock.elapsedRealtime()
 		val leanback = leanbackFragment
+		osdShowing = leanback?.isControlsOverlayVisible == true
 		// The OSD was brought up some other way (a key we didn't see): it wins
 		if (pauseTimer.visible && leanback?.isControlsOverlayVisible == true) pauseTimer.onInput(now, dismiss = false)
 

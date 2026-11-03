@@ -82,10 +82,10 @@ private val Accent = Tokens.Color.colorBlue400
 
 /** Everything the enhancer draws over the video: the pause screen and the rating badge. */
 @Composable
-fun PlaybackOverlay(pause: PauseScreenModel?, badge: RatingBadgeModel?) {
+fun PlaybackOverlay(pause: PauseScreenModel?, badge: RatingBadgeModel?, osdShowing: Boolean = false) {
 	Box(Modifier.fillMaxSize()) {
 		AnimatedVisibility(
-			visible = badge != null && pause == null,
+			visible = badge != null && pause == null && !osdShowing,
 			enter = fadeIn(tween(FADE_MS)) + slideInHorizontally(tween(FADE_MS)) { -it / 8 },
 			exit = fadeOut(tween(FADE_MS)) + slideOutHorizontally(tween(FADE_MS)) { -it / 8 },
 			modifier = Modifier.align(Alignment.TopStart).padding(top = 64.dp),
