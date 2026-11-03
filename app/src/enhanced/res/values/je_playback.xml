@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_playback_paused">Paused</string>
+    <string name="je_playback_remaining">%1$s left</string>
+    <string name="je_playback_ends_at">Ends at %1$s</string>
+    <string name="je_playback_bookmark">Bookmark</string>
+    <string name="je_playback_bookmark_add_at">Add bookmark at %1$s</string>
+    <string name="je_playback_bookmark_saved">Bookmark saved at %1$s</string>
+    <string name="je_playback_bookmark_failed">Couldn\'t save the bookmark: %1$s</string>
+</resources>

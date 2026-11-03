@@ -283,6 +283,7 @@ public class CustomPlaybackTransportControlGlue extends PlaybackTransportControl
         }
 
         secondaryActionsAdapter.add(zoomAction);
+        org.jellyfin.androidtv.enhanced.playback.EnhancedPlayback.addSecondaryActions(getContext(), this, secondaryActionsAdapter);
     }
 
     @Override

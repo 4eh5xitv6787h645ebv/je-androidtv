@@ -223,6 +223,8 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
         if (playbackController != null) {
             playbackController.init(new VideoManager(requireActivity(), view, helper), this);
         }
+
+        org.jellyfin.androidtv.enhanced.playback.EnhancedPlayback.attach(this, view);
     }
 
     @Override
@@ -474,6 +476,7 @@ public class CustomPlaybackOverlayFragment extends Fragment implements LiveTvGui
     private View.OnKeyListener keyListener = new View.OnKeyListener() {
         @Override
         public boolean onKey(View v, int keyCode, KeyEvent event) {
+            if (org.jellyfin.androidtv.enhanced.playback.EnhancedPlayback.onKey(CustomPlaybackOverlayFragment.this, keyCode, event)) return true;
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (!mGuideVisible)
                     leanbackOverlayFragment.setShouldShowOverlay(true);
