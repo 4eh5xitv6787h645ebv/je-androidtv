@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.bookmarks
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
 import android.text.InputFilter
@@ -14,11 +13,8 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
@@ -26,7 +22,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -35,11 +30,8 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.lifecycleScope
@@ -48,26 +40,27 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
-import org.jellyfin.androidtv.enhanced.calendar.PageImage
-import org.jellyfin.androidtv.enhanced.calendar.PageListRow
-import org.jellyfin.androidtv.enhanced.calendar.PageNotice
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowAction
+import org.jellyfin.androidtv.enhanced.ui.design.RowDensity
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.PlaybackHelper
-import org.jellyfin.design.Tokens
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
@@ -234,7 +227,7 @@ class BookmarksFragment : Fragment() {
 		val busyKeys by busy.collectAsState()
 		val count = (state as? LoadState.Ready)?.value?.rows?.size
 
-		EnhancedScreen(
+		PageScaffold(
 			title = stringResource(R.string.je_bookmarks_title),
 			subtitle = count?.takeIf { it > 0 }?.let { stringResource(R.string.je_bookmarks_count, it) },
 		) {
@@ -242,12 +235,21 @@ class BookmarksFragment : Fragment() {
 				state = state,
 				empty = { it.rows.isEmpty() },
 				emptyMessage = stringResource(R.string.je_bookmarks_empty),
+				emptyIcon = R.drawable.je_ic_bookmarks_bookmark,
+				loading = SkeletonShape.Rows(density = RowDensity.Large),
 			) { loaded ->
 				Column(modifier = Modifier.fillMaxSize()) {
-					if (loaded.resolveFailed) PageNotice(stringResource(R.string.je_bookmarks_unresolved), Modifier.padding(horizontal = 48.dp))
+					if (loaded.resolveFailed) {
+						Notice(
+							kind = NoticeKind.Warning,
+							title = stringResource(R.string.je_bookmarks_unresolved),
+							inline = true,
+							modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = 8.dp),
+						)
+					}
 					LazyColumn(
-						contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
-						verticalArrangement = Arrangement.spacedBy(8.dp),
+						contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, top = 4.dp, bottom = JeSpace.pageBottom),
+						verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
 					) {
 						items(loaded.rows, key = { it.key }) { row ->
 							BookmarkItem(row, busy = row.key in busyKeys)
@@ -272,41 +274,28 @@ class BookmarksFragment : Fragment() {
 		val details = listOfNotNull(
 			stringResource(R.string.je_bookmarks_at, BookmarkLogic.formatTimestamp(bookmark.timestampSeconds)),
 			savedOn?.let { stringResource(R.string.je_bookmarks_saved_on, it) },
-		).joinToString("  ·  ")
-		// The remote's Menu key opens the same menu as a long press, on the row and on its "⋯" button
+		).joinToString(" · ")
+		// The remote's Menu key on the "⋯" button opens the same menu as on the row (ListRow handles the row itself)
 		val menuKey = Modifier.onPreviewKeyEvent { event ->
 			if (event.key.nativeKeyCode != KeyEvent.KEYCODE_MENU) return@onPreviewKeyEvent false
 			if (event.type == KeyEventType.KeyUp) showMenu(row)
 			true
 		}
 
-		Row(
-			horizontalArrangement = Arrangement.spacedBy(12.dp),
-			verticalAlignment = Alignment.CenterVertically,
-			modifier = Modifier.fillMaxWidth(),
-		) {
-			PageListRow(
-				onClick = { if (!busy) select(row) },
-				onLongClick = { if (!busy) showMenu(row) },
-				modifier = Modifier
-					.weight(1f)
-					.focusRequester(listFocus.requester(row.key))
-					.onFocusChanged { if (it.isFocused) selectedKey = row.key }
-					.then(menuKey),
-			) {
-				PageImage(url = row.item?.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
-				Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-					Text(text = label ?: name, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-					if (label != null) Text(text = name, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-					Text(text = if (busy) stringResource(R.string.je_bookmarks_saving) else details, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
-					if (row.stale) Text(stringResource(R.string.je_bookmarks_stale), fontSize = 13.sp, color = Tokens.Color.colorRed300)
-				}
-			}
+		ListRow(
+			title = label ?: name,
+			leading = RowLeading.Poster(row.item?.posterUrl, R.drawable.je_ic_bookmarks_bookmark),
+			supporting = listOfNotNull(name.takeIf { label != null }, if (busy) stringResource(R.string.je_bookmarks_saving) else details),
+			warning = if (row.stale) stringResource(R.string.je_bookmarks_stale) else null,
+			onClick = { if (!busy) select(row) },
+			onMenu = { if (!busy) showMenu(row) },
 			// Not disabled while busy: disabling the focused button would throw the focus elsewhere
-			Button(onClick = { if (!busy) showMenu(row) }, modifier = menuKey) {
-				Icon(painter = painterResource(R.drawable.ic_more), contentDescription = stringResource(R.string.je_bookmarks_more), modifier = Modifier.size(24.dp))
-			}
-		}
+			actions = listOf(RowAction(R.drawable.ic_more, stringResource(R.string.je_bookmarks_more), { if (!busy) showMenu(row) }, modifier = menuKey)),
+			mainModifier = Modifier
+				.focusRequester(listFocus.requester(row.key))
+				.onFocusChanged { if (it.isFocused) selectedKey = row.key },
+			density = RowDensity.Large,
+		)
 	}
 
 	private fun displayName(row: BookmarkRow): String {
