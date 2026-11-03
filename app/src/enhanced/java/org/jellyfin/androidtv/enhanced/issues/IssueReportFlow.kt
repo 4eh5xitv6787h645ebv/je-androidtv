@@ -19,6 +19,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import timber.log.Timber
 
@@ -258,6 +259,7 @@ class IssueReportFlow(
 
 /** A user-facing message for a failed Seerr issue call, preferring the plugin's own message. */
 internal fun errorMessage(context: android.content.Context, err: EnhancedApi.EnhancedApiException): String = when {
+	SeerrLinkTexts.error(context, err, false) != null -> SeerrLinkTexts.error(context, err, false)!!
 	!err.serverMessage.isNullOrBlank() -> err.serverMessage
 	err.code == "no_issue_permission" || err.status == 403 -> context.getString(R.string.je_issues_no_permission)
 	err.status == 503 || err.code == "unreachable" -> context.getString(R.string.je_issues_seerr_unreachable)

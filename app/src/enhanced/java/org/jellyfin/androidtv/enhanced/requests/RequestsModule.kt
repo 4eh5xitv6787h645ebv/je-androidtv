@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.requests
 
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.ui.hub.HubEntry
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.ui.navigation.fragmentDestination
 import org.koin.dsl.module
 
@@ -21,7 +22,7 @@ val requestsHubEntry = HubEntry(
 	title = R.string.je_requests_title,
 	description = R.string.je_requests_description,
 	icon = R.drawable.je_ic_requests_list_alt,
-	enabled = { state -> state.requests },
+	enabled = { state -> state.requests || SeerrLink.blocksPage(state, state.config.downloadsPageEnabled) },
 	destination = { RequestsDestinations.requests() },
 	order = 20,
 )

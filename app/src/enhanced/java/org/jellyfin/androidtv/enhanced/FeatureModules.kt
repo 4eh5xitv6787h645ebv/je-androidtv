@@ -21,6 +21,7 @@ import org.jellyfin.androidtv.enhanced.requests.requestsHubEntry
 import org.jellyfin.androidtv.enhanced.requests.requestsModule
 import org.jellyfin.androidtv.enhanced.reviews.reviewsModule
 import org.jellyfin.androidtv.enhanced.search.searchModule
+import org.jellyfin.androidtv.enhanced.seerr.seerrLinkModule
 import org.jellyfin.androidtv.enhanced.seerrdetails.seerrDetailsModule
 import org.jellyfin.androidtv.enhanced.subtitles.subtitlesModule
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedHub
@@ -36,6 +37,7 @@ val featureModules: List<Module> = listOf(
 	discoverModule,
 	requestsModule,
 	seerrDetailsModule,
+	seerrLinkModule,
 	managementModule,
 	metadataModule,
 	reviewsModule,

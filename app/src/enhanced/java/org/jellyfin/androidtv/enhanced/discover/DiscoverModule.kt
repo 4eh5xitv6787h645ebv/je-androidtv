@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.discover
 
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.enhanced.ui.hub.HubEntry
 import org.jellyfin.androidtv.ui.navigation.fragmentDestination
 import org.koin.dsl.module
@@ -30,7 +31,7 @@ object DiscoverHubEntries {
 		title = R.string.je_discover_title,
 		description = R.string.je_discover_description,
 		icon = R.drawable.je_ic_discover_explore,
-		enabled = { it.discover },
+		enabled = { it.discover || SeerrLink.blocksPage(it, it.config.recommendationsPageEnabled) },
 		destination = DiscoverDestinations::discover,
 		order = 10,
 	)
