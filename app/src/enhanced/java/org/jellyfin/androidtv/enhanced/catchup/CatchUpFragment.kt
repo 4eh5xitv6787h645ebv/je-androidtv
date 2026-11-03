@@ -90,8 +90,11 @@ class CatchUpFragment : Fragment() {
 	private val tally = MutableStateFlow(CatchUpTally())
 	private var fetchJob: Job? = null
 
-	/** An action is running; further presses are ignored so one press can't act on the next card. */
-	private var busy = false
+	/**
+	 * The button whose action is running, shown with a spinner; further presses are ignored meanwhile so one press
+	 * can't act on the next card.
+	 */
+	private val busy = MutableStateFlow<DeckButton?>(null)
 
 	/** The title opened from the deck; re-checked on return in case it was watched meanwhile. */
 	private var openedItemId: String? = null
@@ -118,12 +121,13 @@ class CatchUpFragment : Fragment() {
 		val error by fetchError.collectAsState()
 		val openPicker by picker.collectAsState()
 		val confirmClear by confirmingClear.collectAsState()
+		val busyButton by busy.collectAsState()
 		val left = tallyState.left(deckState)
 
 		val current = deckState.current
 		val failed = error
 		if (session != null && current != null) {
-			Deck(current, deckState, left, currentFilter)
+			Deck(current, deckState, left, currentFilter, busyButton)
 		} else {
 			PageScaffold(
 				title = stringResource(R.string.je_catchup_title),
@@ -186,7 +190,7 @@ class CatchUpFragment : Fragment() {
 	}
 
 	@Composable
-	private fun Deck(item: CatchUpItem, deckState: CatchUpDeck, left: Int?, currentFilter: CatchUpFilter) {
+	private fun Deck(item: CatchUpItem, deckState: CatchUpDeck, left: Int?, currentFilter: CatchUpFilter, busyButton: DeckButton?) {
 		val requesters = remember { DeckButton.entries.associateWith { FocusRequester() } }
 		// The button that last had focus; it gets it back after the deck moves on or the page is shown again
 		var focused by rememberSaveable { mutableIntStateOf(DeckButton.WATCH.ordinal) }
@@ -226,6 +230,8 @@ class CatchUpFragment : Fragment() {
 							icon = button.icon,
 							label = stringResource(button.label),
 							onClick = { onButton(button) },
+							// Busy keeps the button enabled, so the focus stays on it while the spinner runs
+							busy = busyButton == button,
 							// Undo stays focusable while it has the focus, so taking back the last action never drops it
 							enabled = button != DeckButton.UNDO || deckState.canUndo || focused == button.ordinal,
 							modifier = Modifier.deckButton(button),
@@ -278,11 +284,11 @@ class CatchUpFragment : Fragment() {
 	/** Asks which seasons were watched; shows with fewer than two seasons are marked whole, as on the web. */
 	private fun pickSeasons(series: CatchUpItem) {
 		val session = session ?: return
-		if (busy) return
-		busy = true
+		if (busy.value != null) return
+		busy.value = DeckButton.WATCHED
 		lifecycleScope.launch {
 			val seasons = attempt { SeasonSelection.pickable(session.seasons(series.id)) }
-			busy = false
+			busy.value = null
 			seasons.onSuccess { list ->
 				if (list.size < 2) perform(series, SeasonSelection.wholeShow(series))
 				else picker.value = SeasonPicker(series, list)
@@ -296,8 +302,12 @@ class CatchUpFragment : Fragment() {
 	/** Runs [action] on the server (if it has a server side), then moves the deck on and logs it. */
 	private fun perform(item: CatchUpItem, action: CatchUpAction) {
 		val session = session ?: return
-		if (busy) return
-		busy = true
+		if (busy.value != null) return
+		busy.value = when (action) {
+			is CatchUpAction.Watched -> DeckButton.WATCHED
+			is CatchUpAction.Watchlist -> DeckButton.WATCHLIST
+			CatchUpAction.Dismiss -> DeckButton.DISMISS
+		}
 		lifecycleScope.launch {
 			val result = attempt {
 				when (action) {
@@ -309,7 +319,7 @@ class CatchUpFragment : Fragment() {
 					CatchUpAction.Dismiss -> action
 				}
 			}
-			busy = false
+			busy.value = null
 			result.onSuccess { applied ->
 				deck.update { it.after(item, applied) }
 				tally.update { it.handled(item, applied) }
@@ -335,12 +345,12 @@ class CatchUpFragment : Fragment() {
 	/** Reverts the last action on the server first; the card only comes back once that worked. */
 	private fun undo() {
 		val session = session ?: return
-		if (busy) return
+		if (busy.value != null) return
 		val last = deck.value.history.lastOrNull() ?: return
-		busy = true
+		busy.value = DeckButton.UNDO
 		lifecycleScope.launch {
 			val result = attempt { session.revert(last.action) }
-			busy = false
+			busy.value = null
 			session.log(
 				CatchUpEvents.swipe(CatchUpEvents.UNDO, last.item.id, ok = result.isSuccess, undoOf = last.action.logName)
 			)
