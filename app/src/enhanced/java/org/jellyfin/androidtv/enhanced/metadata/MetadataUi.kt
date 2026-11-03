@@ -26,8 +26,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.delay
 import org.jellyfin.androidtv.enhanced.ui.design.JeColors
 import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
@@ -138,8 +140,17 @@ fun showDialogHost(
 	content: @Composable (visible: Boolean, dismiss: () -> Unit) -> Unit,
 ) {
 	val activity = fragment.activity ?: return
-	val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 	val owner = fragment.viewLifecycleOwnerLiveData.value ?: return
+	showDialogHost(activity, owner, content)
+}
+
+/** [showDialogHost] for places that only have the activity (card menus); the host goes with [owner]. */
+fun showDialogHost(
+	activity: FragmentActivity,
+	owner: LifecycleOwner = activity,
+	content: @Composable (visible: Boolean, dismiss: () -> Unit) -> Unit,
+) {
+	val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 	val host = ComposeView(activity)
 	val visible = mutableStateOf(true)
 	val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_DESTROY) root.removeView(host) }

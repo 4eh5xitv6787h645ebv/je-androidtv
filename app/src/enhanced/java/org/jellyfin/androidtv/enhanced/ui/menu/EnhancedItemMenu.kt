@@ -1,13 +1,15 @@
 package org.jellyfin.androidtv.enhanced.ui.menu
 
-import android.app.AlertDialog
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
+import androidx.compose.ui.res.stringResource
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
 import androidx.lifecycle.lifecycleScope
+import java.lang.ref.WeakReference
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -20,15 +22,15 @@ import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.HomeSurface
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.management.errorMessage
+import org.jellyfin.androidtv.enhanced.metadata.showDialogHost
 import org.jellyfin.androidtv.enhanced.ui.HideFlow
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter
 import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
-import java.lang.ref.WeakReference
-import java.util.UUID
 
 /**
  * Jellyfin Enhanced entries for the card context menu (long-press OK or the menu key):
@@ -199,12 +201,18 @@ object EnhancedItemMenu {
 			}
 
 			when {
-				target == null -> AlertDialog.Builder(activity)
-					.setTitle(item.name)
-					.setMessage(if (guarded) R.string.je_management_sg_collection_on else R.string.je_management_sg_collection_off)
-					.setPositiveButton(if (guarded) R.string.je_management_sg_turn_off else R.string.je_management_sg_turn_on) { _, _ -> apply(!guarded) }
-					.setNegativeButton(android.R.string.cancel, null)
-					.show()
+				target == null -> showDialogHost(activity) { visible, dismiss ->
+					JeConfirmDialog(
+						visible = visible,
+						title = item.name.orEmpty(),
+						body = stringResource(if (guarded) R.string.je_management_sg_collection_on else R.string.je_management_sg_collection_off),
+						confirmLabel = stringResource(if (guarded) R.string.je_management_sg_turn_off else R.string.je_management_sg_turn_on),
+						// Turning protection off is the risky direction: focus starts on Cancel then
+						destructive = guarded,
+						onConfirm = { apply(!guarded) },
+						onDismissRequest = dismiss,
+					)
+				}
 
 				// Already there (changed elsewhere since the label was built)
 				target == guarded -> Toast.makeText(activity, if (guarded) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off, Toast.LENGTH_SHORT).show()
@@ -213,12 +221,17 @@ object EnhancedItemMenu {
 
 				state.prefs.skipDisableConfirm -> apply(false)
 
-				else -> AlertDialog.Builder(activity)
-					.setTitle(R.string.je_spoiler_disable_title)
-					.setMessage(R.string.je_spoiler_disable_message)
-					.setPositiveButton(R.string.je_spoiler_disable_confirm) { _, _ -> apply(false) }
-					.setNegativeButton(android.R.string.cancel, null)
-					.show()
+				else -> showDialogHost(activity) { visible, dismiss ->
+					JeConfirmDialog(
+						visible = visible,
+						title = stringResource(R.string.je_spoiler_disable_title),
+						body = stringResource(R.string.je_spoiler_disable_message),
+						confirmLabel = stringResource(R.string.je_spoiler_disable_confirm),
+						destructive = true,
+						onConfirm = { apply(false) },
+						onDismissRequest = dismiss,
+					)
+				}
 			}
 		}
 	}

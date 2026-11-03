@@ -1,12 +1,12 @@
 package org.jellyfin.androidtv.enhanced.ui.details
 
-import android.app.AlertDialog
 import android.content.Context
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.PopupMenu
 import android.widget.Toast
+import androidx.compose.ui.res.stringResource
 import androidx.core.view.doOnAttach
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
@@ -26,11 +26,13 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.metadata.showDialogHost
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.enhanced.ui.HideFlow
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrViewAllCard
 import org.jellyfin.androidtv.ui.TextUnderButton
@@ -314,12 +316,17 @@ object EnhancedDetails {
 
 		val skipConfirm = button.tag as? Boolean ?: false
 		if (!enable && !skipConfirm) {
-			AlertDialog.Builder(context)
-				.setTitle(R.string.je_spoiler_disable_title)
-				.setMessage(R.string.je_spoiler_disable_message)
-				.setPositiveButton(R.string.je_spoiler_disable_confirm) { _, _ -> apply() }
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
+			showDialogHost(fragment) { visible, dismiss ->
+				JeConfirmDialog(
+					visible = visible,
+					title = stringResource(R.string.je_spoiler_disable_title),
+					body = stringResource(R.string.je_spoiler_disable_message),
+					confirmLabel = stringResource(R.string.je_spoiler_disable_confirm),
+					destructive = true,
+					onConfirm = { apply() },
+					onDismissRequest = dismiss,
+				)
+			}
 		} else apply()
 	}
 
