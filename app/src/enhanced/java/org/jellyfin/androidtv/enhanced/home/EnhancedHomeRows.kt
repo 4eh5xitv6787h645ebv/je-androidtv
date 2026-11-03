@@ -11,7 +11,9 @@ import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.bookmarks.BookmarkLogic
 import org.jellyfin.androidtv.enhanced.calendar.attempt
@@ -112,7 +114,8 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		val previous = slot.cards
 		slot.job?.cancel()
 		slot.job = fragment.lifecycleScope.launch {
-			attempt { cards(kind, if (refresh) previous else null) }
+			// The SDK's HTTP client blocks the calling dispatcher, as upstream's rows do, so load off the main thread
+			attempt { withContext(Dispatchers.IO) { cards(kind, if (refresh) previous else null) } }
 				.onSuccess { cards ->
 					slot.cards = cards
 					render(kind)
