@@ -1,14 +1,9 @@
 package org.jellyfin.androidtv.enhanced.bookmarks
 
-import android.app.AlertDialog
 import android.os.Bundle
-import android.text.InputFilter
-import android.text.InputType
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -46,6 +41,7 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
+import org.jellyfin.androidtv.enhanced.ui.design.JeChoiceDialog
 import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
 import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
 import org.jellyfin.androidtv.enhanced.ui.design.ListRow
@@ -56,6 +52,7 @@ import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
 import org.jellyfin.androidtv.enhanced.ui.design.RowAction
 import org.jellyfin.androidtv.enhanced.ui.design.RowDensity
 import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.JeTextInputDialog
 import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
@@ -129,6 +126,10 @@ class BookmarksFragment : Fragment() {
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
 	/** The bookmark whose delete confirmation is open, if any. */
 	private val deleting = MutableStateFlow<BookmarkRow?>(null)
+	/** The bookmark whose "⋯" menu is open, if any. */
+	private val menuRow = MutableStateFlow<BookmarkRow?>(null)
+	/** The bookmark being renamed, if any. */
+	private val renaming = MutableStateFlow<BookmarkRow?>(null)
 	private val listFocus = ListFocus()
 	private var loadJob: Job? = null
 	private var generation = 0
@@ -286,7 +287,78 @@ class BookmarksFragment : Fragment() {
 					deleteRow?.let(::refocus)
 				},
 			)
+
+			BookmarkMenu()
+			RenameDialog()
 		}
+	}
+
+	/** One action of the "⋯" menu. [opensDialog] actions hand the focus on to their own dialog. */
+	private class MenuAction(val label: String, val opensDialog: Boolean = false, val run: () -> Unit)
+
+	private fun menuActions(row: BookmarkRow): List<MenuAction> = buildList {
+		val itemId = row.itemId
+		if (!row.stale && itemId != null) {
+			add(MenuAction(getString(R.string.je_bookmarks_play_from, BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds))) { play(row) })
+			add(MenuAction(getString(R.string.je_bookmarks_open_details)) { navigationRepository.navigate(Destinations.itemDetails(itemId)) })
+		}
+		add(MenuAction(getString(R.string.je_bookmarks_rename), opensDialog = true) { renaming.value = row })
+		add(MenuAction(getString(R.string.je_bookmarks_delete), opensDialog = true) { confirmDelete(row) })
+	}
+
+	/** The row's "⋯" menu: Play from here, Open details, Rename, Delete. Closing it puts the focus back on the row. */
+	@Composable
+	private fun BookmarkMenu() {
+		val open by menuRow.collectAsState()
+		// Keeps its content while it fades out
+		val row = rememberLastNonNull(open)
+		val actions = remember(row) { row?.let(::menuActions).orEmpty() }
+		JeChoiceDialog(
+			visible = open != null,
+			title = row?.let(::title).orEmpty(),
+			options = actions.map { it.label },
+			selected = emptySet(),
+			indicators = false,
+			onConfirm = { picked ->
+				val action = picked.firstOrNull()?.let(actions::getOrNull)
+				menuRow.value = null
+				// Back on the row first unless the next dialog takes the focus (its own dismissal brings it back)
+				if (action?.opensDialog != true) row?.let(::refocus)
+				action?.run?.invoke()
+			},
+			onDismissRequest = {
+				// Also called right after a choice, which already closed the menu and placed the focus
+				if (menuRow.value != null) {
+					menuRow.value = null
+					row?.let(::refocus)
+				}
+			},
+		)
+	}
+
+	/** The label of a bookmark; left empty it is labelled with its time. Closing it puts the focus back on the row. */
+	@Composable
+	private fun RenameDialog() {
+		val open by renaming.collectAsState()
+		val row = rememberLastNonNull(open)
+		val seconds = row?.entry?.bookmark?.timestampSeconds ?: 0.0
+		val time = BookmarkLogic.formatTimestamp(seconds)
+		JeTextInputDialog(
+			visible = open != null,
+			title = stringResource(R.string.je_bookmarks_rename_title, time),
+			body = stringResource(R.string.je_bookmarks_rename_message),
+			initialValue = row?.entry?.bookmark?.label.orEmpty(),
+			hint = time,
+			maxLength = BookmarkLogic.MAX_LABEL_LENGTH,
+			confirmLabel = stringResource(R.string.je_bookmarks_save),
+			onConfirm = { text -> if (renaming.value != null) row?.let { rename(it, BookmarkLogic.labelForSave(text, seconds)) } },
+			onDismissRequest = {
+				if (renaming.value != null) {
+					renaming.value = null
+					row?.let(::refocus)
+				}
+			},
+		)
 	}
 
 	@Composable
@@ -359,50 +431,8 @@ class BookmarksFragment : Fragment() {
 	}
 
 	private fun showMenu(row: BookmarkRow) {
-		val context = context ?: return
 		if (row.key in busy.value) return
-		val actions = buildList<Pair<String, () -> Unit>> {
-			if (!row.stale && row.itemId != null) {
-				add(getString(R.string.je_bookmarks_play_from, BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds)) to { play(row) })
-				add(getString(R.string.je_bookmarks_open_details) to { navigationRepository.navigate(Destinations.itemDetails(row.itemId)) })
-			}
-			add(getString(R.string.je_bookmarks_rename) to { askRename(row) })
-			add(getString(R.string.je_bookmarks_delete) to { confirmDelete(row) })
-		}
-		AlertDialog.Builder(context)
-			.setTitle(title(row))
-			.setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
-			.setNegativeButton(android.R.string.cancel, null)
-			.setOnDismissListener { refocus(row) }
-			.show()
-	}
-
-	private fun askRename(row: BookmarkRow) {
-		val context = context ?: return
-		val seconds = row.entry.bookmark.timestampSeconds
-		val time = BookmarkLogic.formatTimestamp(seconds)
-		val input = EditText(context).apply {
-			setText(row.entry.bookmark.label.orEmpty())
-			setSelection(text.length)
-			// Left empty, the bookmark is labelled with its time
-			hint = time
-			inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-			isSingleLine = true
-			filters = arrayOf(InputFilter.LengthFilter(BookmarkLogic.MAX_LABEL_LENGTH))
-		}
-		val padding = (24 * context.resources.displayMetrics.density).toInt()
-		val frame = FrameLayout(context).apply {
-			setPadding(padding, padding / 2, padding, 0)
-			addView(input)
-		}
-		AlertDialog.Builder(context)
-			.setTitle(getString(R.string.je_bookmarks_rename_title, time))
-			.setMessage(R.string.je_bookmarks_rename_message)
-			.setView(frame)
-			.setPositiveButton(R.string.je_bookmarks_save) { _, _ -> rename(row, BookmarkLogic.labelForSave(input.text?.toString(), seconds)) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.setOnDismissListener { refocus(row) }
-			.show()
+		menuRow.value = row
 	}
 
 	private fun rename(row: BookmarkRow, label: String) {

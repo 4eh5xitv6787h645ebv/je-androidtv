@@ -70,7 +70,7 @@ Resources: strings in `res/values/je_design.xml` (`je_design_*`), icons `res/dra
 | `ErrorState(message?, onRetry, secondary?)`, `ErrorRow(message?, onRetry)` | `States.kt` | Load errors (Retry focused); inline error at the end of paged lists. |
 | `LoadingSkeleton(shape = Rows/Grid/Hero, delayMillis = 300)`, `LoadingRow()` | `States.kt` | Loading (the spec's "LoadingState"); "loading more" footer. |
 | `Notice(kind, title, body?, icon?, inline, trailing?)` | `Notice.kt` | Banners and inline notices; not focusable. |
-| `JeDialog(visible, onDismissRequest, title, body?, actions?, content?)`, `JeConfirmDialog(...)`, `JeChoiceDialog(options, selected, multi, captions?, ...)` | `JeDialog.kt` | All dialogs (replace `AlertDialog`). |
+| `JeDialog(visible, onDismissRequest, title, body?, actions?, content?)`, `JeConfirmDialog(...)`, `JeChoiceDialog(options, selected, multi, captions?, indicators, ...)`, `JeTextInputDialog(title, initialValue, confirmLabel, onConfirm, hint?, maxLength, ...)` | `JeDialog.kt` | All dialogs (replace `AlertDialog`). `indicators = false` drops the radio buttons for an action menu (a row's "⋯"); `JeTextInputDialog` asks for one line of text (rename). |
 | `SettingsSection(overline, heading?)`, `SettingsIntro(text)`, `SettingsToggle`, `SettingsChoice`, `SettingsNav` | `SettingsRows.kt` | Settings drawer pages. |
 | `OverlayPanel { }`, `OverlayAgeRating(text, container, content, border?)`, `OsdInfo(text, leading?)`, `onVideoTextStyle()`, `OverlayToast(visible, text, onTimeout)`, `JePlayerStyle` | `PlayerOverlayStyle.kt` | Rating badge, OSD ratings line, pause screen text, bookmark toast. |
 
