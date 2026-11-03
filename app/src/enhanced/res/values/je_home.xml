@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_home_coming_up">Coming up</string>
+    <string name="je_home_jump_back_in">Jump back in</string>
+    <string name="je_home_trending">Trending on Seerr</string>
+    <string name="je_home_catch_up">Catch Up</string>
+    <string name="je_home_open_catch_up">Open Catch Up</string>
+    <string name="je_home_today">Today</string>
+    <string name="je_home_tomorrow">Tomorrow</string>
+
+    <string name="je_home_settings_title">Home rows</string>
+    <string name="je_home_settings_caption">Extra rows on the home screen</string>
+    <string name="je_home_settings_description">Rows added below your home sections. Saved on this device for this user.</string>
+    <string name="je_home_settings_none">None of these rows is available on this server.</string>
+    <string name="je_home_settings_coming_up">The next 7 days of the calendar, for titles in your library</string>
+    <string name="je_home_settings_jump_back_in">Your bookmarks; select one to play from the saved moment</string>
+    <string name="je_home_settings_trending">Popular titles on Seerr that aren\'t in your library yet</string>
+    <string name="je_home_settings_catch_up">10 random unwatched titles, and a shortcut to Catch Up</string>
+</resources>

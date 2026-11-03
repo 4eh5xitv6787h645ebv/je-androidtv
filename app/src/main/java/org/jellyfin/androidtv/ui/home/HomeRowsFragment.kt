@@ -34,6 +34,7 @@ import org.jellyfin.androidtv.data.repository.CustomMessageRepository
 import org.jellyfin.androidtv.data.repository.NotificationsRepository
 import org.jellyfin.androidtv.data.repository.UserViewsRepository
 import org.jellyfin.androidtv.data.service.BackgroundService
+import org.jellyfin.androidtv.enhanced.home.EnhancedHomeRows
 import org.jellyfin.androidtv.enhanced.ui.menu.EnhancedItemMenu
 import org.jellyfin.androidtv.preference.UserPreferences
 import org.jellyfin.androidtv.preference.UserSettingPreferences
@@ -92,6 +93,7 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 		super.onCreate(savedInstanceState)
 
 		adapter = MutableObjectAdapter<Row>(PositionableListRowPresenter())
+		val enhancedRows = EnhancedHomeRows(this)
 
 		lifecycleScope.launch(Dispatchers.IO) {
 			val currentUser = withTimeout(30.seconds) {
@@ -124,6 +126,7 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 
 				HomeSectionType.NONE -> Unit
 			}
+			rows.add(enhancedRows)
 
 			// Add sections to layout
 			withContext(Dispatchers.Main) {
@@ -192,7 +195,7 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 
 		//React to deletion
 		if (currentRow != null && currentItem != null && currentItem?.baseItem != null && currentItem!!.baseItem!!.id == dataRefreshService.lastDeletedItemId) {
-			(currentRow!!.adapter as ItemRowAdapter).remove(currentItem)
+			(currentRow!!.adapter as? ItemRowAdapter)?.remove(currentItem)
 			currentItem = null
 			dataRefreshService.lastDeletedItemId = null
 		}
@@ -250,6 +253,7 @@ class HomeRowsFragment : RowsSupportFragment(), AudioEventListener, View.OnKeyLi
 			rowViewHolder: RowPresenter.ViewHolder?,
 			row: Row?,
 		) {
+			if (EnhancedHomeRows.onItemClicked(requireContext(), item)) return
 			if (item is GridButton) {
 				when (item.id) {
 					LiveTvOption.LIVE_TV_GUIDE_OPTION_ID -> navigationRepository.navigate(Destinations.liveTvGuide)
