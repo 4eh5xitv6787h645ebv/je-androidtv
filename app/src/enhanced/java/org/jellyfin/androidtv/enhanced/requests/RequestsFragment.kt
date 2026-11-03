@@ -117,7 +117,8 @@ class RequestsFragment : Fragment() {
 
 	// History
 	private val historyVisible = MutableStateFlow(true)
-	private val history = PagedLoader(lifecycleScope, ::describe, key = { item: HistoryItem -> item }) { page ->
+	// Lazy list keys must be Bundle-storable, so a string rather than the item itself
+	private val history = PagedLoader(lifecycleScope, ::describe, key = { item: HistoryItem -> listOf(item.source, item.instanceName, item.title, item.subtitle, item.eventType, item.date).joinToString("|") }) { page ->
 		val result = requestsRepository.history(page, HISTORY_PAGE_SIZE)
 		historyVisible.value = result.visible
 		PagedLoader.Page(result.items, result.totalPages)
