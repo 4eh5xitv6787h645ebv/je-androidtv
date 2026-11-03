@@ -8,6 +8,7 @@ import androidx.leanback.widget.OnItemViewSelectedListener
 import androidx.leanback.widget.Row
 import org.jellyfin.androidtv.constant.QueryType
 import org.jellyfin.androidtv.data.service.BackgroundService
+import org.jellyfin.androidtv.enhanced.search.SeerrSearchRows
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.ItemLauncher
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter
@@ -21,6 +22,7 @@ class SearchFragmentDelegate(
 	private val itemLauncher: ItemLauncher,
 ) {
 	val rowsAdapter = MutableObjectAdapter<Row>(CustomListRowPresenter())
+	val seerrRows = SeerrSearchRows(context, rowsAdapter)
 
 	fun showResults(searchResultGroups: Collection<SearchResultGroup>) {
 		rowsAdapter.clear()
@@ -38,17 +40,20 @@ class SearchFragmentDelegate(
 			adapters.add(adapter)
 		}
 		for (adapter in adapters) adapter.Retrieve()
+		seerrRows.reattach()
 	}
 
 	val onItemViewClickedListener = OnItemViewClickedListener { _, item, _, row ->
+		if (seerrRows.onItemClicked(item)) return@OnItemViewClickedListener
 		if (item !is BaseRowItem) return@OnItemViewClickedListener
 		row as ListRow
 		val adapter = row.adapter as ItemRowAdapter
 		itemLauncher.launch(item as BaseRowItem?, adapter, context)
 	}
 
-	val onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, _ ->
-		val baseItem = item?.let { (item as BaseRowItem).baseItem }
+	val onItemViewSelectedListener = OnItemViewSelectedListener { _, item, _, row ->
+		seerrRows.onItemSelected(item, row)
+		val baseItem = (item as? BaseRowItem)?.baseItem
 		if (baseItem != null) {
 			backgroundService.setBackground(baseItem)
 		} else {

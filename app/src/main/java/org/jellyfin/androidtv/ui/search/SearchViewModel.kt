@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.search.SeerrSearchSession
 import org.jellyfin.sdk.model.api.BaseItemKind
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -40,6 +41,8 @@ class SearchViewModel(
 
 	private var searchJob: Job? = null
 
+	val seerr = SeerrSearchSession(viewModelScope)
+
 	private var previousQuery: String? = null
 
 	private val _searchResultsFlow = MutableStateFlow<Collection<SearchResultGroup>>(emptyList())
@@ -51,6 +54,7 @@ class SearchViewModel(
 		val trimmed = query.trim()
 		if (trimmed == previousQuery) return false
 		previousQuery = trimmed
+		seerr.onQuery(trimmed, debounce)
 
 		searchJob?.cancel()
 

@@ -29,6 +29,7 @@ import androidx.fragment.compose.AndroidFragment
 import androidx.fragment.compose.content
 import androidx.leanback.app.RowsSupportFragment
 import androidx.lifecycle.Lifecycle
+import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.ui.search.composable.SearchTextInput
 import org.jellyfin.androidtv.ui.search.composable.SearchVoiceInput
 import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbar
@@ -65,6 +66,7 @@ class SearchFragment : Fragment() {
 				textInputFocusRequester.requestFocus()
 			}
 
+			launch { searchFragmentDelegate.seerrRows.bind(viewModel.seerr) }
 			viewModel.searchResultsFlow.collect { results ->
 				searchFragmentDelegate.showResults(results)
 			}

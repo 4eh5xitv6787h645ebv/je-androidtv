@@ -26,6 +26,8 @@ data class HiddenContentSettings(
 	@SerialName("Enabled") val enabled: Boolean = true,
 	@SerialName("FilterDiscovery") val filterDiscovery: Boolean = true,
 	@SerialName("FilterRecommendations") val filterRecommendations: Boolean = true,
+	/** Whether Seerr search results drop hidden titles. Off unless the user (or the admin default) turns it on. */
+	@SerialName("FilterSearch") val filterSearch: Boolean = false,
 	@SerialName("FilterNextUp") val filterNextUp: Boolean = true,
 	@SerialName("FilterContinueWatching") val filterContinueWatching: Boolean = true,
 	@SerialName("ShowHideButtons") val showHideButtons: Boolean = true,

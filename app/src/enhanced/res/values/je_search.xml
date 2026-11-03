@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_search_row_media">Movies &amp; shows on Seerr</string>
+    <string name="je_search_row_collections">Collections on Seerr</string>
+    <string name="je_search_row_people">People on Seerr</string>
+    <string name="je_search_collection">Collection</string>
+    <string name="je_search_error">Couldn\'t load Seerr results</string>
+    <string name="je_search_select_to_retry">Select to retry</string>
+    <string name="je_search_results_title">“%1$s” on Seerr</string>
+</resources>
