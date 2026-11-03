@@ -57,6 +57,7 @@ import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.jellyfin.androidtv.ui.base.Text
+import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.design.Tokens
@@ -230,6 +231,15 @@ class ActivityFragment : Fragment() {
 								modifier = chipModifier,
 							)
 						}
+					}
+				}
+			}
+			// Nothing else on the page takes the focus: give the D-pad somewhere to land
+			val nothingFocusable = sessions.isEmpty() && entries.isEmpty() && categories.size <= 1
+			if (nothingFocusable) {
+				item(key = "back") {
+					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus)) {
+						Text(stringResource(R.string.je_hub_back))
 					}
 				}
 			}
