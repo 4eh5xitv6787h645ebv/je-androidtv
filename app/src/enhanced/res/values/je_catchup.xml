@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_catchup_title">Catch Up</string>
+    <string name="je_catchup_description">Go through unwatched titles one card at a time</string>
+    <string name="je_catchup_filter_all">All</string>
+    <string name="je_catchup_filter_movies">Movies</string>
+    <string name="je_catchup_filter_shows">Shows</string>
+    <string name="je_catchup_reset_dismissed">Show dismissed again (%1$d)</string>
+    <string name="je_catchup_reset_dismissed_title">Show dismissed titles again?</string>
+    <string name="je_catchup_reset_dismissed_message">The %1$d titles you dismissed on this device can come up in Catch Up again.</string>
+    <string name="je_catchup_reset_dismissed_confirm">Show again</string>
+    <string name="je_catchup_cancel">Cancel</string>
+
+    <string name="je_catchup_watch">Watch</string>
+    <string name="je_catchup_details">Details</string>
+    <string name="je_catchup_watched">Watched</string>
+    <string name="je_catchup_watchlist">Watchlist</string>
+    <string name="je_catchup_dismiss">Dismiss</string>
+    <string name="je_catchup_undo">Undo</string>
+
+    <string name="je_catchup_minutes">%1$d min</string>
+    <plurals name="je_catchup_seasons">
+        <item quantity="one">%1$d season</item>
+        <item quantity="other">%1$d seasons</item>
+    </plurals>
+    <string name="je_catchup_untitled">Untitled</string>
+    <string name="je_catchup_movie">Movie</string>
+    <string name="je_catchup_show">Show</string>
+
+    <string name="je_catchup_done_watched">Marked as watched: %1$s</string>
+    <string name="je_catchup_done_watchlist">Added to your watchlist: %1$s</string>
+    <string name="je_catchup_done_dismiss">Dismissed on this device: %1$s</string>
+    <string name="je_catchup_undone">Undone: %1$s</string>
+    <string name="je_catchup_failed">Couldn\'t update %1$s: %2$s</string>
+    <string name="je_catchup_undo_failed">Couldn\'t undo: %1$s</string>
+    <string name="je_catchup_no_session">You\'re not signed in.</string>
+
+    <string name="je_catchup_empty">You\'re all caught up</string>
+    <string name="je_catchup_empty_filtered">No unwatched titles left here</string>
+    <string name="je_catchup_start_over">Look again</string>
+
+    <string name="je_catchup_picker_title">Which seasons of %1$s have you watched?</string>
+    <string name="je_catchup_picker_help">Selecting a season selects the ones before it too. Select a selected season again to untick just that one.</string>
+    <string name="je_catchup_picker_all">All seasons</string>
+    <string name="je_catchup_picker_season">Season %1$s</string>
+    <string name="je_catchup_picker_progress">%1$d of %2$d episodes watched</string>
+    <string name="je_catchup_picker_select">Select seasons</string>
+    <plurals name="je_catchup_picker_mark">
+        <item quantity="one">Mark %1$d season watched</item>
+        <item quantity="other">Mark %1$d seasons watched</item>
+    </plurals>
+</resources>
