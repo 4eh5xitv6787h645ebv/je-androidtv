@@ -12,9 +12,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -35,10 +33,12 @@ import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.management.ManagementNavigation
 import org.jellyfin.androidtv.enhanced.management.ManagementRow
 import org.jellyfin.androidtv.enhanced.management.ManagementSectionHeader
+import org.jellyfin.androidtv.enhanced.management.actionFocusKey
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.management.formatDate
 import org.jellyfin.androidtv.enhanced.management.libraryPosterUrls
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.koin.android.ext.android.inject
@@ -70,7 +70,7 @@ class SpoilerGuardFragment : Fragment() {
 
 	private val state = MutableStateFlow<LoadState<Page>>(LoadState.Loading)
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
-	private val focusTarget = MutableStateFlow<String?>(null)
+	private val listFocus = ListFocus()
 	private var started = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,8 +118,6 @@ class SpoilerGuardFragment : Fragment() {
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val load by state.collectAsState()
 		val busyKeys by busy.collectAsState()
-		val target by focusTarget.collectAsState()
-		val requesters = remember { mutableMapOf<String, FocusRequester>() }
 		val ready = (load as? LoadState.Ready)?.value
 
 		EnhancedScreen(
@@ -131,7 +129,7 @@ class SpoilerGuardFragment : Fragment() {
 				empty = { it.entries.isEmpty() && it.pending.isEmpty() },
 				emptyMessage = stringResource(R.string.je_management_sg_empty),
 			) { page ->
-				fun requester(key: String) = requesters.getOrPut(key) { FocusRequester() }
+				listFocus.Effect()
 
 				LazyColumn(
 					contentPadding = PaddingValues(bottom = 32.dp),
@@ -157,7 +155,8 @@ class SpoilerGuardFragment : Fragment() {
 										else ManagementNavigation.openDetails(id)
 									}
 								},
-								mainModifier = Modifier.focusRequester(requester(key)),
+								mainModifier = Modifier.focusRequester(listFocus.requester(key)),
+								actionModifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
 							)
 						}
 					}
@@ -186,19 +185,15 @@ class SpoilerGuardFragment : Fragment() {
 								onOpen = if (page.seerrUsable && tmdbId != null) {
 									{ ManagementNavigation.openSeerr(entry.mediaType, tmdbId) }
 								} else null,
-								mainModifier = Modifier.focusRequester(requester(key)),
+								mainModifier = Modifier.focusRequester(listFocus.requester(key)),
+								actionModifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
 							)
 						}
 					}
 				}
 
 				LaunchedEffect(Unit) {
-					page.rowKeys.firstOrNull()?.let { key -> runCatching { requester(key).requestFocus() } }
-				}
-				LaunchedEffect(target) {
-					val key = target ?: return@LaunchedEffect
-					runCatching { requester(key).requestFocus() }
-					focusTarget.value = null
+					page.rowKeys.firstOrNull()?.let { key -> listFocus.moveTo(key) }
 				}
 			}
 		}
@@ -213,9 +208,10 @@ class SpoilerGuardFragment : Fragment() {
 			lifecycleScope.launch {
 				try {
 					remove()
-					val keys = page.rowKeys
-					val index = keys.indexOf(key)
-					focusTarget.value = keys.getOrNull(index + 1) ?: keys.getOrNull(index - 1)
+					// Before the row goes: "Turn off" was pressed on its action button, so land on the next row's. With
+					// nothing left, the empty state's Back takes the focus.
+					val latest = (state.value as? LoadState.Ready)?.value ?: page
+					ListFocus.neighbour(latest.rowKeys, listOf(key))?.let { listFocus.moveTo(actionFocusKey(it)) }
 					state.update { current ->
 						if (current !is LoadState.Ready) current
 						else LoadState.Ready(current.value.copy(

@@ -119,6 +119,8 @@ fun ManagementRow(
 	modifier: Modifier = Modifier,
 	/** Applied to the main (open) button, e.g. a focus requester. */
 	mainModifier: Modifier = Modifier,
+	/** Applied to the trailing action button. */
+	actionModifier: Modifier = Modifier,
 	onOpen: (() -> Unit)? = null,
 	busy: Boolean = false,
 	chips: List<String> = emptyList(),
@@ -151,7 +153,7 @@ fun ManagementRow(
 			}
 		}
 		// Not enabled=false while busy: disabling the focused button would throw focus elsewhere
-		Button(onClick = { if (!busy) onAction() }) {
+		Button(onClick = { if (!busy) onAction() }, modifier = actionModifier) {
 			Text(if (busy) "…" else actionLabel)
 		}
 	}
@@ -178,3 +180,6 @@ fun ManagementSectionHeader(text: String) {
 		modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 16.dp, bottom = 4.dp),
 	)
 }
+
+/** The [org.jellyfin.androidtv.enhanced.ui.hub.ListFocus] key of a [ManagementRow]'s action button. */
+fun actionFocusKey(rowKey: String) = "$rowKey#action"

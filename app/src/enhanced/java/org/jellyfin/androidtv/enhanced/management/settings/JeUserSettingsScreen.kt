@@ -27,8 +27,6 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.list.ListMessage
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 import timber.log.Timber
@@ -100,32 +98,35 @@ private fun JeUserSettingsScreen(@StringRes title: Int, sections: List<Pair<Int,
 		enhancedSettingsHeader(title = { stringResource(title) })
 
 		if (!enhanced.available) {
-			item { ListMessage { Text(stringResource(R.string.je_hub_unavailable)) } }
+			enhancedSettingsUnavailable { stringResource(R.string.je_hub_unavailable) }
 			return@SettingsColumn
 		}
 
 		val docs = enhancedSettingsLoad(documents) ?: return@SettingsColumn
+		// The focus starts on the first setting, not on the page heading
+		val firstKey = sections.firstOrNull()?.second?.firstOrNull()?.key
 
 		for ((section, settings) in sections) {
 			enhancedSettingsSection(title = { stringResource(section) })
 			for (setting in settings) item(key = setting.key) {
 				val busy = saving == setting.key
+				val first = setting.key == firstKey
 				val caption = setting.caption?.let { stringResource(it) }
 				when (setting) {
 					is JeUserSetting.Toggle -> {
 						val value = setting.value(docs.user, docs.public)
-						EnhancedToggleRow(setting.key, stringResource(setting.title), caption, value, busy) { save(setting, JsonPrimitive(!value)) }
+						EnhancedToggleRow(setting.key, stringResource(setting.title), caption, value, busy, first) { save(setting, JsonPrimitive(!value)) }
 					}
 
 					is JeUserSetting.Choice -> {
 						val value = setting.value(docs.user, docs.public)
 						val label = setting.options.firstOrNull { it.first == value }?.let { stringResource(it.second) } ?: value
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), label, busy) { save(setting, JsonPrimitive(setting.next(value))) }
+						EnhancedChoiceRow(setting.key, stringResource(setting.title), label, busy, first) { save(setting, JsonPrimitive(setting.next(value))) }
 					}
 
 					is JeUserSetting.Number -> {
 						val value = setting.value(docs.user, docs.public)
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), stringResource(R.string.je_management_set_seconds, value), busy) {
+						EnhancedChoiceRow(setting.key, stringResource(setting.title), stringResource(R.string.je_management_set_seconds, value), busy, first) {
 							save(setting, JsonPrimitive(setting.next(value)))
 						}
 					}
@@ -139,7 +140,7 @@ private fun JeUserSettingsScreen(@StringRes title: Int, sections: List<Pair<Int,
 								false -> R.string.je_management_set_off
 							}
 						)
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), listOfNotNull(label, caption).joinToString(" · "), busy) {
+						EnhancedChoiceRow(setting.key, stringResource(setting.title), listOfNotNull(label, caption).joinToString(" · "), busy, first) {
 							save(setting, setting.next(value)?.let(::JsonPrimitive) ?: JsonNull)
 						}
 					}

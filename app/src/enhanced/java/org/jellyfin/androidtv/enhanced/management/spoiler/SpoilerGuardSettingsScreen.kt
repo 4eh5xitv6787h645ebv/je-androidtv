@@ -24,9 +24,8 @@ import org.jellyfin.androidtv.enhanced.management.settings.EnhancedToggleRow
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsHeader
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsLoad
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsSection
+import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsUnavailable
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.list.ListMessage
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 import timber.log.Timber
@@ -85,7 +84,7 @@ fun SpoilerGuardSettingsScreen() {
 		)
 
 		if (!enhanced.spoilerGuard) {
-			item { ListMessage { Text(stringResource(R.string.je_management_sg_unavailable)) } }
+			enhancedSettingsUnavailable { stringResource(R.string.je_management_sg_unavailable) }
 			return@SettingsColumn
 		}
 
@@ -104,6 +103,8 @@ fun SpoilerGuardSettingsScreen() {
 					caption = stringResource(category.description),
 					checked = category.applied(current),
 					saving = saving == category.key,
+					// The focus starts on the first toggle, not on the page heading
+					initialFocus = category == categories.first(),
 					onToggle = { save(category.key, category.toggled(current)) },
 				)
 			}
@@ -117,6 +118,7 @@ fun SpoilerGuardSettingsScreen() {
 				caption = stringResource(R.string.je_management_sg_skip_confirm_desc),
 				checked = current.skipDisableConfirm,
 				saving = saving == SpoilerGuardRepository.PREF_SKIP_DISABLE_CONFIRM,
+				initialFocus = categories.isEmpty(),
 				onToggle = { save(SpoilerGuardRepository.PREF_SKIP_DISABLE_CONFIRM, !current.skipDisableConfirm) },
 			)
 		}
