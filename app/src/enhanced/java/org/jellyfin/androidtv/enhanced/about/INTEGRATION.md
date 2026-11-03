@@ -17,3 +17,8 @@
   is only called from that Dismiss row (never on page open); it's server-wide, so the caption says so. Non-admins
   never call either route (the server answers 403 to them anyway).
 - Uses `je_ic_catchup_check` (from the Catch Up stream's drawables, same branch) as the Dismiss row icon.
+- Seerr row and "Import Jellyfin users into Seerr" (admins, whenever Seerr is set up): need
+  `org.jellyfin.androidtv.enhanced.seerr.seerrLinkModule` in `featureModules` (see `seerr/INTEGRATION.md`). The
+  import calls `POST jellyseerr/import-users` only when the row is selected; the Seerr row calls
+  `GET jellyseerr/user-status` only when selected (and the link isn't fine), and admins' "Linked as" name reads
+  `GET jellyseerr/user?take=1000` once per Seerr user id per app run.

@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -23,7 +24,13 @@ import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkKind
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
+import org.jellyfin.androidtv.enhanced.ui.seerr.resolve
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.list.ListButton
@@ -102,12 +109,6 @@ fun AboutSettingsScreen() {
 	val unknown = stringResource(R.string.je_about_unknown)
 	val pluginVersion = state.pluginVersion ?: unknown
 	val serverCaption = loadCaption(serverVersion) ?: (serverVersion as LoadState.Ready).value ?: unknown
-	val seerrCaption = when {
-		!state.config.jellyseerrEnabled -> stringResource(R.string.je_about_seerr_off)
-		state.seerrAdvanced -> stringResource(R.string.je_about_seerr_linked_advanced)
-		state.seerr.linked -> stringResource(R.string.je_about_seerr_linked)
-		else -> stringResource(R.string.je_about_seerr_not_linked, state.seerr.reason ?: unknown)
-	}
 	val features = enabledFeatures(state).map { stringResource(it) }
 		.ifEmpty { listOf(stringResource(R.string.je_about_features_none)) }
 		.joinToString(", ")
@@ -130,7 +131,10 @@ fun AboutSettingsScreen() {
 
 		infoItem("plugin_version", R.string.je_about_plugin_version, pluginVersion, R.drawable.je_ic_about_info)
 		infoItem("server_version", R.string.je_about_server_version, serverCaption, onClick = (serverVersion as? LoadState.Error)?.retry)
-		infoItem("seerr", R.string.je_about_seerr, seerrCaption)
+		item(key = "seerr") { SeerrLinkRow(state) }
+		if (SeerrLink.importOffered(SeerrLink.kind(state), state.isAdmin)) {
+			item(key = "seerr_import") { SeerrImportRow() }
+		}
 		infoItem("features", R.string.je_about_features, features)
 
 		item {
@@ -268,6 +272,101 @@ fun WhatsNewSettingsScreen() {
 		}
 		if (newSettings.isNotEmpty()) whatsNewItems(newSettings)
 	}
+}
+
+/**
+ * The Seerr row: "Linked as <Seerr user>" (the name needs the admin-only user list, so others see "Linked to your
+ * Seerr account"), "Not linked", "Seerr unreachable" or "Seerr disabled", each with the reason as a sentence. When a
+ * second look can change anything, selecting the row checks again (the automatic check runs only once per session).
+ */
+@Composable
+private fun SeerrLinkRow(state: EnhancedState) {
+	val manager = koinInject<SeerrLinkManager>()
+	val scope = rememberCoroutineScope()
+	val kind = SeerrLink.kind(state)
+	var checking by remember { mutableStateOf(false) }
+	var displayName by remember(state.seerr.jellyseerrUserId) { mutableStateOf<String?>(null) }
+	LaunchedEffect(state.seerr.jellyseerrUserId, state.isAdmin) {
+		displayName = manager.linkedDisplayName(state)
+	}
+
+	val reason = SeerrErrors.forLink(kind, state.isAdmin).text.resolve()
+	val status = when (kind) {
+		SeerrLinkKind.LINKED -> when {
+			displayName != null -> stringResource(
+				if (state.seerrAdvanced) R.string.je_about_seerr_linked_as_advanced else R.string.je_about_seerr_linked_as,
+				displayName.orEmpty(),
+			)
+			state.seerrAdvanced -> stringResource(R.string.je_about_seerr_linked_advanced)
+			else -> stringResource(R.string.je_about_seerr_linked)
+		}
+		SeerrLinkKind.OFF, SeerrLinkKind.BLOCKED -> stringResource(R.string.je_about_seerr_disabled, reason)
+		SeerrLinkKind.UNREACHABLE -> stringResource(R.string.je_about_seerr_unreachable, reason)
+		SeerrLinkKind.UNLINKED, SeerrLinkKind.NO_USER, SeerrLinkKind.UNKNOWN -> stringResource(R.string.je_about_seerr_not_linked, reason)
+	}
+	val canCheck = kind != SeerrLinkKind.LINKED && kind != SeerrLinkKind.OFF && kind != SeerrLinkKind.BLOCKED
+	val caption = when {
+		checking -> stringResource(R.string.je_seerr_link_checking)
+		canCheck -> stringResource(R.string.je_about_seerr_check_again, status)
+		else -> status
+	}
+	val heading = stringResource(R.string.je_about_seerr)
+
+	ListButton(
+		headingContent = { Text(heading) },
+		captionContent = { Text(caption) },
+		onClick = if (canCheck) {
+			{
+				if (!checking) {
+					checking = true
+					// The state reloads when the link changed, which updates this row
+					scope.launch {
+						manager.recheck()
+						checking = false
+					}
+				}
+			}
+		} else copyAction(ClipData.newPlainText(heading, caption)),
+		modifier = Modifier.focusKey("je_about_seerr"),
+	)
+}
+
+/**
+ * Administrators: "Import Jellyfin users into Seerr" (`POST jellyseerr/import-users`), so nobody has to sign in to Seerr.
+ * The caption tells the outcome ("3 users imported into Seerr.") or the server's refusal (it allows one run per 30 s).
+ */
+@Composable
+private fun SeerrImportRow() {
+	val manager = koinInject<SeerrLinkManager>()
+	val context = LocalContext.current
+	val scope = rememberCoroutineScope()
+	var running by remember { mutableStateOf(false) }
+	var outcome by remember { mutableStateOf<String?>(null) }
+
+	ListButton(
+		headingContent = { Text(stringResource(R.string.je_seerr_link_import)) },
+		captionContent = {
+			Text(
+				when {
+					running -> stringResource(R.string.je_seerr_link_importing)
+					else -> outcome ?: stringResource(R.string.je_seerr_link_import_caption)
+				}
+			)
+		},
+		onClick = {
+			if (running) return@ListButton
+			running = true
+			outcome = null
+			scope.launch {
+				outcome = attempt { manager.importUsers() }.fold(
+					onSuccess = { SeerrLinkTexts.importResult(context, it) },
+					onFailure = { SeerrLinkTexts.importFailure(context, it) },
+				)
+				running = false
+			}
+		},
+		modifier = Modifier.focusKey("je_about_seerr_import"),
+	)
 }
 
 /** A read-only info row; selecting it copies the value, or runs [onClick] (e.g. a retry) when given. */

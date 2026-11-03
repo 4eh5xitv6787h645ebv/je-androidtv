@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.ui.seerr
 
 import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -58,7 +59,11 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrDetails
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkKind
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrMediaStatus
 import org.jellyfin.androidtv.enhanced.seerr.SeerrPartialRequestSettings
 import org.jellyfin.androidtv.enhanced.seerr.SeerrQuota
@@ -95,6 +100,7 @@ class SeerrDetailsFragment : Fragment() {
 
 	private val seerrRepository by inject<SeerrRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
+	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
@@ -233,7 +239,8 @@ class SeerrDetailsFragment : Fragment() {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Failed to load Seerr details")
-				state.value = state.value.copy(loading = false, busy = false, error = getString(R.string.je_error_generic))
+				val context = context ?: return@launch
+				state.value = state.value.copy(loading = false, busy = false, error = seerrError(context, err) ?: getString(R.string.je_error_generic))
 			}
 		}
 	}
@@ -394,7 +401,13 @@ class SeerrDetailsFragment : Fragment() {
 				}
 
 				if (!ui.enhanced.seerrUsable) {
-					Text(stringResource(R.string.je_seerr_unavailable), color = secondaryTextColor())
+					// Why, when it's the user's Seerr link (not linked, blocked, unreachable)
+					val link = SeerrLink.kind(ui.enhanced)
+					Text(
+						text = if (link == SeerrLinkKind.OFF || link == SeerrLinkKind.LINKED) stringResource(R.string.je_seerr_unavailable)
+						else SeerrErrors.forLink(link, ui.enhanced.isAdmin).text.resolve(),
+						color = secondaryTextColor(),
+					)
 				}
 
 				ui.quota?.let { quota ->
@@ -674,6 +687,15 @@ class SeerrDetailsFragment : Fragment() {
 		)
 	}
 
+	/**
+	 * A failed Seerr call as a sentence ("not linked" in the TV's own words), or null for the caller's fallback. A call
+	 * that says the account isn't in Seerr reloads a state that still says linked.
+	 */
+	private fun seerrError(context: Context, err: Throwable): String? {
+		if (SeerrErrors.isUnlinked(err)) seerrLinkManager.onUnlinkedError()
+		return SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin)
+	}
+
 	private fun toast(text: String, long: Boolean = false) {
 		val context = context ?: return
 		Toast.makeText(context, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
@@ -689,7 +711,8 @@ class SeerrDetailsFragment : Fragment() {
 				throw err
 			} catch (err: EnhancedApi.EnhancedApiException) {
 				Timber.w(err, "Seerr request failed")
-				toast(getString(R.string.je_request_failed, "HTTP ${err.status}"), long = true)
+				val context = context ?: return@launch
+				toast(getString(R.string.je_request_failed, seerrError(context, err) ?: "HTTP ${err.status}"), long = true)
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr request failed")
 				toast(getString(R.string.je_request_failed, err.message ?: ""), long = true)

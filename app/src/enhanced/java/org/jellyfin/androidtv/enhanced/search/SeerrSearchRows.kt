@@ -1,16 +1,25 @@
 package org.jellyfin.androidtv.enhanced.search
 
 import android.content.Context
+import android.widget.Toast
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.DiffCallback
 import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkKind
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkActions
+import org.jellyfin.androidtv.enhanced.ui.seerr.resolve
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.presentation.MutableObjectAdapter
 import org.koin.core.component.KoinComponent
@@ -29,6 +38,8 @@ class SeerrSearchRows(
 	private val rowsAdapter: MutableObjectAdapter<Row>,
 ) : KoinComponent {
 	private val navigationRepository by inject<NavigationRepository>()
+	private val enhancedRepository by inject<EnhancedRepository>()
+	private val seerrLinkManager by inject<SeerrLinkManager>()
 
 	private var session: SeerrSearchSession? = null
 	private var state = SeerrSearchState()
@@ -58,7 +69,7 @@ class SeerrSearchRows(
 
 	private fun render(newState: SeerrSearchState) {
 		state = newState
-		mediaAdapter.setItems(rowItems(newState), cardDiff)
+		mediaAdapter.setItems(rowItems(newState.copy(error = newState.error?.let(::presentError))), cardDiff)
 		collectionsAdapter.setItems(newState.collections, cardDiff)
 		peopleAdapter.setItems(newState.people, cardDiff)
 		placeRows()
@@ -104,10 +115,46 @@ class SeerrSearchRows(
 				SeerrSearchDestinations.results(item.query, context.getString(R.string.je_search_results_title, item.query))
 			)
 
-			is SeerrSearchError -> session?.retry()
+			is SeerrSearchError -> onErrorClicked()
 			else -> return false
 		}
 		return true
+	}
+
+	/**
+	 * The error card's text, on one line: "not linked" in the TV's own words (the session keeps only the server's
+	 * message, so the plugin's fixed `unlinked` text is recognised), anything else as the server said it.
+	 */
+	private fun presentError(error: SeerrSearchError): SeerrSearchError = when {
+		SeerrErrors.isUnlinkedMessage(error.serverMessage) -> SeerrSearchError(
+			context.getString(
+				if (enhancedRepository.current.isAdmin) R.string.je_seerr_link_unlinked_short_admin
+				else R.string.je_seerr_link_unlinked_short
+			)
+		)
+		else -> SeerrSearchError(SeerrErrors.sentence(error.serverMessage))
+	}
+
+	/**
+	 * Retry the failed search. When the account isn't in Seerr, administrators import Jellyfin users first (the outcome
+	 * in a toast); everyone else gets the full explanation in a toast.
+	 */
+	private fun onErrorClicked() {
+		val unlinked = SeerrErrors.isUnlinkedMessage(state.error?.serverMessage)
+		if (!unlinked) {
+			session?.retry()
+			return
+		}
+		seerrLinkManager.onUnlinkedError()
+		val isAdmin = enhancedRepository.current.isAdmin
+		val scope = (context as? LifecycleOwner)?.lifecycleScope
+		if (isAdmin && scope != null) {
+			SeerrLinkActions.importUsers(scope, context, seerrLinkManager) { session?.retry() }
+		} else {
+			val text = SeerrErrors.forLink(SeerrLinkKind.UNLINKED, isAdmin).text.resolve(context)
+			Toast.makeText(context, text, Toast.LENGTH_LONG).show()
+			session?.retry()
+		}
 	}
 
 	/**

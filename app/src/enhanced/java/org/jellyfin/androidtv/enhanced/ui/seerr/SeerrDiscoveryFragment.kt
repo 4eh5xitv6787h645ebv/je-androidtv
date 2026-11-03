@@ -34,6 +34,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSort
@@ -68,6 +71,8 @@ class SeerrDiscoveryFragment : Fragment() {
 	private enum class Filter { ALL, MOVIES, TV }
 
 	private val seerrRepository by inject<SeerrRepository>()
+	private val enhancedRepository by inject<EnhancedRepository>()
+	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val navigationRepository by inject<NavigationRepository>()
 
 	private lateinit var source: SeerrSource
@@ -191,7 +196,9 @@ class SeerrDiscoveryFragment : Fragment() {
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr discovery failed")
 				// Leave hasMore set so Retry (or scrolling) can try the same page again
-				status.value = getString(R.string.je_error_generic)
+				val context = context ?: return@launch
+				if (SeerrErrors.isUnlinked(err)) seerrLinkManager.onUnlinkedError()
+				status.value = SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin) ?: getString(R.string.je_error_generic)
 				failed.value = true
 			}
 		}

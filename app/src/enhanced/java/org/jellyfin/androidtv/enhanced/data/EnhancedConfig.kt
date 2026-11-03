@@ -133,13 +133,18 @@ data class EnhancedUserSettings(
 	@SerialName("IsAdmin") val isAdmin: Boolean? = null,
 )
 
-/** `GET /JellyfinEnhanced/jellyseerr/user-status`. */
+/**
+ * `GET /JellyfinEnhanced/jellyseerr/user-status`. [reason] is `linked`, `unlinked`, `blocked`, `unreachable`,
+ * `disabled` or `no_user`; null when the call itself failed. See `seerr/SeerrLink.kt` for how the app presents it.
+ */
 @Serializable
 data class SeerrUserStatus(
 	val active: Boolean = false,
 	val userFound: Boolean = false,
 	val reason: String? = null,
 	val canRequestAdvanced: Boolean = false,
+	/** The Seerr user id (as a string) the plugin resolved for the signed-in Jellyfin user, when linked. */
+	val jellyseerrUserId: String? = null,
 ) {
 	val linked get() = active && userFound
 }
