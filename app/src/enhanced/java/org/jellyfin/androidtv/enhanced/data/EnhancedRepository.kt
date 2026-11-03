@@ -27,7 +27,8 @@ import java.util.UUID
 
 /**
  * Loads and caches the Jellyfin Enhanced feature flags for the signed-in user. The state is reset whenever the
- * user changes and reloaded lazily by [ensureLoaded].
+ * user changes and reloaded lazily by [ensureLoaded]. The first load of a session always fetches the plugin
+ * configuration afresh, so a session (a saved-token login included) never starts with a document fetched before it.
  *
  * A loaded state is refreshed in the background once it is older than [STALE_AFTER_MS], when the app returns to the
  * foreground ([processLifecycle]) or when a screen asks for it, so an admin's change to the plugin configuration
@@ -87,6 +88,8 @@ class EnhancedRepository(
 					if (loadedFor != userId) {
 						loadedFor = null
 						_state.value = EnhancedState()
+						// Features read public-config directly too: none of them may get the previous session's copy
+						enhancedApi.invalidatePublicConfig()
 					}
 				}
 				if (userId != null) ensureLoaded()
@@ -133,7 +136,8 @@ class EnhancedRepository(
 		val hiddenSettingsAtStart = hiddenSettingsRevision
 		attemptedAt = clock()
 		val newState = try {
-			fetch(userId, fresh = force)
+			// The first load for this user (a new session) never adopts a cached copy
+			fetch(userId, fresh = force || loadedFor != userId)
 		} catch (err: CancellationException) {
 			throw err
 		} catch (err: Exception) {

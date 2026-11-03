@@ -7,7 +7,10 @@ import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
+import io.mockk.verify
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,13 +27,15 @@ class EnhancedRepositoryTest : FunSpec({
 
 	class Fixture {
 		val api = mockk<EnhancedApi>()
-		private val user = mockk<UserDto> {
+		val user = mockk<UserDto> {
 			every { id } returns UUID.fromString("c799f011-678d-4423-bd7c-07d24c672de8")
 			every { policy } returns null
 		}
-		private val users = mockk<UserRepository> { every { currentUser } returns MutableStateFlow(user) }
+		val currentUser = MutableStateFlow<UserDto?>(user)
+		private val users = mockk<UserRepository> { every { currentUser } returns this@Fixture.currentUser }
 
 		init {
+			every { api.invalidatePublicConfig() } just runs
 			// Optional parts of the state are missing; only public-config decides availability
 			coEvery { api.get(any(), any()) } throws EnhancedApi.EnhancedApiException(404, "not found")
 			coEvery { api.getText(any(), any()) } throws EnhancedApi.EnhancedApiException(404, "not found")
@@ -162,7 +167,8 @@ class EnhancedRepositoryTest : FunSpec({
 		fixture.now += 1
 		fixture.repository.ensureLoaded().config.hiddenContentEnabled shouldBe false
 		withTimeout(5_000) { fixture.repository.state.first { it.config.hiddenContentEnabled } }
-		coVerify(exactly = 1) { fixture.api.publicConfig(true) }
+		// The session's first load and the refresh both bypass the shared public-config cache
+		coVerify(exactly = 2) { fixture.api.publicConfig(true) }
 	}
 
 	test("returning to the foreground refreshes only a stale state") {
@@ -224,5 +230,26 @@ class EnhancedRepositoryTest : FunSpec({
 
 		val refreshed = withTimeout(5_000) { fixture.repository.state.first { it.config.jellyseerrEnabled } }
 		refreshed.userSettings shouldBe saved
+	}
+
+	test("a new session, a restored saved-token login included, starts with a fresh configuration") {
+		val fixture = Fixture()
+		// The shared cache still holds a copy fetched before the session; only a fresh read gets the current one
+		coEvery { fixture.api.publicConfig(false) } returns json.parseToJsonElement("""{"SpoilerBlurEnabled":true}""")
+		coEvery { fixture.api.publicConfig(true) } returns json.parseToJsonElement("""{"SpoilerBlurEnabled":true,"JellyseerrEnabled":true}""")
+		fixture.repository.ensureLoaded().config.jellyseerrEnabled shouldBe true
+
+		// Signed out, then the saved token restores the same user (same server, same token: same cache key)
+		fixture.currentUser.value = null
+		withTimeout(5_000) { fixture.repository.state.first { !it.available } }
+		coEvery { fixture.api.publicConfig(true) } returns json.parseToJsonElement("""{"SpoilerBlurEnabled":true,"HiddenContentEnabled":true}""")
+		fixture.currentUser.value = fixture.user
+		val restored = withTimeout(5_000) { fixture.repository.state.first { it.available } }
+		restored.config.hiddenContentEnabled shouldBe true
+		restored.config.jellyseerrEnabled shouldBe false
+
+		coVerify(exactly = 0) { fixture.api.publicConfig(false) }
+		// The shared copy is dropped too, for features that read public-config themselves
+		verify(atLeast = 1) { fixture.api.invalidatePublicConfig() }
 	}
 })

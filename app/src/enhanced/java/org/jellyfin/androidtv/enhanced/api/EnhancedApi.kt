@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.api
 
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
@@ -33,10 +34,15 @@ import kotlin.coroutines.resumeWithException
  * (`/JellyfinEnhanced/...`). It reuses the SDK's base URL and authorization header, so every call is
  * made as the signed-in user. Paths without a leading slash are relative to [BASE]; paths with one are
  * ordinary Jellyfin routes.
+ *
+ * Every call takes its server and credentials from the client when it is made, before it suspends: the shared client
+ * is updated in place on an account switch, and a call started as one user must not be sent as the next.
  */
 class EnhancedApi(
 	private val api: ApiClient,
 	private val jellyfin: Jellyfin,
+	/** Where request bodies are encoded and responses parsed; replaced in tests. */
+	private val parseDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
 	companion object {
 		const val BASE = "/JellyfinEnhanced"
@@ -99,6 +105,7 @@ class EnhancedApi(
 			httpClientOptions = api.httpClientOptions,
 		),
 		jellyfin = jellyfin,
+		parseDispatcher = parseDispatcher,
 	)
 
 	/** An authenticated Jellyfin image URL. Keep [tag] as returned by the server: the plugin encodes state in it. */
@@ -120,64 +127,85 @@ class EnhancedApi(
 	/** A GET of [PUBLIC_CONFIG] without a query is answered by [publicConfig], so every feature shares one fetch. */
 	suspend fun get(path: String, query: Map<String, Any?> = emptyMap()): JsonElement =
 		if (path == PUBLIC_CONFIG && query.isEmpty()) publicConfig()
-		else request(HttpMethod.GET, path, query, null)
+		else request(HttpMethod.GET, target(path, query), null)
 
 	/**
 	 * The plugin's `public-config`, reused for [PUBLIC_CONFIG_TTL_MS] per server and access token (concurrent callers
-	 * share one request). [fresh] always fetches and replaces the shared copy, for an explicit reload. Failures are
-	 * never cached.
+	 * share one request). [fresh] always fetches and replaces the shared copy, for an explicit reload or a new
+	 * session. Failures are never cached.
 	 */
-	suspend fun publicConfig(fresh: Boolean = false): JsonElement =
-		publicConfigCache.get({ "${api.baseUrl}|${api.accessToken}" }, fresh) { request(HttpMethod.GET, PUBLIC_CONFIG, emptyMap(), null) }
+	suspend fun publicConfig(fresh: Boolean = false): JsonElement {
+		val target = target(PUBLIC_CONFIG, emptyMap())
+		return publicConfigCache.get(target.session, fresh) { request(HttpMethod.GET, target, null) }
+	}
+
+	/**
+	 * Forget the shared `public-config`, for a session change: the next read fetches it, and a fetch already running
+	 * is not kept. Needed even for the same server and token (a saved-token login that restores the previous session),
+	 * where the cache key alone can't tell the sessions apart.
+	 */
+	fun invalidatePublicConfig() = publicConfigCache.invalidate()
 
 	suspend fun post(path: String, body: JsonObject? = null, query: Map<String, Any?> = emptyMap()): JsonElement =
-		request(HttpMethod.POST, path, query, body ?: JsonObject(emptyMap()))
+		request(HttpMethod.POST, target(path, query), body ?: JsonObject(emptyMap()))
 
 	/** POST with any JSON body (the plugin's bulk routes take arrays). */
 	suspend fun postRaw(path: String, body: JsonElement, query: Map<String, Any?> = emptyMap()): JsonElement =
-		request(HttpMethod.POST, path, query, body)
+		request(HttpMethod.POST, target(path, query), body)
 
 	suspend fun delete(path: String, query: Map<String, Any?> = emptyMap()): JsonElement =
-		request(HttpMethod.DELETE, path, query, null)
+		request(HttpMethod.DELETE, target(path, query), null)
 
 	/** GET a route that returns plain text (such as `version`) or where the caller needs headers/status. */
 	suspend fun getText(path: String, query: Map<String, Any?> = emptyMap()): TextResponse =
-		call(HttpMethod.GET, path, query, null)
+		call(HttpMethod.GET, target(path, query), null)
+
+	/** The URL and credentials of one call, read from the client synchronously when the call is made. */
+	private class Target(val fullPath: String, val url: String, val authorization: String, val session: String)
 
 	/**
-	 * A JSON call. Encoding the body and parsing the response run on [Dispatchers.Default]: most callers are on Main
+	 * Capture where and as whom a call goes. The public methods evaluate this before their first suspension, so a call
+	 * waiting for [parseDispatcher] (or for the `public-config` lock) when the user switches accounts still goes to the
+	 * server and user that made it. Authentication is the same header the SDK sends, built from this client's (possibly
+	 * pinned) token and client/device info.
+	 */
+	private fun target(path: String, query: Map<String, Any?>): Target {
+		val fullPath = if (path.startsWith("/")) path else "$BASE/$path"
+		return Target(
+			fullPath = fullPath,
+			url = api.createUrl(fullPath, emptyMap(), query.filterValues { it != null }, false),
+			authorization = AuthorizationHeaderBuilder.buildHeader(
+				api.clientInfo.name,
+				api.clientInfo.version,
+				api.deviceInfo.id,
+				api.deviceInfo.name,
+				api.accessToken,
+			),
+			session = "${api.baseUrl}|${api.accessToken}",
+		)
+	}
+
+	/**
+	 * A JSON call. Encoding the body and parsing the response run on [parseDispatcher]: most callers are on Main
 	 * (lifecycleScope), and some responses (calendars, request lists, review pages) are large.
 	 */
-	private suspend fun request(method: HttpMethod, path: String, query: Map<String, Any?>, body: JsonElement?): JsonElement =
-		withContext(Dispatchers.Default) { parse(call(method, path, query, body)) }
+	private suspend fun request(method: HttpMethod, target: Target, body: JsonElement?): JsonElement =
+		withContext(parseDispatcher) { parse(call(method, target, body)) }
 
 	private fun parse(response: TextResponse): JsonElement =
 		if (response.text.isBlank()) JsonNull else json.parseToJsonElement(response.text)
 
 	/**
 	 * Plain OkHttp transport: the SDK's `request()` throws on non-2xx responses and discards the body, but the
-	 * plugin's error bodies carry the code and message the UI needs. Authentication is the same header the SDK
-	 * sends, built from this client's (possibly pinned) token and client/device info. Cancelling the calling coroutine
-	 * cancels the request, so a screen that is left (or reloads) doesn't keep obsolete calls running.
+	 * plugin's error bodies carry the code and message the UI needs. The URL and credentials come from [target], never
+	 * from the (shared, mutable) client. Cancelling the calling coroutine cancels the request, so a screen that is left
+	 * (or reloads) doesn't keep obsolete calls running.
 	 */
-	private suspend fun call(
-		method: HttpMethod,
-		path: String,
-		query: Map<String, Any?>,
-		body: JsonElement?,
-	): TextResponse {
-		val fullPath = if (path.startsWith("/")) path else "$BASE/$path"
-		val url = api.createUrl(fullPath, emptyMap(), query.filterValues { it != null }, false)
-		val authorization = AuthorizationHeaderBuilder.buildHeader(
-			api.clientInfo.name,
-			api.clientInfo.version,
-			api.deviceInfo.id,
-			api.deviceInfo.name,
-			api.accessToken,
-		)
+	private suspend fun call(method: HttpMethod, target: Target, body: JsonElement?): TextResponse {
+		val fullPath = target.fullPath
 		val request = Request.Builder()
-			.url(url)
-			.header("Authorization", authorization)
+			.url(target.url)
+			.header("Authorization", target.authorization)
 			.header("Accept", "application/json")
 			.method(
 				method.name,
@@ -235,8 +263,9 @@ class EnhancedApi(
 
 /**
  * One cached JSON document for one session key (server + access token), with concurrent fetches coalesced: callers
- * wait for the request in flight instead of starting their own. The key is read again after the fetch, so a document
- * fetched while the shared client switched accounts is returned but not kept.
+ * wait for the request in flight instead of starting their own. The caller's fetch must be made as [get]'s key (the
+ * session captured with it), so an entry is always the document of the session it is filed under. [invalidate] drops
+ * the entry, and a fetch that started before it is returned to its caller but not kept.
  */
 internal class PublicConfigCache(
 	private val ttlMs: Long,
@@ -246,20 +275,28 @@ internal class PublicConfigCache(
 
 	private val mutex = Mutex()
 
-	@Volatile
+	/** Guards [entry] and [generation] together, so [invalidate] can't land between a fetch's check and its store. */
+	private val lock = Any()
 	private var entry: Entry? = null
+	private var generation = 0L
 
-	private fun valid(key: String): JsonElement? =
+	private fun valid(key: String): JsonElement? = synchronized(lock) {
 		entry?.takeIf { it.key == key && clock() - it.at in 0 until ttlMs }?.value
+	}
 
-	suspend fun get(key: () -> String, fresh: Boolean, fetch: suspend () -> JsonElement): JsonElement {
-		if (!fresh) valid(key())?.let { return it }
+	fun invalidate() = synchronized(lock) {
+		generation++
+		entry = null
+	}
+
+	suspend fun get(key: String, fresh: Boolean, fetch: suspend () -> JsonElement): JsonElement {
+		if (!fresh) valid(key)?.let { return it }
 		return mutex.withLock {
-			val before = key()
 			// Someone else fetched it while we waited
-			if (!fresh) valid(before)?.let { return@withLock it }
+			if (!fresh) valid(key)?.let { return@withLock it }
+			val startedIn = synchronized(lock) { generation }
 			fetch().also { value ->
-				entry = if (key() == before) Entry(before, clock(), value) else null
+				synchronized(lock) { if (generation == startedIn) entry = Entry(key, clock(), value) }
 			}
 		}
 	}
