@@ -55,7 +55,7 @@ class BookmarkAction(
 			val existing = attempt { playbackBookmarks.forItem(item.id) }
 				.onFailure { Timber.w(it, "Could not read bookmarks") }
 				.getOrDefault(emptyList())
-			if (existing.isEmpty()) save(context, item, positionMs)
+			if (existing.isEmpty()) save(videoPlayerAdapter, context, item, positionMs)
 			else showList(owner, playbackController, videoPlayerAdapter, context, view, item, positionMs, existing)
 		}
 	}
@@ -78,7 +78,7 @@ class BookmarkAction(
 				menu.add(0, index + 1, index + 1, PlaybackBookmarkLogic.menuLabel(entry.bookmark))
 			}
 			setOnMenuItemClickListener { menuItem ->
-				if (menuItem.itemId == ADD_ID) owner.lifecycleScope.launch { save(context, item, positionMs) }
+				if (menuItem.itemId == ADD_ID) owner.lifecycleScope.launch { save(videoPlayerAdapter, context, item, positionMs) }
 				else entries.getOrNull(menuItem.itemId - 1)?.let {
 					playbackController.seek(PlaybackBookmarkLogic.positionMs(it.bookmark.timestampSeconds))
 				}
@@ -100,7 +100,7 @@ class BookmarkAction(
 		menu.show()
 	}
 
-	private suspend fun save(context: Context, item: BaseItemDto, positionMs: Long) {
+	private suspend fun save(videoPlayerAdapter: VideoPlayerAdapter, context: Context, item: BaseItemDto, positionMs: Long) {
 		if (saving) return
 		saving = true
 		val time = BookmarkLogic.formatTimestamp(PlaybackBookmarkLogic.seconds(positionMs))
@@ -110,12 +110,19 @@ class BookmarkAction(
 			saving = false
 		}
 		result.onSuccess {
-			Toast.makeText(context, context.getString(R.string.je_playback_bookmark_saved, time), Toast.LENGTH_SHORT).show()
+			notify(videoPlayerAdapter, context, context.getString(R.string.je_playback_bookmark_saved, time), error = false)
 		}.onFailure { err ->
 			Timber.w(err, "Failed to save bookmark")
 			val reason = err.serverMessage ?: context.getString(R.string.je_error_generic)
-			Toast.makeText(context, context.getString(R.string.je_playback_bookmark_failed, reason), Toast.LENGTH_LONG).show()
+			notify(videoPlayerAdapter, context, context.getString(R.string.je_playback_bookmark_failed, reason), error = true)
 		}
+	}
+
+	/** The player's own overlay toast when the enhancer is attached to this screen, a system toast otherwise. */
+	private fun notify(videoPlayerAdapter: VideoPlayerAdapter, context: Context, text: String, error: Boolean) {
+		val enhancer = videoPlayerAdapter.masterOverlayFragment.view?.getTag(R.id.je_playback_enhancer) as? PlaybackEnhancer
+		if (enhancer != null) enhancer.showToast(text, error)
+		else Toast.makeText(context, text, if (error) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
 	}
 
 	fun dismissPopup() {

@@ -169,10 +169,12 @@ object JeShapes {
 /** WCAG contrast helpers, used by the tests that keep the palette honest and by callers picking text on art. */
 object JeContrast {
 	/** Relative luminance of an opaque colour (alpha is ignored). */
-	fun luminance(color: Color): Double {
-		fun channel(value: Float): Double = if (value <= 0.03928f) value / 12.92 else ((value + 0.055) / 1.055).pow(2.4)
-		return 0.2126 * channel(color.red) + 0.7152 * channel(color.green) + 0.0722 * channel(color.blue)
-	}
+	fun luminance(color: Color): Double =
+		0.2126 * linearize(color.red) + 0.7152 * linearize(color.green) + 0.0722 * linearize(color.blue)
+
+	/** One sRGB channel (0–1) to linear light, with the sRGB standard's 0.04045 breakpoint (continuous there). */
+	internal fun linearize(value: Float): Double =
+		if (value <= 0.04045f) value / 12.92 else ((value + 0.055) / 1.055).pow(2.4)
 
 	/** [foreground] composited over an opaque [background]. */
 	fun composite(foreground: Color, background: Color): Color {

@@ -141,8 +141,8 @@ fun PageHeader(
 
 /**
  * A full-bleed backdrop (spec §4): centre-cropped, with the two background-coloured scrims drawn once per size
- * (left → right for the text column, top → bottom for the rows below). Text on it belongs in the left 38 % or on
- * [JeColors.surfaceOverArt]. Request the image at ≤ 1280 px wide. [blurHash] shows while it loads (and is all that
+ * (left → right for the text column, top → bottom for the rows below). Text on it belongs in the left
+ * [HeroScrimEnd] of the screen (at least 75 % background over the art there) or on [JeColors.surfaceOverArt]. Request the image at ≤ 1280 px wide. [blurHash] shows while it loads (and is all that
  * shows when [url] is null). [dim] darkens the whole image further, for pages that put lists on top.
  */
 @Composable
@@ -167,8 +167,8 @@ fun Backdrop(
 					val bg = JeColors.background
 					val horizontal = Brush.horizontalGradient(
 						0f to bg.copy(alpha = 0.96f),
-						0.38f to bg.copy(alpha = 0.75f),
-						0.75f to bg.copy(alpha = 0.15f),
+						HeroScrimEnd to bg.copy(alpha = 0.75f),
+						0.82f to bg.copy(alpha = 0.15f),
 						1f to bg.copy(alpha = 0f),
 					)
 					val vertical = Brush.verticalGradient(
@@ -195,7 +195,8 @@ fun Backdrop(
  * stays so D-pad up always has somewhere to go.
  *
  * Without [below] (Catch Up) the hero sits at the bottom of the screen. [topEnd] holds controls at the top right
- * under the toolbar (Catch Up's filter chips); [aside] is drawn over the whole screen for decorations such as the
+ * under the toolbar (Catch Up's count and filter chips), on a [JeColors.surfaceOverArt] panel so they stay readable
+ * on bright art; [aside] is drawn over the whole screen for decorations such as the
  * up-next stack (align it yourself). Items in [below] set their own horizontal padding, so rows can scroll edge to
  * edge. [belowClipGap] moves the edge where scrolled rows are clipped that far below the hero (taken from the
  * rows' top padding, so the unscrolled layout stays the same), keeping a half-scrolled row clear of the action labels.
@@ -225,6 +226,9 @@ fun HeroScaffold(
 						modifier = Modifier
 							.align(Alignment.End)
 							.padding(end = JeSpace.pageHorizontal)
+							// Nothing else darkens the top right, where the art is often brightest
+							.background(JeColors.surfaceOverArt, JeShapes.container)
+							.padding(horizontal = 12.dp, vertical = 6.dp)
 							.focusRestorer()
 							.focusGroup(),
 						horizontalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
@@ -313,8 +317,14 @@ fun HeroHeader(
 	}
 }
 
-/** Text width of a hero: the part of the screen the horizontal scrim keeps dark enough. */
-private const val HeroTextWidth = 0.62f
+/**
+ * Text width of a hero, as a fraction of the width between the page margins. With the margins it must end inside
+ * [HeroScrimEnd] so long titles and overviews keep 4.5:1 over bright art (checked in `JeContrastTest`).
+ */
+internal const val HeroTextWidth = 0.52f
+
+/** Where the backdrop's horizontal scrim stops being at least 75 % background, as a fraction of the screen width. */
+internal const val HeroScrimEnd = 0.56f
 
 /** The hero title: 48 sp on one line, 40 sp once it wraps, never more than two lines. */
 @Composable

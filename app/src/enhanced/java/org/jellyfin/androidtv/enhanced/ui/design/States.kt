@@ -115,7 +115,8 @@ fun EmptyState(
 
 /**
  * A centred error (spec §6.11): warning icon, a generic title, the server's [message] (when it sent one) and a
- * focused Retry, plus an optional [secondary] action (Back, "Open settings"…).
+ * focused Retry, plus an optional [secondary] action (Back, "Open settings"…). [retrying] shows a spinner on Retry
+ * while it runs, keeping the focus there.
  */
 @Composable
 fun ErrorState(
@@ -123,6 +124,7 @@ fun ErrorState(
 	onRetry: () -> Unit,
 	modifier: Modifier = Modifier,
 	secondary: EmptyAction? = null,
+	retrying: Boolean = false,
 ) {
 	val retryFocus = remember { FocusRequester() }
 	StateLayout(
@@ -134,7 +136,7 @@ fun ErrorState(
 		body = message,
 	) {
 		Row(horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap)) {
-			JeButton(text = stringResource(R.string.je_design_retry), onClick = onRetry, modifier = Modifier.focusRequester(retryFocus))
+			JeButton(text = stringResource(R.string.je_design_retry), onClick = onRetry, busy = retrying, modifier = Modifier.focusRequester(retryFocus))
 			if (secondary != null) JeButton(text = secondary.label, onClick = secondary.onClick)
 		}
 		LaunchedEffect(Unit) { runCatching { retryFocus.requestFocus() } }

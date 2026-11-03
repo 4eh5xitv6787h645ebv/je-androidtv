@@ -56,10 +56,10 @@ Resources: strings in `res/values/je_design.xml` (`je_design_*`), icons `res/dra
 | `MediaCard(imageUrl, title, onClick?, subtitle?, aspect, width, badge?, progress?, onMenu?, blurHash?, fallbackIcon?, imageAlpha)` | `Cards.kt` | Compose rows: cast, up-next (onClick null = decorative), reviews, Discover tiles. |
 | `HubTile(icon, title, description, onClick, count?)` | `Cards.kt` | Hub grid (3 columns, 16 dp gaps). |
 | `SeasonCard(name, onClick?, episodes?, status?, imageUrl?)` | `Cards.kt` | Seerr details season row. |
-| `JeTabRow(tabs: List<TabSpec(label, count?)>, selected, onSelect)` | `Chips.kt` | Page tabs; selects on click. |
+| `JeTabRow(tabs: List<TabSpec(label, count?)>, selected, onSelect)` | `Chips.kt` | Page tabs; selects on click; scrolls sideways when wider than the page. |
 | `FilterChip(label, selected, onClick, count?, leadingIcon?, trailingIcon?)` | `Chips.kt` | Filters and toggles. |
 | `ChoiceChip(label, options, selected, onSelect)` | `Chips.kt` | "Where: All ▾" popover choice. |
-| `ChipRow { }`, `ChipSeparator()` | `Chips.kt` | Chip row with focus restore; divider before toggle chips. |
+| `ChipRow { }`, `ChipSeparator()` | `Chips.kt` | Chip row with focus restore, scrolling sideways (focused chip kept in view; no extra `horizontalScroll` needed); divider before toggle chips. |
 | `InfoChip(text, leading?: InfoLeading.Dot/Icon/Image, overArt)` | `Chips.kt` | Non-focusable facts: ratings, awards, providers. |
 | `StatusBadge(status, text?, compact)` / `StatusBadge(spec)`, `StatusRibbon(spec)` | `Chips.kt` | Status labels; poster-bottom band. |
 | `JeButton(text, onClick, icon?, enabled, busy, onLongClick?)` | `Buttons.kt` | Every text button (one style; first = primary). |
@@ -67,7 +67,7 @@ Resources: strings in `res/values/je_design.xml` (`je_design_*`), icons `res/dra
 | `LabeledIconButton(icon, label, onClick, enabled, busy)`, `ActionRow(primary, secondary: List<LabeledIconButtonSpec>)` | `Buttons.kt` | Hero action rows (B layout). |
 | `LoadStateContent(state, empty?, emptyMessage, emptyAction, emptyBody?, emptyIcon?, loading: SkeletonShape) { }` | `States.kt` | Same leading signature as `ui.hub.LoadStateContent`: swap the import. |
 | `EmptyState(title, icon?, body?, action = Back)` | `States.kt` | Empty pages, with a focusable action. |
-| `ErrorState(message?, onRetry, secondary?)`, `ErrorRow(message?, onRetry)` | `States.kt` | Load errors (Retry focused); inline error at the end of paged lists. |
+| `ErrorState(message?, onRetry, secondary?, retrying)`, `ErrorRow(message?, onRetry)` | `States.kt` | Load errors (Retry focused, spinner while `retrying`); inline error at the end of paged lists. |
 | `LoadingSkeleton(shape = Rows/Grid/Hero, delayMillis = 300)`, `LoadingRow()` | `States.kt` | Loading (the spec's "LoadingState"); "loading more" footer. |
 | `Notice(kind, title, body?, icon?, inline, trailing?)` | `Notice.kt` | Banners and inline notices; not focusable. |
 | `JeDialog(visible, onDismissRequest, title, body?, actions?, content?)`, `JeConfirmDialog(...)`, `JeChoiceDialog(options, selected, multi, captions?, ...)` | `JeDialog.kt` | All dialogs (replace `AlertDialog`). |

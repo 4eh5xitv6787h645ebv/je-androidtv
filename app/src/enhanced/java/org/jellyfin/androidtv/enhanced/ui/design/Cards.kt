@@ -129,9 +129,10 @@ fun MediaCard(
 }
 
 /**
- * A hub page tile (spec §6.5): 40 dp icon circle, title, two-line description, optional [count] pill
- * ("3 pending", "47 left"). Inversion focus. Lay them out three per row with 16 dp gaps; give the grid row
- * `Modifier.height(IntrinsicSize.Min)` and the tiles `fillMaxHeight()` if descriptions differ in length.
+ * A hub page tile (spec §6.5): 40 dp icon circle, title with an optional [count] pill after it ("3 pending",
+ * "47 left"), and the description under both, using the full text width and up to three lines (the tile's minimum
+ * height fits three, so tiles of a grid row line up whatever their copy). Inversion focus. Lay them out three per
+ * row with 16 dp gaps.
  * Counts must come from already cached state: never block the hub on them.
  */
 @Composable
@@ -150,7 +151,8 @@ fun HubTile(
 		shape = JeShapes.container,
 		interactionSource = focus.interactionSource,
 		colors = ButtonDefaults.colors(containerColor = JeColors.surface, contentColor = JeColors.onSurface),
-		modifier = modifier.heightIn(min = 93.dp),
+		// 16 dp padding, 24 sp title, 2 dp gap and three 18 sp caption lines
+		modifier = modifier.heightIn(min = 112.dp),
 	) {
 		Row(
 			// Fills a taller tile (equal-height grid rows) and keeps the content centred in it
@@ -174,30 +176,33 @@ fun HubTile(
 				)
 			}
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(
-					text = title,
-					style = LocalTextStyle.current.merge(JeType.cardTitle.copy(color = Color.Unspecified, fontSize = 18.sp, lineHeight = 24.sp)),
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
-				)
+				// The badge shares the title's line so the description keeps the full width below it
+				Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+					Text(
+						text = title,
+						style = LocalTextStyle.current.merge(JeType.cardTitle.copy(color = Color.Unspecified, fontSize = 18.sp, lineHeight = 24.sp)),
+						maxLines = 1,
+						overflow = TextOverflow.Ellipsis,
+						modifier = Modifier.weight(1f),
+					)
+					if (count != null) {
+						Text(
+							text = count,
+							style = JeType.badge,
+							color = JeColors.onSurface,
+							maxLines = 1,
+							modifier = Modifier
+								.background(JeColors.countPill, JeShapes.pill)
+								.padding(horizontal = 8.dp, vertical = 2.dp),
+						)
+					}
+				}
 				Text(
 					text = description,
 					style = JeType.caption,
 					color = if (focus.focused) scheme.onButtonFocused else JeColors.textSecondary,
-					maxLines = 2,
+					maxLines = 3,
 					overflow = TextOverflow.Ellipsis,
-				)
-			}
-			if (count != null) {
-				Text(
-					text = count,
-					style = JeType.badge,
-					color = JeColors.onSurface,
-					maxLines = 1,
-					modifier = Modifier
-						.align(Alignment.Top)
-						.background(JeColors.countPill, JeShapes.pill)
-						.padding(horizontal = 8.dp, vertical = 2.dp),
 				)
 			}
 		}

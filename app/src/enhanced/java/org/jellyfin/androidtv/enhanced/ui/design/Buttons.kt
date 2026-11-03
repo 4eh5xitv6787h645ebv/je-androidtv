@@ -34,8 +34,8 @@ import org.jellyfin.androidtv.ui.base.button.IconButton
  * every text button, as upstream: emphasis comes from order (first) and the icon, never from a light resting fill
  * (light means focus). Destructive actions use the same style and confirm through [JeConfirmDialog].
  *
- * [busy] swaps the icon for a spinner and ignores clicks without disabling the button, so a focused button never
- * loses the focus mid-action.
+ * [busy] swaps the icon for a spinner and ignores clicks and long clicks without disabling the button, so a focused
+ * button never loses the focus mid-action.
  */
 @Composable
 fun JeButton(
@@ -50,7 +50,7 @@ fun JeButton(
 ) {
 	Button(
 		onClick = { if (!busy) onClick() },
-		onLongClick = onLongClick,
+		onLongClick = onLongClick?.let { longClick -> { if (!busy) longClick() } },
 		enabled = enabled,
 		interactionSource = interactionSource,
 		modifier = modifier,

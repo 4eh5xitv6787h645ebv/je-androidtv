@@ -7,4 +7,6 @@
         <item quantity="one">%1$d pending</item>
         <item quantity="other">%1$d pending</item>
     </plurals>
+    <!-- The hub when the plugin's configuration couldn't be read (server error, timeout) -->
+    <string name="je_hub_config_unavailable">Couldn\'t reach Jellyfin Enhanced on this server.</string>
 </resources>

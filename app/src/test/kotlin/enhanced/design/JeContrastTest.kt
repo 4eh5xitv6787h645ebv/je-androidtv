@@ -5,6 +5,7 @@ import io.kotest.assertions.withClue
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.doubles.plusOrMinus
 import io.kotest.matchers.doubles.shouldBeGreaterThanOrEqual
+import io.kotest.matchers.floats.shouldBeLessThanOrEqual
 import io.kotest.matchers.shouldBe
 import org.jellyfin.androidtv.ui.base.colorScheme
 
@@ -15,6 +16,15 @@ class JeContrastTest : FunSpec({
 	test("contrast ratio of the extremes") {
 		JeContrast.ratio(Color.White, Color.Black) shouldBe (21.0 plusOrMinus 0.01)
 		JeContrast.ratio(JeColors.surface, JeColors.surface) shouldBe (1.0 plusOrMinus 0.001)
+	}
+
+	test("channels linearize with the sRGB breakpoint 0.04045") {
+		// 0.04 sits between WCAG 2.0's old 0.03928 and sRGB's 0.04045: still on the linear segment
+		JeContrast.linearize(0.04f) shouldBe (0.04 / 12.92 plusOrMinus 1e-7)
+		// Both segments meet at the breakpoint, so there is no jump either side of it
+		JeContrast.linearize(0.04045f) shouldBe (JeContrast.linearize(0.04046f) plusOrMinus 1e-6)
+		JeContrast.linearize(0.5f) shouldBe (0.2140 plusOrMinus 1e-3)
+		JeContrast.linearize(1f) shouldBe (1.0 plusOrMinus 1e-6)
 	}
 
 	test("translucent text is composited over its background") {
@@ -58,5 +68,15 @@ class JeContrastTest : FunSpec({
 		val scrimmed = JeContrast.composite(JeColors.background.copy(alpha = 0.75f), Color.White)
 		JeContrast.ratio(JeColors.onSurface, scrimmed) shouldBeGreaterThanOrEqual 4.5
 		JeContrast.ratio(JeColors.onSurface, JeContrast.composite(JeColors.surfaceOverArt, Color.White)) shouldBeGreaterThanOrEqual 4.5
+		// Unselected chips and captions on the hero's top-right panel (Catch Up)
+		JeContrast.ratio(JeColors.textSecondary, JeContrast.composite(JeColors.surfaceOverArt, Color.White)) shouldBeGreaterThanOrEqual 4.5
+	}
+
+	test("the hero text column ends inside the dark part of the scrim") {
+		// 960 dp is the TV's width in dp; the column starts and ends at the page margins
+		val width = 960f
+		val margin = JeSpace.pageHorizontal.value
+		val textEnd = (margin + HeroTextWidth * (width - 2 * margin)) / width
+		textEnd shouldBeLessThanOrEqual HeroScrimEnd
 	}
 })
