@@ -1,6 +1,10 @@
 package org.jellyfin.androidtv.enhanced.api
 
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -45,6 +49,14 @@ class EnhancedApi(
 		}
 
 		private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+		/** How long a fetched `public-config` is reused for the same server and access token. */
+		const val PUBLIC_CONFIG_TTL_MS = 60_000L
+
+		const val PUBLIC_CONFIG = "public-config"
+
+		/** Shared by all instances (pinned copies included), so every feature's read of the config costs one request. */
+		private val publicConfigCache = PublicConfigCache(PUBLIC_CONFIG_TTL_MS)
 
 		/** One client for all instances (pinned copies included): connection pool and threads are shared. */
 		private val httpClient: OkHttpClient by lazy {
@@ -105,22 +117,39 @@ class EnhancedApi(
 	suspend fun currentUserId(): String? =
 		(get("/Users/Me") as? JsonObject)?.get("Id")?.let { (it as? JsonPrimitive)?.content }
 
+	/** A GET of [PUBLIC_CONFIG] without a query is answered by [publicConfig], so every feature shares one fetch. */
 	suspend fun get(path: String, query: Map<String, Any?> = emptyMap()): JsonElement =
-		parse(call(HttpMethod.GET, path, query, null))
+		if (path == PUBLIC_CONFIG && query.isEmpty()) publicConfig()
+		else request(HttpMethod.GET, path, query, null)
+
+	/**
+	 * The plugin's `public-config`, reused for [PUBLIC_CONFIG_TTL_MS] per server and access token (concurrent callers
+	 * share one request). [fresh] always fetches and replaces the shared copy, for an explicit reload. Failures are
+	 * never cached.
+	 */
+	suspend fun publicConfig(fresh: Boolean = false): JsonElement =
+		publicConfigCache.get({ "${api.baseUrl}|${api.accessToken}" }, fresh) { request(HttpMethod.GET, PUBLIC_CONFIG, emptyMap(), null) }
 
 	suspend fun post(path: String, body: JsonObject? = null, query: Map<String, Any?> = emptyMap()): JsonElement =
-		parse(call(HttpMethod.POST, path, query, body ?: JsonObject(emptyMap())))
+		request(HttpMethod.POST, path, query, body ?: JsonObject(emptyMap()))
 
 	/** POST with any JSON body (the plugin's bulk routes take arrays). */
 	suspend fun postRaw(path: String, body: JsonElement, query: Map<String, Any?> = emptyMap()): JsonElement =
-		parse(call(HttpMethod.POST, path, query, body))
+		request(HttpMethod.POST, path, query, body)
 
 	suspend fun delete(path: String, query: Map<String, Any?> = emptyMap()): JsonElement =
-		parse(call(HttpMethod.DELETE, path, query, null))
+		request(HttpMethod.DELETE, path, query, null)
 
 	/** GET a route that returns plain text (such as `version`) or where the caller needs headers/status. */
 	suspend fun getText(path: String, query: Map<String, Any?> = emptyMap()): TextResponse =
 		call(HttpMethod.GET, path, query, null)
+
+	/**
+	 * A JSON call. Encoding the body and parsing the response run on [Dispatchers.Default]: most callers are on Main
+	 * (lifecycleScope), and some responses (calendars, request lists, review pages) are large.
+	 */
+	private suspend fun request(method: HttpMethod, path: String, query: Map<String, Any?>, body: JsonElement?): JsonElement =
+		withContext(Dispatchers.Default) { parse(call(method, path, query, body)) }
 
 	private fun parse(response: TextResponse): JsonElement =
 		if (response.text.isBlank()) JsonNull else json.parseToJsonElement(response.text)
@@ -201,5 +230,37 @@ class EnhancedApi(
 				continuation.resume(result)
 			}
 		})
+	}
+}
+
+/**
+ * One cached JSON document for one session key (server + access token), with concurrent fetches coalesced: callers
+ * wait for the request in flight instead of starting their own. The key is read again after the fetch, so a document
+ * fetched while the shared client switched accounts is returned but not kept.
+ */
+internal class PublicConfigCache(
+	private val ttlMs: Long,
+	private val clock: () -> Long = System::currentTimeMillis,
+) {
+	private class Entry(val key: String, val at: Long, val value: JsonElement)
+
+	private val mutex = Mutex()
+
+	@Volatile
+	private var entry: Entry? = null
+
+	private fun valid(key: String): JsonElement? =
+		entry?.takeIf { it.key == key && clock() - it.at in 0 until ttlMs }?.value
+
+	suspend fun get(key: () -> String, fresh: Boolean, fetch: suspend () -> JsonElement): JsonElement {
+		if (!fresh) valid(key())?.let { return it }
+		return mutex.withLock {
+			val before = key()
+			// Someone else fetched it while we waited
+			if (!fresh) valid(before)?.let { return@withLock it }
+			fetch().also { value ->
+				entry = if (key() == before) Entry(before, clock(), value) else null
+			}
+		}
 	}
 }

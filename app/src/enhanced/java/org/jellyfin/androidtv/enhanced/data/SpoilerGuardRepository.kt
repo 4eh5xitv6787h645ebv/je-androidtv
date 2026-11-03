@@ -84,6 +84,7 @@ data class SpoilerGuardState(
  */
 class SpoilerGuardRepository(
 	private val enhancedApi: EnhancedApi,
+	private val clock: () -> Long = System::currentTimeMillis,
 ) {
 	enum class Kind(val path: String, val nameField: String?) {
 		SERIES("series", null),
@@ -93,11 +94,14 @@ class SpoilerGuardRepository(
 
 	private val prefsMutex = Mutex()
 
-	private class Cached(val token: String?, val generation: Long, val state: SpoilerGuardState)
+	private class Cached(val token: String?, val generation: Long, val at: Long, val state: SpoilerGuardState)
 
 	/** The last state read with [getState], with the token and [generation] it was read with, for synchronous menus. */
 	@Volatile
 	private var cached: Cached? = null
+
+	/** Serializes [getState] reads, so concurrent callers share one request instead of each starting their own. */
+	private val readMutex = Mutex()
 
 	private val writes = AtomicLong()
 
@@ -121,6 +125,9 @@ class SpoilerGuardRepository(
 		/** Pref keys of the per-category overrides, in the web settings panel's order. */
 		const val PREF_SKIP_DISABLE_CONFIRM = "SkipDisableConfirm"
 		const val PREF_USE_ADVANCED_CATEGORIES = "UseAdvancedCategories"
+
+		/** How long [getState] reuses a state it read: about one screen load, so its parts share one request. */
+		const val SHARE_WINDOW_MS = 2_000L
 
 		/** The guarded library titles of [state], by kind, newest first. Entries are read leniently. */
 		fun entries(state: SpoilerGuardState): List<SpoilerGuardEntry> = listOf(
@@ -173,13 +180,22 @@ class SpoilerGuardRepository(
 		private fun JsonObject?.string(key: String) = (this?.get(key) as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotEmpty() }
 	}
 
-	suspend fun getState(): SpoilerGuardState {
+	/**
+	 * The user's whole Spoiler Guard document. Concurrent reads (the contributors of one screen, a menu and a row)
+	 * share one request, and a state read less than [SHARE_WINDOW_MS] ago by this account is reused while no write in
+	 * this client ([generation]) has started since. Errors are thrown and never cached.
+	 */
+	suspend fun getState(): SpoilerGuardState = readMutex.withLock {
 		val token = enhancedApi.accessToken
+		cached?.takeIf { it.token == token && it.generation == generation && clock() - it.at in 0 until SHARE_WINDOW_MS }
+			?.let { return@withLock it.state }
+
 		val before = generation
 		val state = EnhancedApi.json.decodeFromJsonElement<SpoilerGuardState>(enhancedApi.get("spoiler-blur/series"))
-		// A write started or ended during the read: the response may be the old state, so don't remember it
-		if (generation == before) cached = Cached(token, before, state)
-		return state
+		// A write started or ended during the read (the response may be the old state) or the account changed: use it
+		// this once, don't remember it
+		if (generation == before && enhancedApi.accessToken == token) cached = Cached(token, before, clock(), state)
+		state
 	}
 
 	/** The state last read by [getState] for the current account, if any. May be stale; re-read before acting. */
@@ -207,8 +223,13 @@ class SpoilerGuardRepository(
 	 * [changes] (null = follow the server) and posts it all back, through a client pinned to one user. Nothing is
 	 * written if the read fails.
 	 */
-	suspend fun setPrefs(changes: Map<String, Boolean?>): SpoilerGuardPrefs = prefsMutex.withLock {
+	suspend fun setPrefs(changes: Map<String, Boolean?>): SpoilerGuardPrefs {
+		// Pinned before waiting: a change queued behind another one still saves for the user who made it
 		val api = enhancedApi.pinned()
+		return prefsMutex.withLock { setPrefs(api, changes) }
+	}
+
+	private suspend fun setPrefs(api: EnhancedApi, changes: Map<String, Boolean?>): SpoilerGuardPrefs {
 		val current = api.get("spoiler-blur/user-prefs") as? JsonObject
 			?: throw IllegalStateException("Unexpected Spoiler Guard preferences response")
 		val fields = current.toMutableMap()
@@ -222,7 +243,7 @@ class SpoilerGuardRepository(
 		}
 		val updated = JsonObject(fields)
 		write { api.post("spoiler-blur/user-prefs", updated) }
-		EnhancedApi.json.decodeFromJsonElement(updated)
+		return EnhancedApi.json.decodeFromJsonElement(updated)
 	}
 
 	fun isGuarded(state: SpoilerGuardState, kind: Kind, id: UUID): Boolean {

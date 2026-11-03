@@ -219,16 +219,18 @@ class HiddenContentRepository(
 
 	/**
 	 * Hide [id] from Continue Watching or Next Up only (the plugin's "Remove from …" action). The plugin edits the
-	 * document itself, so the call waits for (and blocks) client-side edits.
+	 * document itself, so the call waits for (and blocks) client-side edits. The client is pinned before waiting, so a
+	 * call queued behind an edit still acts as the user who asked even if the account changes meanwhile.
 	 */
-	suspend fun removeFromHome(id: UUID, surface: HomeSurface) = settingsRepository.withDocumentLock {
-		enhancedApi.post("${surface.path}/hide/$id")
-		Unit
+	suspend fun removeFromHome(id: UUID, surface: HomeSurface) {
+		val api = enhancedApi.pinned()
+		settingsRepository.withDocumentLock { api.post("${surface.path}/hide/$id") }
 	}
 
-	suspend fun undoRemoveFromHome(id: UUID, surface: HomeSurface) = settingsRepository.withDocumentLock {
-		enhancedApi.delete("${surface.path}/hide/$id")
-		Unit
+	/** Undo [removeFromHome], with the same pinning. */
+	suspend fun undoRemoveFromHome(id: UUID, surface: HomeSurface) {
+		val api = enhancedApi.pinned()
+		settingsRepository.withDocumentLock { api.delete("${surface.path}/hide/$id") }
 	}
 
 	/**
