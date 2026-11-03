@@ -25,6 +25,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -47,9 +48,11 @@ import org.jellyfin.androidtv.enhanced.ui.design.JeColors
 import org.jellyfin.androidtv.enhanced.ui.design.JePlayerStyle
 import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
 import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
 import org.jellyfin.androidtv.enhanced.ui.design.OsdInfo
 import org.jellyfin.androidtv.enhanced.ui.design.OverlayAgeRating
 import org.jellyfin.androidtv.enhanced.ui.design.OverlayPanel
+import org.jellyfin.androidtv.enhanced.ui.design.OverlayToast
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.util.getTimeFormatter
@@ -80,11 +83,20 @@ data class RatingBadgeModel(val itemId: UUID, val rating: String, val genres: Li
 /** Community and critic ratings for the OSD title area. */
 data class OsdRatingModel(val communityRating: Float?, val criticPercent: Int?)
 
+/** A short message over the video (bookmark saved or not); [id] tells two identical messages apart. */
+data class PlayerToastModel(val id: Long, val text: String, val error: Boolean)
+
 private val OverlayBlack = Color.Black
 
-/** Everything the enhancer draws over the video: the pause screen and the rating badge. */
+/** Everything the enhancer draws over the video: the pause screen, the rating badge and the [toast]. */
 @Composable
-fun PlaybackOverlay(pause: PauseScreenModel?, badge: RatingBadgeModel?, osdShowing: Boolean = false) {
+fun PlaybackOverlay(
+	pause: PauseScreenModel?,
+	badge: RatingBadgeModel?,
+	osdShowing: Boolean = false,
+	toast: PlayerToastModel? = null,
+	onToastTimeout: (PlayerToastModel) -> Unit = {},
+) {
 	Box(Modifier.fillMaxSize()) {
 		AnimatedVisibility(
 			visible = badge != null && pause == null && !osdShowing,
@@ -102,8 +114,27 @@ fun PlaybackOverlay(pause: PauseScreenModel?, badge: RatingBadgeModel?, osdShowi
 		AnimatedVisibility(visible = pause != null, enter = fadeIn(tween(FADE_MS)), exit = ExitTransition.None) {
 			pause?.let { PauseScreen(it) }
 		}
+
+		// Keep the last message while it fades out; a new one starts its own timer
+		var shownToast by remember { mutableStateOf(toast) }
+		if (toast != null) shownToast = toast
+		shownToast?.let { shown ->
+			key(shown.id) {
+				OverlayToast(
+					visible = toast != null,
+					text = shown.text,
+					kind = if (shown.error) NoticeKind.Error else NoticeKind.Info,
+					durationMillis = if (shown.error) ERROR_TOAST_MS else TOAST_MS,
+					onTimeout = { onToastTimeout(shown) },
+					modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = JeSpace.pageBottom),
+				)
+			}
+		}
 	}
 }
+
+private const val TOAST_MS = 3_000L
+private const val ERROR_TOAST_MS = 5_000L
 
 private const val FADE_MS = 400
 

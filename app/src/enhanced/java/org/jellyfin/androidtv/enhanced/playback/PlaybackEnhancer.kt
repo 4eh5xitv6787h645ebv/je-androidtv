@@ -34,8 +34,8 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 import java.util.UUID
 
 /**
- * The Jellyfin Enhanced additions to one video player screen: the pause screen, the playback-start rating badge and
- * the community/critic ratings in the OSD title area. Created by [EnhancedPlayback.attach] once the plugin is known
+ * The Jellyfin Enhanced additions to one video player screen: the pause screen, the playback-start rating badge,
+ * the community/critic ratings in the OSD title area and the Bookmark action's messages. Created by [EnhancedPlayback.attach] once the plugin is known
  * to be available, and bound to the player fragment's view lifecycle.
  *
  * It reads the player through [PlaybackController]'s public state on a short tick (faster while paused) instead of
@@ -58,6 +58,8 @@ internal class PlaybackEnhancer(
 	private var osdRating by mutableStateOf<OsdRatingModel?>(null)
 	/** The upstream OSD is up: the badge hides so it never covers the title area. */
 	private var osdShowing by mutableStateOf(false)
+	private var toast by mutableStateOf<PlayerToastModel?>(null)
+	private var toastId = 0L
 
 	private var lastBadgeItemId: UUID? = null
 	private var badgeJob: Job? = null
@@ -70,7 +72,11 @@ internal class PlaybackEnhancer(
 	fun attach() {
 		val context = root.context
 		root.addView(nonFocusable(ComposeView(context).apply {
-			setContent { JellyfinTheme { PlaybackOverlay(pause, badge, osdShowing) } }
+			setContent {
+				JellyfinTheme {
+					PlaybackOverlay(pause, badge, osdShowing, toast, onToastTimeout = { shown -> if (toast == shown) toast = null })
+				}
+			}
 		}), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
 		// The OSD title area (logo or title, then the episode line); the ratings go on a line of their own below it
@@ -94,6 +100,11 @@ internal class PlaybackEnhancer(
 				}
 			}
 		}
+	}
+
+	/** Shows [text] over the video for a few seconds (the Bookmark action's result), in place of a system toast. */
+	fun showToast(text: String, error: Boolean = false) {
+		toast = PlayerToastModel(++toastId, text, error)
 	}
 
 	/** Observes a remote key; returns true only for the Back press that closes the pause screen. */
