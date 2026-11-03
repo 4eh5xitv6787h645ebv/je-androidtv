@@ -340,27 +340,32 @@ data class SeerrIssuePage(
 /**
  * What to withhold from *arr queue and history rows while Spoiler Guard is on. Those rows come from Sonarr/Radarr,
  * outside the plugin's filtering, and only carry TMDB ids, so protected titles can't be matched exactly: as soon as
- * the user protects any show, episode titles are dropped from every Sonarr row, and as soon as they protect any
- * movie or collection, Radarr posters are withheld. When the protection state couldn't be loaded, both are.
+ * the user protects any show, episode titles are dropped from every Sonarr row; as soon as they protect any show or
+ * collection, Sonarr posters are withheld; as soon as they protect any movie or collection, Radarr posters are. When
+ * the protection state couldn't be loaded, all of it is. A withheld poster of a library title can be replaced by the
+ * server's own (filtered) poster, see [RequestsRepository].
  */
 data class ArrSpoilerPolicy(
 	val stripEpisodeTitles: Boolean,
 	val withholdMoviePosters: Boolean,
+	val withholdShowPosters: Boolean = stripEpisodeTitles,
 	private val pendingTmdb: Set<String> = emptySet(),
 ) {
 	/** Whether a title opted in before it reached the library (`movie:603`, `tv:1399`). */
 	fun isPending(mediaType: String, tmdbId: Int?) = tmdbId != null && "$mediaType:$tmdbId" in pendingTmdb
 
 	companion object {
-		val NONE = ArrSpoilerPolicy(stripEpisodeTitles = false, withholdMoviePosters = false)
+		val NONE = ArrSpoilerPolicy(stripEpisodeTitles = false, withholdMoviePosters = false, withholdShowPosters = false)
 
 		/** [state] null with [enabled] means the state failed to load. */
 		fun of(enabled: Boolean, state: SpoilerGuardState?): ArrSpoilerPolicy = when {
 			!enabled -> NONE
-			state == null -> ArrSpoilerPolicy(stripEpisodeTitles = true, withholdMoviePosters = true)
+			state == null -> ArrSpoilerPolicy(stripEpisodeTitles = true, withholdMoviePosters = true, withholdShowPosters = true)
 			else -> ArrSpoilerPolicy(
 				stripEpisodeTitles = state.series.isNotEmpty(),
 				withholdMoviePosters = state.movies.isNotEmpty() || state.collections.isNotEmpty(),
+				// Collections can hold shows too
+				withholdShowPosters = state.series.isNotEmpty() || state.collections.isNotEmpty(),
 				pendingTmdb = state.pendingTmdb.keys,
 			)
 		}
@@ -372,25 +377,22 @@ data class ArrSpoilerPolicy(
 			subtitle?.let { EPISODE_TITLE.matchEntire(it)?.groupValues?.get(1) ?: it }
 	}
 
-	fun apply(item: QueueItem): QueueItem {
-		val movie = !item.isSonarr
-		val strip = !movie && (stripEpisodeTitles || isPending("tv", item.tmdbId))
-		val withhold = movie && (withholdMoviePosters || isPending("movie", item.tmdbId))
-		return item.copy(
-			subtitle = if (strip) withoutEpisodeTitle(item.subtitle) else item.subtitle,
-			posterUrl = if (withhold) null else item.posterUrl,
-		)
-	}
+	private fun stripsTitle(sonarr: Boolean, tmdbId: Int?) = sonarr && (stripEpisodeTitles || isPending("tv", tmdbId))
 
-	fun apply(item: HistoryItem): HistoryItem {
-		val movie = !item.isSonarr
-		val strip = !movie && (stripEpisodeTitles || isPending("tv", item.tmdbId))
-		val withhold = movie && (withholdMoviePosters || isPending("movie", item.tmdbId))
-		return item.copy(
-			subtitle = if (strip) withoutEpisodeTitle(item.subtitle) else item.subtitle,
-			posterUrl = if (withhold) null else item.posterUrl,
-		)
-	}
+	/** Whether the *arr poster of this row must not be shown. */
+	fun withholdsPoster(sonarr: Boolean, tmdbId: Int?) =
+		if (sonarr) withholdShowPosters || isPending("tv", tmdbId)
+		else withholdMoviePosters || isPending("movie", tmdbId)
+
+	fun apply(item: QueueItem): QueueItem = item.copy(
+		subtitle = if (stripsTitle(item.isSonarr, item.tmdbId)) withoutEpisodeTitle(item.subtitle) else item.subtitle,
+		posterUrl = if (withholdsPoster(item.isSonarr, item.tmdbId)) null else item.posterUrl,
+	)
+
+	fun apply(item: HistoryItem): HistoryItem = item.copy(
+		subtitle = if (stripsTitle(item.isSonarr, item.tmdbId)) withoutEpisodeTitle(item.subtitle) else item.subtitle,
+		posterUrl = if (withholdsPoster(item.isSonarr, item.tmdbId)) null else item.posterUrl,
+	)
 }
 
 /**

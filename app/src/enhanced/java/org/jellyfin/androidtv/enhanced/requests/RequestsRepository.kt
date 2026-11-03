@@ -4,6 +4,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
@@ -25,8 +27,8 @@ import java.time.LocalDate
 /**
  * Requests, watchlist, download queue/history and issues for the Requests page. All calls go through the plugin as
  * the signed-in user; the server decides what each user may see (own requests only, admin-only history…). The rows
- * are then filtered the way the web filters its Requests page: Hidden Content's "requests" surface, and Spoiler
- * Guard's artwork and episode-title protection.
+ * are then filtered the way the web filters its Requests page: Hidden Content's "requests" surface (on every tab,
+ * failing closed when the hidden list can't be read), and Spoiler Guard's artwork and episode-title protection.
  */
 class RequestsRepository(
 	private val enhancedApi: EnhancedApi,
@@ -51,6 +53,12 @@ class RequestsRepository(
 
 	/** Queue rows plus the *arr instances that failed; failures never blank the rows that did load. */
 	data class QueueResult(val entries: List<QueueEntry>, val errors: List<QueueError>)
+
+	/**
+	 * Hidden Content is on but the user's hidden list couldn't be read: the rows aren't shown at all, since showing
+	 * them unfiltered could bring back titles the user hid.
+	 */
+	class HiddenContentUnavailableException(cause: Throwable) : Exception("Hidden content unavailable", cause)
 
 	// Requests
 
@@ -92,9 +100,6 @@ class RequestsRepository(
 		}
 	}
 
-	/** Re-resolve posters of cards shown again (Spoiler Guard may have changed meanwhile). */
-	suspend fun refreshArtwork(cards: List<RequestCard>): List<RequestCard> = withArtwork(cards.map { it.request })
-
 	/** Approve a pending request. Not idempotent: never retried automatically. */
 	suspend fun approve(requestId: Int) {
 		enhancedApi.post("arr/requests/$requestId/approve")
@@ -109,11 +114,13 @@ class RequestsRepository(
 
 	suspend fun watchlist(page: Int): SeerrPage {
 		val response = EnhancedApi.json.decodeFromJsonElement<SeerrPage>(enhancedApi.get("jellyseerr/watchlist", mapOf("page" to page)))
-		return response.copy(results = seerrRepository.refreshLibraryArtwork(response.results))
+		val hidden = hiddenFilter()
+		val visible = response.results.filterNot { result ->
+			hidden.isHidden(result.id.takeIf { it > 0 }, result.mediaInfo?.jellyfinMediaId) ||
+				hidden.isHidden(null, result.mediaInfo?.jellyfinMediaId4k)
+		}
+		return response.copy(results = seerrRepository.refreshLibraryArtwork(visible))
 	}
-
-	/** Re-resolve library posters of watchlist titles shown again. */
-	suspend fun refreshWatchlistArtwork(results: List<SeerrResult>): List<SeerrResult> = seerrRepository.refreshLibraryArtwork(results)
 
 	/** Run the server's watchlist sync now (admins only, and only when the server has it turned on). */
 	suspend fun syncWatchlist(): WatchlistSyncResult =
@@ -125,9 +132,13 @@ class RequestsRepository(
 		val response = EnhancedApi.json.decodeFromJsonElement<QueueResponse>(enhancedApi.get("arr/queue"))
 		val hidden = hiddenFilter()
 		val spoilers = spoilerPolicy()
-		val items = response.items
-			.filterNot { hidden.isHidden(it.tmdbId, it.jellyfinMediaId) }
-			.map(spoilers::apply)
+		val visible = response.items.filterNot { hidden.isHidden(it.tmdbId, it.jellyfinMediaId) }
+		val items = withLibraryPosters(
+			items = visible.map(spoilers::apply),
+			withheld = { spoilers.withholdsPoster(it.isSonarr, it.tmdbId) },
+			result = { SeerrResult(id = it.tmdbId ?: 0, mediaType = if (it.isSonarr) "tv" else "movie", mediaInfo = it.jellyfinMediaId?.let { id -> SeerrMediaInfo(jellyfinMediaId = id) }) },
+			withPoster = { item, url -> item.copy(posterUrl = url) },
+		)
 		return QueueResult(groupQueue(items), response.errors)
 	}
 
@@ -138,16 +149,41 @@ class RequestsRepository(
 		if (!response.visible) return response
 		val hidden = hiddenFilter()
 		val spoilers = spoilerPolicy()
+		val visible = response.items.filterNot { hidden.isHidden(it.tmdbId, it.jellyfinMediaId) }
 		return response.copy(
-			items = response.items.filterNot { hidden.isHidden(it.tmdbId, it.jellyfinMediaId) }.map(spoilers::apply)
+			items = withLibraryPosters(
+				items = visible.map(spoilers::apply),
+				withheld = { spoilers.withholdsPoster(it.isSonarr, it.tmdbId) },
+				result = { SeerrResult(id = it.tmdbId ?: 0, mediaType = if (it.isSonarr) "tv" else "movie", mediaInfo = it.jellyfinMediaId?.let { id -> SeerrMediaInfo(jellyfinMediaId = id) }) },
+				withPoster = { item, url -> item.copy(posterUrl = url) },
+			)
 		)
+	}
+
+	/**
+	 * Rows whose *arr poster Spoiler Guard withheld get the server's own poster instead when they are library titles
+	 * (the server applies the protection to it); the rest stay without a poster.
+	 */
+	private suspend fun <T> withLibraryPosters(
+		items: List<T>,
+		withheld: (T) -> Boolean,
+		result: (T) -> SeerrResult,
+		withPoster: (T, String?) -> T,
+	): List<T> {
+		val candidates = items.indices.filter { withheld(items[it]) && result(items[it]).mediaInfo != null }
+		if (candidates.isEmpty()) return items
+		val resolved = seerrRepository.refreshLibraryArtwork(candidates.map { result(items[it]) })
+		val posters = candidates.zip(resolved) { index, artwork -> index to artwork.libraryPosterUrl.takeIf { artwork.libraryArtwork } }.toMap()
+		return items.mapIndexed { index, item -> if (index in posters) withPoster(item, posters[index]) else item }
 	}
 
 	// Issues
 
 	/**
 	 * Issues with their titles. Seerr's issue only carries the media's ids, so each title is looked up once per
-	 * [titleCache] (the screen's, so it never outlives the signed-in user). A failed lookup leaves the title out.
+	 * [titleCache] (the screen's, so it never outlives the signed-in user): several issues about the same title share
+	 * one lookup, and only a few run at a time. A failed lookup leaves the title out. Hidden titles are dropped by
+	 * their ids before any lookup, so a failed lookup can't let them through.
 	 */
 	suspend fun issues(filter: IssueFilter, page: Int, pageSize: Int, titleCache: MutableMap<String, SeerrResult?>): IssuesResult {
 		val response = EnhancedApi.json.decodeFromJsonElement<SeerrIssuePage>(
@@ -156,11 +192,16 @@ class RequestsRepository(
 				mapOf("take" to pageSize, "skip" to (page - 1) * pageSize, "filter" to filter.apiValue, "sort" to "added"),
 			)
 		)
-		val titles = coroutineScope {
-			response.results.map { issue -> async { issueTitle(issue, titleCache) } }.awaitAll()
+		val hidden = hiddenFilter()
+		val issues = response.results.filterNot { hidden.isHidden(it.media?.tmdbId, it.media?.jellyfinMediaId) }
+		val keys = issues.mapNotNull { issueTitleKey(it) }.distinct()
+		val lookups = Semaphore(MAX_TITLE_LOOKUPS)
+		val titlesByKey = coroutineScope {
+			keys.map { key -> async { key to lookups.withPermit { issueTitle(key, titleCache) } } }.awaitAll().toMap()
 		}
+		val titles = issues.map { issue -> issueTitleKey(issue)?.let { titlesByKey[it] } }
 		val withArtwork = seerrRepository.refreshLibraryArtwork(titles.map { it ?: SeerrResult(id = 0) })
-		val cards = response.results.zip(titles.zip(withArtwork)) { issue, (title, result) ->
+		val cards = issues.zip(titles.zip(withArtwork)) { issue, (title, result) ->
 			if (title == null) IssueCard(issue, null, null, null, issue.media?.mediaType)
 			else IssueCard(
 				issue = issue,
@@ -173,16 +214,24 @@ class RequestsRepository(
 		return IssuesResult(cards, response.pageInfo.pages)
 	}
 
-	private suspend fun issueTitle(issue: SeerrIssue, cache: MutableMap<String, SeerrResult?>): SeerrResult? {
+	private data class IssueTitleKey(val mediaType: String, val tmdbId: Int) {
+		override fun toString() = "$mediaType:$tmdbId"
+	}
+
+	private fun issueTitleKey(issue: SeerrIssue): IssueTitleKey? {
 		val mediaType = issue.media?.mediaType ?: return null
 		val tmdbId = issue.media.tmdbId ?: return null
-		val key = "$mediaType:$tmdbId"
-		synchronized(cache) { if (cache.containsKey(key)) return cache[key] }
+		return IssueTitleKey(mediaType, tmdbId)
+	}
+
+	private suspend fun issueTitle(key: IssueTitleKey, cache: MutableMap<String, SeerrResult?>): SeerrResult? {
+		val cacheKey = key.toString()
+		synchronized(cache) { if (cache.containsKey(cacheKey)) return cache[cacheKey] }
 		val result = try {
-			val details = seerrRepository.details(mediaType, tmdbId)
+			val details = seerrRepository.details(key.mediaType, key.tmdbId)
 			SeerrResult(
-				id = tmdbId,
-				mediaType = mediaType,
+				id = key.tmdbId,
+				mediaType = key.mediaType,
 				title = details.title,
 				name = details.name,
 				posterPath = details.posterPath,
@@ -194,25 +243,30 @@ class RequestsRepository(
 			throw err
 		} catch (err: Exception) {
 			// Not cached, so the next refresh tries again
-			Timber.w(err, "Issue title lookup failed for %s", key)
+			Timber.w(err, "Issue title lookup failed for %s", cacheKey)
 			return null
 		}
-		synchronized(cache) { cache[key] = result }
+		synchronized(cache) { cache[cacheKey] = result }
 		return result
 	}
 
 	// Filtering
 
-	/** Hidden Content's "requests" surface (`FilterRequests`, on by default). A failed lookup filters nothing. */
+	/**
+	 * Hidden Content's "requests" surface (`FilterRequests`, on by default). A failed lookup fails closed: it throws
+	 * [HiddenContentUnavailableException], so the tab shows an error with Retry instead of unfiltered rows.
+	 */
 	private suspend fun hiddenFilter(): HiddenRequestFilter {
-		if (!enhancedRepository.current.hiddenContent) return HiddenRequestFilter.NONE
+		// An unknown configuration counts as on: the list is read, and its failure fails closed like any other
+		val state = enhancedRepository.ensureLoaded()
+		if (!state.hiddenContent && !state.configUnavailable) return HiddenRequestFilter.NONE
 		val snapshot = try {
 			hiddenContentRepository.get()
 		} catch (err: CancellationException) {
 			throw err
 		} catch (err: Exception) {
 			Timber.w(err, "Failed to load hidden content")
-			return HiddenRequestFilter.NONE
+			throw HiddenContentUnavailableException(err)
 		}
 		val settings = snapshot.document["Settings"] as? JsonObject
 		val filterRequests = (settings?.get("FilterRequests") as? JsonPrimitive)?.booleanOrNull ?: true
@@ -241,6 +295,9 @@ class RequestsRepository(
 	}
 
 	companion object {
+		// Seerr title lookups for one page of issues running at the same time
+		private const val MAX_TITLE_LOOKUPS = 4
+
 		/** Today in the device's zone, for release labels. */
 		fun today(): LocalDate = LocalDate.now()
 

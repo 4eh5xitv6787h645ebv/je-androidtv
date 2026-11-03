@@ -111,4 +111,8 @@
     <!-- Shared -->
     <string name="je_requests_load_failed">Couldn\'t load this page (HTTP %1$d).</string>
     <string name="je_requests_refresh">Refresh</string>
+    <string name="je_requests_load_more">Load more</string>
+    <string name="je_requests_paused_empty">Nothing to show on the pages checked so far.</string>
+    <string name="je_requests_hidden_unavailable">Couldn\'t load your hidden content, so this list isn\'t shown.</string>
+    <string name="je_requests_working">Updating…</string>
 </resources>

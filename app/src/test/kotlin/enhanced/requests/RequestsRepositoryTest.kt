@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.requests
 
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
@@ -13,6 +14,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
@@ -21,6 +23,7 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.seerr.SeerrDetails
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 
@@ -91,11 +94,103 @@ class RequestsRepositoryTest : FunSpec({
 		fixture.repository.requests(RequestFilter.ALL, userOnly = false, page = 1, pageSize = 20).cards.size shouldBe 1
 	}
 
-	test("a failing Hidden Content lookup doesn't blank the requests") {
+	test("a failing Hidden Content lookup fails closed on every tab instead of showing unfiltered rows") {
 		val fixture = Fixture(state(EnhancedPublicConfig(hiddenContentEnabled = true)))
 		coEvery { fixture.api.get("arr/requests", any()) } returns json.parseToJsonElement("""{"requests":[{"id":1,"tmdbId":272}],"totalPages":1}""")
+		coEvery { fixture.api.get("jellyseerr/watchlist", any()) } returns json.parseToJsonElement("""{"page":1,"totalPages":1,"results":[{"id":272,"mediaType":"movie"}]}""")
+		coEvery { fixture.api.get("jellyseerr/issue", any()) } returns json.parseToJsonElement("""{"pageInfo":{"pages":1},"results":[]}""")
+		coEvery { fixture.api.get("arr/queue", any()) } returns json.parseToJsonElement("""{"items":[],"errors":[]}""")
+		coEvery { fixture.api.get("arr/history", any()) } returns json.parseToJsonElement("""{"items":[],"totalPages":1,"visible":true}""")
 		coEvery { fixture.hidden.get() } throws EnhancedApi.EnhancedApiException(500, "boom")
+
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.requests(RequestFilter.ALL, userOnly = false, page = 1, pageSize = 20) }
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.watchlist(1) }
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.issues(IssueFilter.ALL, 1, 20, HashMap()) }
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.queue() }
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.history(1, 30) }
+	}
+
+	test("an unknown configuration still reads the hidden list and fails closed when it can't") {
+		val fixture = Fixture(EnhancedState(configUnavailable = true))
+		coEvery { fixture.api.get("arr/requests", any()) } returns json.parseToJsonElement("""{"requests":[{"id":1,"tmdbId":272}],"totalPages":1}""")
+		coEvery { fixture.hidden.get() } throws EnhancedApi.EnhancedApiException(0, "offline")
+		coEvery { fixture.spoilers.getState() } returns SpoilerGuardState()
+		shouldThrow<RequestsRepository.HiddenContentUnavailableException> { fixture.repository.requests(RequestFilter.ALL, userOnly = false, page = 1, pageSize = 20) }
+	}
+
+	test("Hidden Content off: the hidden list isn't read") {
+		val fixture = Fixture(state())
+		coEvery { fixture.api.get("arr/requests", any()) } returns json.parseToJsonElement("""{"requests":[{"id":1,"tmdbId":272}],"totalPages":1}""")
 		fixture.repository.requests(RequestFilter.ALL, userOnly = false, page = 1, pageSize = 20).cards.size shouldBe 1
+		coVerify(exactly = 0) { fixture.hidden.get() }
+	}
+
+	test("the watchlist drops hidden titles by TMDB id and library id") {
+		val fixture = Fixture(state(EnhancedPublicConfig(hiddenContentEnabled = true)))
+		coEvery { fixture.api.get("jellyseerr/watchlist", any()) } returns json.parseToJsonElement(
+			"""{"page":1,"totalPages":3,"results":[
+				{"id":272,"mediaType":"movie","title":"Hidden by TMDB id"},
+				{"id":500,"mediaType":"tv","name":"Hidden by library id","mediaInfo":{"jellyfinMediaId":"F494BED9-1955-7E62-D08C-44EE252D877A"}},
+				{"id":603,"mediaType":"movie","title":"Shown"}
+			]}"""
+		)
+		coEvery { fixture.hidden.get() } returns HiddenContentRepository.Snapshot(
+			json.parseToJsonElement(
+				"""{"Settings":{"Enabled":true},"Items":{"a":{"ItemId":"zzz","TmdbId":"272"},"b":{"ItemId":"f494bed919557e62d08c44ee252d877a"}}}"""
+			).jsonObject
+		)
+		val page = fixture.repository.watchlist(1)
+		page.results.map { it.id } shouldContainExactly listOf(603)
+		page.totalPages shouldBe 3
+	}
+
+	test("issues drop hidden titles by their media ids even when the title lookup fails, and share lookups per title") {
+		val fixture = Fixture(state(EnhancedPublicConfig(hiddenContentEnabled = true)))
+		coEvery { fixture.api.get("jellyseerr/issue", any()) } returns json.parseToJsonElement(
+			"""{"pageInfo":{"pages":1},"results":[
+				{"id":1,"media":{"mediaType":"movie","tmdbId":272}},
+				{"id":2,"media":{"mediaType":"tv","tmdbId":1399,"jellyfinMediaId":"f494bed919557e62d08c44ee252d877a"}},
+				{"id":3,"media":{"mediaType":"movie","tmdbId":603}},
+				{"id":4,"media":{"mediaType":"movie","tmdbId":603}},
+				{"id":5,"media":{"mediaType":"tv","tmdbId":603}}
+			]}"""
+		)
+		coEvery { fixture.hidden.get() } returns HiddenContentRepository.Snapshot(
+			json.parseToJsonElement(
+				"""{"Settings":{"Enabled":true},"Items":{"a":{"ItemId":"zzz","TmdbId":"272"},"b":{"ItemId":"f494bed919557e62d08c44ee252d877a"}}}"""
+			).jsonObject
+		)
+		coEvery { fixture.seerr.details(any(), any()) } throws EnhancedApi.EnhancedApiException(500, "lookup failed")
+		coEvery { fixture.seerr.details("movie", 603) } returns SeerrDetails(id = 603, title = "The Matrix")
+
+		val result = fixture.repository.issues(IssueFilter.ALL, 1, 20, HashMap())
+
+		result.cards.map { it.issue.issueId } shouldContainExactly listOf(3, 4, 5)
+		result.cards.map { it.title } shouldContainExactly listOf("The Matrix", "The Matrix", null)
+		// Hidden titles are never looked up; the two issues about the same movie share one lookup
+		coVerify(exactly = 1) { fixture.seerr.details("movie", 603) }
+		coVerify(exactly = 1) { fixture.seerr.details("tv", 603) }
+		coVerify(exactly = 0) { fixture.seerr.details("movie", 272) }
+		coVerify(exactly = 0) { fixture.seerr.details("tv", 1399) }
+	}
+
+	test("withheld Sonarr posters of library titles fall back to the server's poster") {
+		val fixture = Fixture(state(EnhancedPublicConfig(spoilerBlurEnabled = true)))
+		coEvery { fixture.api.get("arr/queue", any()) } returns json.parseToJsonElement(
+			"""{"items":[
+				{"id":"1","source":"Sonarr","title":"In library","posterUrl":"tmdb-a","tmdbId":1,"jellyfinMediaId":"aaaa"},
+				{"id":"2","source":"Sonarr","title":"Not in library","posterUrl":"tmdb-b","tmdbId":2},
+				{"id":"3","source":"Radarr","title":"Movie","posterUrl":"tmdb-c","tmdbId":3}
+			],"errors":[]}"""
+		)
+		coEvery { fixture.spoilers.getState() } returns SpoilerGuardState(series = mapOf("x" to JsonPrimitive(true)))
+		val posters = fixture.repository.queue().entries.map { it.item.posterUrl }
+		posters shouldContainExactly listOf("server-poster", null, "tmdb-c")
+
+		coEvery { fixture.api.get("arr/history", any()) } returns json.parseToJsonElement(
+			"""{"items":[{"source":"Sonarr","title":"In library","posterUrl":"tmdb-a","tmdbId":1,"jellyfinMediaId":"aaaa","eventType":"imported"}],"totalPages":1,"visible":true}"""
+		)
+		fixture.repository.history(1, 30).items.single().posterUrl shouldBe "server-poster"
 	}
 
 	test("approve and decline post to the request id route without a retry") {
@@ -125,6 +220,7 @@ class RequestsRepositoryTest : FunSpec({
 			"""{"items":[{"id":"1","source":"Sonarr","title":"Show","subtitle":"S01E01 - Pilot","seasonNumber":1,"episodeNumber":1}],"errors":[]}"""
 		)
 		coEvery { fixture.spoilers.getState() } throws EnhancedApi.EnhancedApiException(0, "offline")
+		coEvery { fixture.hidden.get() } returns HiddenContentRepository.Snapshot(JsonObject(emptyMap()))
 		fixture.repository.queue().entries.single().item.subtitle shouldBe "S01E01"
 	}
 
@@ -218,6 +314,101 @@ class RequestsRepositoryTest : FunSpec({
 
 		loader.reload()
 		loader.state.value.items shouldContainExactly listOf("a")
+		scope.cancel()
+	}
+
+	test("the pager pauses after several fully filtered pages and offers more instead of ending") {
+		val scope = CoroutineScope(Dispatchers.Unconfined)
+		val requested = mutableListOf<Int>()
+		val loader = PagedLoader(scope, { "error" }, key = { it }) { page ->
+			requested += page
+			PagedLoader.Page(if (page == 7) listOf("late") else emptyList(), totalPages = 10)
+		}
+		loader.ensureStarted()
+		loader.state.value.items shouldBe emptyList()
+		loader.state.value.paused shouldBe true
+		loader.state.value.endReached shouldBe false
+		requested shouldContainExactly (1..PagedLoader.MAX_EMPTY_PAGES).toList()
+
+		loader.loadMore()
+		loader.state.value.paused shouldBe false
+		loader.state.value.items shouldContainExactly listOf("late")
+		scope.cancel()
+	}
+
+	test("a refresh re-fetches the loaded pages and swaps the rows in one go") {
+		val scope = CoroutineScope(Dispatchers.Unconfined)
+		var version = 1
+		val gate = CompletableDeferred<Unit>()
+		var gated = false
+		val requested = mutableListOf<Int>()
+		val loader = PagedLoader(scope, { it.message ?: "error" }, key = { it }) { page ->
+			requested += page
+			if (gated) gate.await()
+			PagedLoader.Page(listOf("v$version-p$page"), totalPages = 5)
+		}
+		loader.ensureStarted()
+		loader.loadMore()
+		loader.state.value.items shouldContainExactly listOf("v1-p1", "v1-p2")
+
+		version = 2
+		gated = true
+		loader.refresh()
+		// The old rows stay until every page is back
+		loader.state.value.items shouldContainExactly listOf("v1-p1", "v1-p2")
+		loader.state.value.loading shouldBe true
+		gate.complete(Unit)
+		loader.state.value.items shouldContainExactly listOf("v2-p1", "v2-p2")
+		loader.state.value.loading shouldBe false
+		requested shouldContainExactly listOf(1, 2, 1, 2)
+
+		// The next page continues after the refreshed ones
+		gated = false
+		loader.loadMore()
+		loader.state.value.items shouldContainExactly listOf("v2-p1", "v2-p2", "v2-p3")
+		scope.cancel()
+	}
+
+	test("invalidated rows refresh when shown again; a failed refresh keeps them") {
+		val scope = CoroutineScope(Dispatchers.Unconfined)
+		var fail = false
+		var version = 1
+		val loader = PagedLoader(scope, { it.message ?: "error" }, key = { it }) { _ ->
+			if (fail) throw IllegalStateException("offline")
+			PagedLoader.Page(listOf("v$version"), totalPages = 1)
+		}
+		loader.invalidate()
+		loader.stale shouldBe false
+		loader.show()
+		loader.state.value.items shouldContainExactly listOf("v1")
+		loader.show()
+		loader.state.value.items shouldContainExactly listOf("v1")
+
+		version = 2
+		loader.invalidate()
+		loader.stale shouldBe true
+		loader.show()
+		loader.stale shouldBe false
+		loader.state.value.items shouldContainExactly listOf("v2")
+
+		fail = true
+		loader.refresh()
+		loader.state.value.items shouldContainExactly listOf("v2")
+		loader.state.value.error shouldBe "offline"
+		scope.cancel()
+	}
+
+	test("focus is restored once, and only to a row that is still there") {
+		val scope = CoroutineScope(Dispatchers.Unconfined)
+		val loader = PagedLoader(scope, { "error" }, key = { it }) { _ -> PagedLoader.Page(listOf("a", "b"), totalPages = 1) }
+		loader.ensureStarted()
+		loader.requestFocusRestore() shouldBe false
+		loader.focusedKey = "b"
+		loader.requestFocusRestore() shouldBe true
+		loader.takeFocusRestore() shouldBe "b"
+		loader.takeFocusRestore() shouldBe null
+		loader.focusedKey = "gone"
+		loader.requestFocusRestore() shouldBe false
 		scope.cancel()
 	}
 

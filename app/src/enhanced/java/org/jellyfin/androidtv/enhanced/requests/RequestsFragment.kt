@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.requests
 
 import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
+import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -44,6 +45,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -91,6 +93,15 @@ class RequestsFragment : Fragment() {
 		private const val PAGE_SIZE = 20
 		private const val ISSUE_PAGE_SIZE = 20
 		private const val HISTORY_PAGE_SIZE = 30
+
+		private const val STATE_TAB = "tab"
+		private const val STATE_REQUEST_FILTER = "requestFilter"
+		private const val STATE_MINE_ONLY = "mineOnly"
+		private const val STATE_ISSUE_FILTER = "issueFilter"
+
+		// Approve/decline and the watchlist sync outlive the page: leaving it mid-call must neither cancel the write
+		// nor touch a fragment that is no longer attached (feedback goes through the application context)
+		private val writeScope = MainScope()
 	}
 
 	private val requestsRepository by inject<RequestsRepository>()
@@ -141,10 +152,18 @@ class RequestsFragment : Fragment() {
 	}
 
 	private var shownBefore = false
+	// Set when the page comes back from another screen: the focused card is focused again instead of the first tab
+	private var restoreCardFocus = false
 	private val linkRecovery = SeerrLinkRecovery()
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
+		savedInstanceState?.let { state ->
+			state.getString(STATE_TAB)?.let { name -> RequestsTab.entries.firstOrNull { it.name == name } }?.let { tab.value = it }
+			state.getString(STATE_REQUEST_FILTER)?.let { name -> RequestFilter.entries.firstOrNull { it.name == name } }?.let { requestFilter.value = it }
+			if (state.containsKey(STATE_MINE_ONLY)) mineOnly.value = state.getBoolean(STATE_MINE_ONLY)
+			state.getString(STATE_ISSUE_FILTER)?.let { name -> IssueFilter.entries.firstOrNull { it.name == name } }?.let { issueFilter.value = it }
+		}
 		// The link starting to work (by itself, or after an import or check from the notice): the page drops the
 		// notice the moment the state says linked, so the change is watched here rather than in the notice
 		lifecycleScope.launch {
@@ -152,10 +171,22 @@ class RequestsFragment : Fragment() {
 		}
 	}
 
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		outState.putString(STATE_TAB, tab.value.name)
+		outState.putString(STATE_REQUEST_FILTER, requestFilter.value.name)
+		mineOnly.value?.let { outState.putBoolean(STATE_MINE_ONLY, it) }
+		outState.putString(STATE_ISSUE_FILTER, issueFilter.value.name)
+	}
+
 	override fun onStart() {
 		super.onStart()
-		// Back from a details screen: Spoiler Guard may have changed there, so re-resolve library posters
-		if (shownBefore) refreshArtwork()
+		// Back from a details screen: a request, watchlist change, issue, hide or Spoiler Guard change there may have
+		// changed any tab. The current one refreshes now (keeping its rows and focus), the others when opened
+		if (shownBefore) {
+			listOf(requests, watchlist, history, issues).forEach { it.invalidate() }
+			open(tab.value)
+		}
 		shownBefore = true
 	}
 
@@ -164,11 +195,19 @@ class RequestsFragment : Fragment() {
 		val tabs = remember(state) { RequestsTab.available(state) }
 		val currentTab by tab.collectAsState()
 		val firstFocus = remember { FocusRequester() }
+		val restoring = remember {
+			// The grid of the current tab puts the focus back on the card that had it (see PagedGrid)
+			val restore = restoreCardFocus && pagedLoader(tab.value)?.requestFocusRestore() == true
+			restoreCardFocus = false
+			restore
+		}
 
 		LaunchedEffect(Unit) {
-			enhancedRepository.ensureLoaded()
+			val loaded = enhancedRepository.ensureLoaded()
+			// A restored tab the server no longer offers falls back to the first one
+			if (tab.value !in RequestsTab.available(loaded)) tab.value = RequestsTab.REQUESTS
 			open(tab.value)
-			runCatching { firstFocus.requestFocus() }
+			if (!restoring) runCatching { firstFocus.requestFocus() }
 		}
 
 		EnhancedScreen(
@@ -206,6 +245,12 @@ class RequestsFragment : Fragment() {
 		}
 	}
 
+	override fun onDestroyView() {
+		super.onDestroyView()
+		// The next view is the page coming back
+		restoreCardFocus = true
+	}
+
 	override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
 		super.onViewCreated(view, savedInstanceState)
 		// Poll the queue only while it is on screen and the page is in the foreground
@@ -238,13 +283,19 @@ class RequestsFragment : Fragment() {
 		if (!state.requests) return
 		if (mineOnly.value == null) mineOnly.value = state.config.downloadsFilterByUserRequests
 		when (value) {
-			RequestsTab.REQUESTS -> requests.ensureStarted()
-			RequestsTab.WATCHLIST -> watchlist.ensureStarted()
 			// The queue changes all the time: refresh it whenever it is opened
 			RequestsTab.QUEUE -> refreshQueue(silent = queue.value is LoadState.Ready)
-			RequestsTab.HISTORY -> history.ensureStarted()
-			RequestsTab.ISSUES -> issues.ensureStarted()
+			// Load the first page, or refresh rows a write made stale
+			else -> pagedLoader(value)?.show()
 		}
+	}
+
+	private fun pagedLoader(value: RequestsTab): PagedLoader<*>? = when (value) {
+		RequestsTab.REQUESTS -> requests
+		RequestsTab.WATCHLIST -> watchlist
+		RequestsTab.QUEUE -> null
+		RequestsTab.HISTORY -> history
+		RequestsTab.ISSUES -> issues
 	}
 
 	/**
@@ -252,13 +303,17 @@ class RequestsFragment : Fragment() {
 	 * generic one with the HTTP status. A call that says the account isn't in Seerr reloads a state that still says
 	 * linked, so the page turns into the link notice.
 	 */
-	private fun describe(err: Throwable): String {
+	private fun describe(err: Throwable): String = describe(context?.applicationContext, err)
+
+	/** [describe] with a context that outlives the page, for writes that finish after it closed. */
+	private fun describe(context: Context?, err: Throwable): String {
 		if (SeerrErrors.isUnlinked(err)) seerrLinkManager.onUnlinkedError()
-		val context = context ?: return RequestsRepository.serverMessage(err).orEmpty()
+		if (context == null) return RequestsRepository.serverMessage(err).orEmpty()
+		if (err is RequestsRepository.HiddenContentUnavailableException) return context.getString(R.string.je_requests_hidden_unavailable)
 		return SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin)
 			?: RequestsRepository.serverMessage(err)
-			?: (err as? EnhancedApi.EnhancedApiException)?.let { getString(R.string.je_requests_load_failed, it.status) }
-			?: getString(R.string.je_error_generic)
+			?: (err as? EnhancedApi.EnhancedApiException)?.let { context.getString(R.string.je_requests_load_failed, it.status) }
+			?: context.getString(R.string.je_error_generic)
 	}
 
 	/** The Seerr link works now: whatever the tabs loaded before failed, so load them again. */
@@ -269,36 +324,11 @@ class RequestsFragment : Fragment() {
 		open(tab.value)
 	}
 
-	private fun toast(text: String) {
-		val context = context ?: return
-		Toast.makeText(context, text, Toast.LENGTH_LONG).show()
-	}
 
 	private fun openDetails(mediaType: String?, tmdbId: Int?) {
 		if (tmdbId == null || tmdbId <= 0) return
 		val type = if (mediaType == SeerrRepository.MEDIA_TV) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE
 		navigationRepository.navigate(EnhancedDestinations.seerrDetails(type, tmdbId))
-	}
-
-	private fun refreshArtwork() {
-		lifecycleScope.launch {
-			try {
-				val cards = requests.state.value.items
-				if (cards.any { it.request.jellyfinMediaId != null }) {
-					val refreshed = requestsRepository.refreshArtwork(cards).associateBy { it.request }
-					requests.update { list -> list.map { refreshed[it.request] ?: it } }
-				}
-				val results = watchlist.state.value.items
-				if (results.any { it.mediaInfo?.jellyfinMediaId != null || it.mediaInfo?.jellyfinMediaId4k != null }) {
-					val refreshed = requestsRepository.refreshWatchlistArtwork(results).associateBy { it.dedupeKey }
-					watchlist.update { list -> list.map { refreshed[it.dedupeKey] ?: it } }
-				}
-			} catch (err: CancellationException) {
-				throw err
-			} catch (err: Exception) {
-				Timber.w(err, "Failed to refresh library artwork")
-			}
-		}
 	}
 
 	// Requests
@@ -384,6 +414,7 @@ class RequestsFragment : Fragment() {
 					if (!card.protectedTitle) releaseLabel(request, today)?.let { CardLine(releaseText(it)) }
 				}
 				if (chip == RequestChip.ORPHANED) CardLine(stringResource(R.string.je_requests_orphaned_hint), ColorAmber)
+				if (busy) CardLine(stringResource(R.string.je_requests_working))
 				Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
 					requestsRepository.avatarUrl(request.requestedByAvatar)?.let { url ->
 						Box(modifier = Modifier.size(18.dp).clip(CircleShape)) {
@@ -397,10 +428,11 @@ class RequestsFragment : Fragment() {
 			}
 			if (actionable) {
 				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					IconButton(onClick = { approve(card) }, enabled = !busy) {
+					// Stay enabled while busy so the focus stays put; act() ignores repeated presses
+					IconButton(onClick = { approve(card) }) {
 						Icon(painterResource(R.drawable.je_ic_requests_check), contentDescription = stringResource(R.string.je_requests_approve))
 					}
-					IconButton(onClick = { confirmDecline(card) }, enabled = !busy) {
+					IconButton(onClick = { confirmDecline(card) }) {
 						Icon(painterResource(R.drawable.je_ic_requests_close), contentDescription = stringResource(R.string.je_requests_decline))
 					}
 				}
@@ -484,6 +516,7 @@ class RequestsFragment : Fragment() {
 
 	private fun confirmDecline(card: RequestsRepository.RequestCard) {
 		val context = context ?: return
+		if (card.request.requestId in busyRequests.value) return
 		val title = card.request.title ?: getString(R.string.je_requests_issue_unknown_title)
 		AlertDialog.Builder(context)
 			.setTitle(getString(R.string.je_requests_decline_title, title))
@@ -498,22 +531,28 @@ class RequestsFragment : Fragment() {
 	private fun act(card: RequestsRepository.RequestCard, approve: Boolean) {
 		val requestId = card.request.requestId ?: return
 		if (requestId in busyRequests.value) return
+		val appContext = context?.applicationContext ?: return
 		busyRequests.value += requestId
 		val title = card.request.title.orEmpty()
-		lifecycleScope.launch {
-			try {
+		writeScope.launch {
+			val message = try {
 				if (approve) requestsRepository.approve(requestId) else requestsRepository.decline(requestId)
-				toast(getString(if (approve) R.string.je_requests_approved_toast else R.string.je_requests_declined_toast, title))
+				appContext.getString(if (approve) R.string.je_requests_approved_toast else R.string.je_requests_declined_toast, title)
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Request %d action failed", requestId)
-				toast(getString(R.string.je_requests_action_failed, describe(err)))
+				appContext.getString(R.string.je_requests_action_failed, describe(appContext, err))
 			} finally {
 				busyRequests.value -= requestId
 			}
-			// Never retry: reload to show what the server now has, and the queue an approval may have started
-			requests.reload()
+			Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+			// Never retry: refresh to show what the server now has (keeping the focused card), and the queue and
+			// history an approval may have started. Nothing to refresh once the page is gone
+			if (!lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) return@launch
+			requests.refresh()
+			history.invalidate()
+			if (tab.value == RequestsTab.HISTORY) history.show()
 			if (queue.value !is LoadState.Loading) refreshQueue(silent = true)
 		}
 	}
@@ -538,7 +577,8 @@ class RequestsFragment : Fragment() {
 						verticalAlignment = Alignment.CenterVertically,
 						modifier = Modifier.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
 					) {
-						Button(onClick = { syncWatchlist() }, enabled = !isSyncing) {
+						// Stays enabled while syncing so the focus stays put; syncWatchlist() ignores repeated presses
+						Button(onClick = { syncWatchlist() }) {
 							Icon(painterResource(R.drawable.je_ic_requests_sync), contentDescription = null, modifier = Modifier.size(18.dp))
 							Text(stringResource(if (isSyncing) R.string.je_requests_syncing else R.string.je_requests_sync_now), modifier = Modifier.padding(start = 6.dp))
 						}
@@ -567,24 +607,25 @@ class RequestsFragment : Fragment() {
 
 	private fun syncWatchlist() {
 		if (syncing.value) return
+		val appContext = context?.applicationContext ?: return
 		syncing.value = true
-		lifecycleScope.launch {
-			try {
+		writeScope.launch {
+			val (message, synced) = try {
 				val result = requestsRepository.syncWatchlist()
 				val failedUsers = result.errors?.size ?: 0
-				toast(
-					if (failedUsers > 0) getString(R.string.je_requests_sync_result_errors, result.itemsProcessed, result.itemsAdded, failedUsers)
-					else getString(R.string.je_requests_sync_result, result.itemsProcessed, result.itemsAdded)
-				)
-				watchlist.reload()
+				val text = if (failedUsers > 0) appContext.getString(R.string.je_requests_sync_result_errors, result.itemsProcessed, result.itemsAdded, failedUsers)
+				else appContext.getString(R.string.je_requests_sync_result, result.itemsProcessed, result.itemsAdded)
+				text to true
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Watchlist sync failed")
-				toast(getString(R.string.je_requests_sync_failed, describe(err)))
+				appContext.getString(R.string.je_requests_sync_failed, describe(appContext, err)) to false
 			} finally {
 				syncing.value = false
 			}
+			Toast.makeText(appContext, message, Toast.LENGTH_LONG).show()
+			if (synced && lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED)) watchlist.refresh()
 		}
 	}
 

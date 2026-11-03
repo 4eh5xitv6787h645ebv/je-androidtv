@@ -31,9 +31,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.res.painterResource
@@ -43,8 +47,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.distinctUntilChanged
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberBackAction
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
@@ -210,7 +216,8 @@ internal fun PageMessage(text: String, modifier: Modifier = Modifier) {
 
 /**
  * A grid over a [PagedLoader]: loading and first-page errors (with Retry) fill the page, later failures show a Retry
- * button under the rows, and the next page loads when focus gets near the end.
+ * button under the rows, and the next page loads when focus gets near the end. When the loader paused on filtered-out
+ * pages, a "Load more" button (under the rows, or in place of the empty message) carries on.
  */
 @Composable
 internal fun <T> PagedGrid(
@@ -228,11 +235,29 @@ internal fun <T> PagedGrid(
 		state.loading || !state.started -> LoadState.Loading
 		else -> LoadState.Ready(emptyList())
 	}
+	// Loading stopped after several fully filtered pages: the server has more, so offer them rather than "nothing"
+	val loadMoreLabel = stringResource(R.string.je_requests_load_more)
+	val loadMore = remember(loader, loadMoreLabel) { EmptyAction(loadMoreLabel) { loader.loadMore() } }
 
 	Column(modifier = modifier.fillMaxSize()) {
 		header?.invoke()
-		LoadStateContent(state = loadState, empty = { it.isEmpty() }, emptyMessage = emptyMessage) { items ->
+		LoadStateContent(
+			state = loadState,
+			empty = { it.isEmpty() },
+			emptyMessage = if (state.paused) stringResource(R.string.je_requests_paused_empty) else emptyMessage,
+			emptyAction = if (state.paused) loadMore else rememberBackAction(),
+		) { items ->
 			val gridState = rememberLazyGridState()
+			// Back from another screen: bring the card that had the focus into view and focus it again
+			val restoreKey = remember(loader) { loader.takeFocusRestore() }
+			val restoreFocus = remember { FocusRequester() }
+			LaunchedEffect(restoreKey) {
+				val index = restoreKey?.let { key -> items.indexOfFirst { loader.key(it) == key } } ?: -1
+				if (index < 0) return@LaunchedEffect
+				gridState.scrollToItem(index)
+				withFrameNanos { }
+				runCatching { restoreFocus.requestFocus() }
+			}
 			LaunchedEffect(gridState, loader) {
 				snapshotFlow {
 					val info = gridState.layoutInfo
@@ -246,8 +271,19 @@ internal fun <T> PagedGrid(
 				horizontalArrangement = Arrangement.spacedBy(12.dp),
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
-				items(items, key = loader.key) { value -> item(value) }
-				if (state.error != null || state.loading) {
+				items(items, key = loader.key) { value ->
+					val key = loader.key(value)
+					// Passes the cell's width on to the card unchanged
+					Box(
+						propagateMinConstraints = true,
+						modifier = Modifier
+							.then(if (key == restoreKey) Modifier.focusRequester(restoreFocus) else Modifier)
+							.onFocusChanged { if (it.hasFocus) loader.focusedKey = key },
+					) {
+						item(value)
+					}
+				}
+				if (state.error != null || state.loading || state.paused) {
 					item(span = { GridItemSpan(maxLineSpan) }) {
 						Row(
 							horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -257,8 +293,10 @@ internal fun <T> PagedGrid(
 							if (state.error != null) {
 								Text(text = state.error, color = Tokens.Color.colorGrey100, fontSize = 14.sp)
 								Button(onClick = { loader.loadMore() }) { Text(stringResource(R.string.je_retry)) }
-							} else {
+							} else if (state.loading) {
 								Text(text = stringResource(R.string.je_loading), color = secondaryTextColor(), fontSize = 14.sp)
+							} else {
+								Button(onClick = { loader.loadMore() }) { Text(loadMoreLabel) }
 							}
 						}
 					}

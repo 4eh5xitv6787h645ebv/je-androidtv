@@ -82,3 +82,16 @@ Not in `EnhancedConfig.kt` and deliberately not used: `DownloadsUsePluginPages`,
 `DownloadsUseNativeTab` (web placement options). Hidden Content's `FilterRequests` user setting is read straight from
 `hidden-content.json` (`Settings.FilterRequests`, default true) because `HiddenContentSettings` doesn't have it; if
 the data-layer owner adds it there, `RequestsRepository.hiddenFilter()` can use it instead.
+
+## Behaviour notes (night fixes)
+
+- Hidden Content fails closed on every tab (requests, watchlist, queue, history, issues): when it is on, or the
+  configuration is unknown, and `hidden-content.json` can't be read, the tab shows an error with Retry instead of
+  unfiltered rows.
+- Approve/decline and "Sync watchlists now" run in a process-wide main scope (`RequestsFragment.writeScope`), so
+  leaving the page doesn't cancel the write; their toasts use the application context. Device check: approve, then
+  press Home before the response arrives — no crash, toast still shows.
+- Back from another screen, the current tab refreshes in place (rows stay until the new ones arrive) and the card
+  that had the focus is focused again; the other tabs refresh when opened. Device check: open a request's details,
+  come back, focus is on the same card.
+- Tab and filters survive a configuration change / process restore (`onSaveInstanceState`).

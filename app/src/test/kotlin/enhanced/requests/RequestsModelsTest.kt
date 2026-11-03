@@ -177,7 +177,7 @@ class RequestsModelsTest : FunSpec({
 		// Couldn't load the protection state: withhold everything that could be protected
 		val failed = ArrSpoilerPolicy.of(enabled = true, state = null)
 		failed.apply(sonarr).subtitle shouldBe "S02E01"
-		failed.apply(sonarr).posterUrl shouldBe "p"
+		failed.apply(sonarr).posterUrl shouldBe null
 		failed.apply(radarr).posterUrl shouldBe null
 		failed.apply(radarr).subtitle shouldBe "2024"
 
@@ -187,18 +187,28 @@ class RequestsModelsTest : FunSpec({
 
 		val seriesProtected = ArrSpoilerPolicy.of(enabled = true, state = SpoilerGuardState(series = mapOf("abc" to JsonPrimitive(true))))
 		seriesProtected.apply(sonarr).subtitle shouldBe "S02E01"
+		// Guarded shows lose their Sonarr (TMDB) posters too
+		seriesProtected.apply(sonarr).posterUrl shouldBe null
 		seriesProtected.apply(radarr) shouldBe radarr
 
 		val collectionProtected = ArrSpoilerPolicy.of(enabled = true, state = SpoilerGuardState(collections = mapOf("c" to JsonPrimitive(true))))
 		collectionProtected.apply(radarr).posterUrl shouldBe null
+		collectionProtected.apply(sonarr).posterUrl shouldBe null
+		collectionProtected.apply(sonarr).subtitle shouldBe "S02E01 - The Proposal"
+
+		val moviesProtected = ArrSpoilerPolicy.of(enabled = true, state = SpoilerGuardState(movies = mapOf("m" to JsonPrimitive(true))))
+		moviesProtected.apply(sonarr) shouldBe sonarr
 
 		val pending = ArrSpoilerPolicy.of(enabled = true, state = SpoilerGuardState(pendingTmdb = mapOf("movie:603" to JsonPrimitive(true), "tv:1" to JsonPrimitive(true))))
 		pending.apply(radarr).posterUrl shouldBe null
 		pending.apply(radarr.copy(tmdbId = 604)).posterUrl shouldBe "m"
 		pending.apply(sonarr).subtitle shouldBe "S02E01"
+		pending.apply(sonarr).posterUrl shouldBe null
+		pending.apply(sonarr.copy(tmdbId = 2)).posterUrl shouldBe "p"
 
 		val history = HistoryItem(source = "Sonarr", subtitle = "S01E02 - Title", tmdbId = 9)
 		failed.apply(history).subtitle shouldBe "S01E02"
+		failed.apply(history.copy(posterUrl = "h")).posterUrl shouldBe null
 		failed.apply(history.copy(subtitle = "S01 · E01-E08")).subtitle shouldBe "S01 · E01-E08"
 	}
 
