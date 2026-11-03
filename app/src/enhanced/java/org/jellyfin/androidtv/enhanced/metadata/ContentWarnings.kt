@@ -124,7 +124,7 @@ fun rememberTriggerPickerState(): TriggerPickerState {
 }
 
 /** Loading/error lines for list screens built from [LoadState]s. */
-private fun LazyListScope.loadStateItem(state: LoadState<*>) {
+internal fun LazyListScope.loadStateItem(state: LoadState<*>) {
 	when (state) {
 		LoadState.Loading -> item { ListButton(onClick = {}, enabled = false, headingContent = { Text(stringResource(R.string.je_loading)) }) }
 		is LoadState.Error -> item {

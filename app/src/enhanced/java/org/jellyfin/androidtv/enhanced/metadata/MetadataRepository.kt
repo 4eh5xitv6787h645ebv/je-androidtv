@@ -1,5 +1,8 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
@@ -112,6 +115,25 @@ class MetadataRepository(
 	/** The user's Elsewhere preferences (`elsewhere.json`). */
 	suspend fun elsewhereSettings(): ElsewhereSettings = ElsewhereSettings.from(settingsRepository.read(EnhancedSettingsRepository.ELSEWHERE).json)
 
+	/** Change the user's Elsewhere preferences; other fields of the document are kept. */
+	suspend fun editElsewhere(edit: (MutableMap<String, JsonElement>) -> Unit): ElsewhereSettings =
+		ElsewhereSettings.from(settingsRepository.edit(EnhancedSettingsRepository.ELSEWHERE, edit).json)
+
+	/** Regions TMDB has provider data for, as (code, name), by name. */
+	suspend fun providerRegions(): List<Pair<String, String>> =
+		decode<TmdbRegions>(enhancedApi.get("tmdb/watch/providers/regions")).results
+			.filter { it.code.isNotBlank() }
+			.map { it.code.uppercase() to (it.englishName ?: it.code) }
+			.sortedBy { it.second.lowercase() }
+
+	/** Names of the streaming services TMDB lists for [region] (movies and shows), most prominent first. */
+	suspend fun regionServices(region: String): List<String> = coroutineScope {
+		val lists = listOf("movie", "tv").map { type ->
+			async { decode<TmdbProviderList>(enhancedApi.get("tmdb/watch/providers/$type", mapOf("watch_region" to region))).results }
+		}.awaitAll().flatten()
+		sortServices(lists, region)
+	}
+
 	/** Flat-rate providers for one title in [region], filtered by the user's and the server's provider lists. */
 	suspend fun watchProviders(target: TmdbTarget, region: String, userServices: List<String>, config: MetadataPublicConfig): List<WatchProvider> {
 		val response = decode<WatchProviders>(enhancedApi.get("watch-providers", mapOf("items" to target.providerKey, "region" to region)))
@@ -170,6 +192,13 @@ class MetadataRepository(
 
 	companion object {
 		const val MAX_PEOPLE = 100
+
+		/** Distinct provider names, by the region's display priority, then name. */
+		fun sortServices(entries: List<TmdbProviderListEntry>, region: String): List<String> = entries
+			.filter { it.providerName.isNotBlank() }
+			.sortedWith(compareBy<TmdbProviderListEntry> { it.displayPriorities[region] ?: it.displayPriority ?: Int.MAX_VALUE }.thenBy { it.providerName.lowercase() })
+			.map { it.providerName }
+			.distinct()
 
 		fun triggersFrom(json: JsonObject): Set<Int> =
 			(json["Triggers"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.intOrNull }?.toSet().orEmpty()

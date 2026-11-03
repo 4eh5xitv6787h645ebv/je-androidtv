@@ -229,3 +229,28 @@ data class TagDataStream(
 data class TagDataRef(
 	@SerialName("Id") val id: String = "",
 )
+
+/** `GET tmdb/watch/providers/regions`: the regions TMDB has provider data for. */
+@Serializable
+data class TmdbRegions(
+	val results: List<TmdbRegion> = emptyList(),
+)
+
+@Serializable
+data class TmdbRegion(
+	@SerialName("iso_3166_1") val code: String = "",
+	@SerialName("english_name") val englishName: String? = null,
+)
+
+/** `GET tmdb/watch/providers/{movie|tv}?watch_region=XX`: every provider TMDB knows in a region. */
+@Serializable
+data class TmdbProviderList(
+	val results: List<TmdbProviderListEntry> = emptyList(),
+)
+
+@Serializable
+data class TmdbProviderListEntry(
+	@SerialName("provider_name") val providerName: String = "",
+	@SerialName("display_priority") val displayPriority: Int? = null,
+	@SerialName("display_priorities") val displayPriorities: Map<String, Int> = emptyMap(),
+)
