@@ -117,6 +117,25 @@ fun showComposeDialog(
 	fragment: Fragment,
 	alignment: Alignment = Alignment.CenterEnd,
 	content: @Composable (dismiss: () -> Unit) -> Unit,
+) = showDialogHost(fragment) { visible, dismiss ->
+	DialogBase(
+		visible = visible,
+		onDismissRequest = dismiss,
+		contentAlignment = alignment,
+	) {
+		content(dismiss)
+	}
+}
+
+/**
+ * Host a dialog composable that brings its own `DialogBase` ([JeDialog], [JeChoiceDialog]) over any screen, View-based
+ * or Compose: [content] gets whether it is showing and a `dismiss` callback to pass as its `onDismissRequest`. Each
+ * call gets its own host, so one dialog can open the next from its confirm callback. The host is dropped once the
+ * dialog has faded out, or with the fragment's view.
+ */
+fun showDialogHost(
+	fragment: Fragment,
+	content: @Composable (visible: Boolean, dismiss: () -> Unit) -> Unit,
 ) {
 	val activity = fragment.activity ?: return
 	val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
@@ -127,13 +146,7 @@ fun showComposeDialog(
 
 	host.setContent {
 		JellyfinTheme {
-			DialogBase(
-				visible = visible.value,
-				onDismissRequest = { visible.value = false },
-				contentAlignment = alignment,
-			) {
-				content { visible.value = false }
-			}
+			content(visible.value) { visible.value = false }
 		}
 		LaunchedEffect(visible.value) {
 			if (!visible.value) {

@@ -1,13 +1,29 @@
 package org.jellyfin.androidtv.enhanced.issues
 
-import android.app.AlertDialog
-import android.text.InputFilter
-import android.text.InputType
-import android.util.TypedValue
-import android.view.inputmethod.EditorInfo
-import android.widget.EditText
-import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
@@ -19,8 +35,19 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
-import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
+import org.jellyfin.androidtv.enhanced.metadata.showDialogHost
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeChoiceDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.rememberFocusedState
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
+import org.jellyfin.androidtv.ui.base.JellyfinTheme
+import org.jellyfin.androidtv.ui.base.LocalTextStyle
+import org.jellyfin.androidtv.ui.base.Text
 import timber.log.Timber
 
 /** Where the season and episode choices of a show report come from. */
@@ -116,16 +143,26 @@ class IssueReportFlow(
 		}
 	}
 
+	/** One step of the flow: pick one of [options]; [onPick] gets its index. */
+	private fun choose(title: String, options: List<String>, onPick: (Int) -> Unit) {
+		showDialogHost(fragment) { visible, dismiss ->
+			JeChoiceDialog(
+				visible = visible,
+				title = title,
+				options = options,
+				selected = emptySet(),
+				onConfirm = { picked -> picked.firstOrNull()?.let(onPick) },
+				onDismissRequest = dismiss,
+			)
+		}
+	}
+
 	private fun pickType(mediaId: Int) {
 		val context = fragment.context ?: return
 		val types = SeerrIssueType.entries
-		AlertDialog.Builder(context)
-			.setTitle(context.getString(R.string.je_issues_report_title, title))
-			.setItems(types.map { context.getString(it.label) }.toTypedArray()) { _, which ->
-				if (isTv && episodeSource != null) pickScope(mediaId, types[which]) else enterMessage(mediaId, types[which], SeerrIssueScope.WHOLE)
-			}
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		choose(context.getString(R.string.je_issues_report_title, title), types.map { context.getString(it.label) }) { which ->
+			if (isTv && episodeSource != null) pickScope(mediaId, types[which]) else enterMessage(mediaId, types[which], SeerrIssueScope.WHOLE)
+		}
 	}
 
 	private fun pickScope(mediaId: Int, type: SeerrIssueType) {
@@ -142,11 +179,7 @@ class IssueReportFlow(
 		options += context.getString(R.string.je_issues_scope_whole_show) to { enterMessage(mediaId, type, SeerrIssueScope.WHOLE) }
 		options += context.getString(R.string.je_issues_scope_other) to { pickSeason(mediaId, type) }
 
-		AlertDialog.Builder(context)
-			.setTitle(R.string.je_issues_scope_title)
-			.setItems(options.map { it.first }.toTypedArray()) { _, which -> options[which].second() }
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		choose(context.getString(R.string.je_issues_scope_title), options.map { it.first }) { which -> options[which].second() }
 	}
 
 	private fun pickSeason(mediaId: Int, type: SeerrIssueType) {
@@ -158,13 +191,9 @@ class IssueReportFlow(
 				enterMessage(mediaId, type, SeerrIssueScope.WHOLE)
 				return@launch
 			}
-			AlertDialog.Builder(context)
-				.setTitle(R.string.je_issues_scope_title)
-				.setItems(seasons.map { context.getString(R.string.je_issues_season, it) }.toTypedArray()) { _, which ->
-					pickEpisode(mediaId, type, seasons[which])
-				}
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
+			choose(context.getString(R.string.je_issues_scope_title), seasons.map { context.getString(R.string.je_issues_season, it) }) { which ->
+				pickEpisode(mediaId, type, seasons[which])
+			}
 		}
 	}
 
@@ -177,52 +206,57 @@ class IssueReportFlow(
 				if (name.isNullOrBlank()) context.getString(R.string.je_issues_episode, number)
 				else context.getString(R.string.je_issues_episode_named, number, name)
 			}
-			AlertDialog.Builder(context)
-				.setTitle(context.getString(R.string.je_issues_season, season))
-				.setItems(labels.toTypedArray()) { _, which ->
-					val episode = if (which == 0) 0 else episodes[which - 1].first
-					enterMessage(mediaId, type, SeerrIssueScope(season, episode))
-				}
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
+			choose(context.getString(R.string.je_issues_season, season), labels) { which ->
+				val episode = if (which == 0) 0 else episodes[which - 1].first
+				enterMessage(mediaId, type, SeerrIssueScope(season, episode))
+			}
 		}
 	}
 
 	private fun enterMessage(mediaId: Int, type: SeerrIssueType, scope: SeerrIssueScope) {
 		val context = fragment.context ?: return
-		val padding = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 24f, context.resources.displayMetrics).toInt()
-		// Single-line input that wraps: the TV keyboard's action key then submits instead of adding a newline
-		val input = EditText(context).apply {
-			hint = context.getString(R.string.je_issues_message_hint)
-			inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
-			imeOptions = EditorInfo.IME_ACTION_DONE
-			setHorizontallyScrolling(false)
-			maxLines = 4
-			filters = arrayOf(InputFilter.LengthFilter(MAX_MESSAGE_LENGTH))
-		}
-		val container = FrameLayout(context).apply {
-			setPadding(padding, padding / 2, padding, 0)
-			addView(input)
-		}
 		val scopeLabel = when {
 			!isTv || scope.season == 0 -> null
 			scope.episode == 0 -> context.getString(R.string.je_issues_season, scope.season)
 			else -> context.getString(R.string.je_issues_season_episode, scope.season, scope.episode)
 		}
-		val dialog = AlertDialog.Builder(context)
-			.setTitle(listOfNotNull(context.getString(type.label), scopeLabel).joinToString(" · "))
-			.setMessage(R.string.je_issues_message_label)
-			.setView(container)
-			.setPositiveButton(R.string.je_issues_submit) { _, _ -> submit(mediaId, type, scope, input.text.toString()) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.create()
-		input.setOnEditorActionListener { _, actionId, _ ->
-			if (actionId != EditorInfo.IME_ACTION_DONE) return@setOnEditorActionListener false
-			dialog.dismiss()
-			submit(mediaId, type, scope, input.text.toString())
-			true
+		val dialogTitle = listOfNotNull(context.getString(type.label), scopeLabel).joinToString(" · ")
+		showDialogHost(fragment) { visible, dismiss ->
+			var message by remember { mutableStateOf("") }
+			val submitFocus = remember { FocusRequester() }
+			fun send() {
+				dismiss()
+				submit(mediaId, type, scope, message)
+			}
+			JeDialog(
+				visible = visible,
+				onDismissRequest = dismiss,
+				title = dialogTitle,
+				body = stringResource(R.string.je_issues_message_label),
+				actions = {
+					JeButton(text = stringResource(R.string.je_design_cancel), onClick = dismiss)
+					JeButton(
+						text = stringResource(R.string.je_issues_submit),
+						icon = R.drawable.je_ic_issue_report,
+						onClick = ::send,
+						modifier = Modifier.focusRequester(submitFocus),
+					)
+				},
+			) {
+				IssueMessageField(
+					value = message,
+					onValueChange = { message = it.take(MAX_MESSAGE_LENGTH) },
+					hint = stringResource(R.string.je_issues_message_hint),
+					onDone = ::send,
+				)
+			}
+			// The message is optional: start on Submit, so the keyboard only opens when the user moves up to the field
+			LaunchedEffect(Unit) {
+				withFrameNanos { }
+				withFrameNanos { }
+				runCatching { submitFocus.requestFocus() }
+			}
 		}
-		dialog.show()
 	}
 
 	private fun submit(mediaId: Int, type: SeerrIssueType, scope: SeerrIssueScope, message: String) {
@@ -264,4 +298,38 @@ internal fun errorMessage(context: android.content.Context, err: EnhancedApi.Enh
 	err.code == "no_issue_permission" || err.status == 403 -> context.getString(R.string.je_issues_no_permission)
 	err.status == 503 || err.code == "unreachable" -> context.getString(R.string.je_issues_seerr_unreachable)
 	else -> context.getString(R.string.je_issues_report_failed, "HTTP ${err.status}")
+}
+
+/**
+ * The optional message of an issue report: a few wrapping lines, the keyboard's action key submits (like the web's
+ * reporter, a newline isn't needed). Opens the keyboard when focused, as upstream's search field does.
+ */
+@Composable
+private fun IssueMessageField(value: String, onValueChange: (String) -> Unit, hint: String, onDone: () -> Unit) {
+	val focus = rememberFocusedState()
+	val colors = if (focus.focused) JellyfinTheme.colorScheme.inputFocused else JellyfinTheme.colorScheme.input
+	Box(
+		modifier = Modifier
+			.fillMaxWidth()
+			.heightIn(min = 96.dp)
+			.border(2.dp, colors, JeShapes.container)
+			.padding(12.dp),
+	) {
+		if (value.isEmpty()) Text(text = hint, style = JeType.body, color = JeColors.textTertiary)
+		BasicTextField(
+			value = value,
+			onValueChange = onValueChange,
+			interactionSource = focus.interactionSource,
+			textStyle = LocalTextStyle.current.merge(JeType.body).copy(color = JeColors.onSurface),
+			cursorBrush = SolidColor(colors),
+			maxLines = 4,
+			keyboardOptions = KeyboardOptions.Default.copy(
+				capitalization = KeyboardCapitalization.Sentences,
+				imeAction = ImeAction.Done,
+				showKeyboardOnFocus = true,
+			),
+			keyboardActions = KeyboardActions(onDone = { onDone() }),
+			modifier = Modifier.fillMaxWidth(),
+		)
+	}
 }

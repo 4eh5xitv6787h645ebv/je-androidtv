@@ -1,10 +1,14 @@
 package org.jellyfin.androidtv.enhanced.issues
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
-import android.app.AlertDialog
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -12,11 +16,16 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import androidx.fragment.app.Fragment
 import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -24,8 +33,18 @@ import kotlinx.serialization.json.contentOrNull
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.metadata.showDialogHost
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrDates
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.StatusBadge
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsAction
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContext
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContributor
@@ -34,8 +53,7 @@ import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsAction
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsContext
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsContributor
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.design.Tokens
+import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.sdk.model.api.BaseItemKind
 import timber.log.Timber
 
@@ -191,40 +209,91 @@ class IssueSeerrDetailsContributor(
 				} else {
 					pluralStringResource(R.plurals.je_issues_resolved_count, issues.issues.size, "${issues.issues.size}$more")
 				}
-				Button(onClick = { context.fragment.context?.let { showIssues(it, context.details.displayTitle, issues.issues) } }) {
-					Text(label)
+				Row(horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap), verticalAlignment = Alignment.CenterVertically) {
+					if (issues.open > 0) StatusBadge(JeStatuses.seerrIssue(1))
+					JeButton(
+						text = label,
+						icon = R.drawable.je_ic_issue_report,
+						onClick = { showIssues(context.fragment, context.details.displayTitle, issues.issues) },
+					)
 				}
 			}
 			is LoadState.Error -> Row(
-				horizontalArrangement = Arrangement.spacedBy(12.dp),
+				horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				Text(current.message ?: stringResource(R.string.je_issues_load_failed), color = secondaryTextColor(), fontSize = 14.sp)
-				Button(onClick = current.retry) { Text(stringResource(R.string.je_retry)) }
+				Notice(kind = NoticeKind.Error, title = current.message ?: stringResource(R.string.je_issues_load_failed), inline = true, modifier = Modifier.weight(1f, fill = false))
+				JeButton(text = stringResource(R.string.je_retry), onClick = current.retry)
 			}
 		}
 	}
 
 	/** A read-only list of the title's issues; selecting one shows its whole message. */
-	private fun showIssues(context: Context, title: String, issues: List<SeerrIssue>) {
-		AlertDialog.Builder(context)
-			.setTitle(context.getString(R.string.je_issues_list_title, title))
-			.setItems(issues.map { issueSummary(context, it) }.toTypedArray()) { _, which -> showIssue(context, issues[which]) }
-			.setNegativeButton(R.string.je_issues_close, null)
-			.show()
+	private fun showIssues(fragment: Fragment, title: String, issues: List<SeerrIssue>) {
+		val context = fragment.context ?: return
+		val rows = issues.map { issue ->
+			val meta = listOfNotNull(issue.createdBy?.label, SeerrDates.format(issue.createdAt)).joinToString(" · ")
+			Triple(issue, issueHeadline(context, issue), listOfNotNull(meta.ifEmpty { null }, issue.message).joinToString(" · ").ifEmpty { null })
+		}
+		showDialogHost(fragment) { visible, dismiss ->
+			val firstFocus = remember { FocusRequester() }
+			JeDialog(
+				visible = visible,
+				onDismissRequest = dismiss,
+				title = stringResource(R.string.je_issues_list_title, title),
+				actions = { JeButton(text = stringResource(R.string.je_issues_close), onClick = dismiss) },
+			) {
+				LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
+					itemsIndexed(rows, key = { _, row -> row.first.id }) { index, (issue, headline, caption) ->
+						ListButton(
+							onClick = { showIssue(fragment, issue) },
+							leadingContent = { StatusBadge(JeStatuses.seerrIssue(if (issue.isOpen) 1 else 2), compact = true) },
+							headingContent = { Text(headline, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+							captionContent = caption?.let { { Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis) } },
+							modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
+						)
+					}
+				}
+				LaunchedEffect(Unit) {
+					withFrameNanos { }
+					withFrameNanos { }
+					runCatching { firstFocus.requestFocus() }
+				}
+			}
+		}
 	}
 
-	private fun showIssue(context: Context, issue: SeerrIssue) {
+	private fun showIssue(fragment: Fragment, issue: SeerrIssue) {
+		val context = fragment.context ?: return
 		val comments = issue.comments.mapNotNull { comment ->
 			val message = comment.message?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
 			val meta = listOfNotNull(comment.user?.label, SeerrDates.format(comment.createdAt)).joinToString(" · ")
-			if (meta.isEmpty()) message else "$meta\n$message"
+			meta.ifEmpty { null } to message
 		}
-		AlertDialog.Builder(context)
-			.setTitle(issueHeadline(context, issue))
-			.setMessage(comments.joinToString("\n\n").ifEmpty { context.getString(R.string.je_issues_no_message) })
-			.setPositiveButton(R.string.je_issues_close, null)
-			.show()
+		showDialogHost(fragment) { visible, dismiss ->
+			JeDialog(
+				visible = visible,
+				onDismissRequest = dismiss,
+				title = issueHeadline(context, issue),
+				body = if (comments.isEmpty()) stringResource(R.string.je_issues_no_message) else null,
+				actions = { JeButton(text = stringResource(R.string.je_issues_close), onClick = dismiss) },
+			) {
+				// Long threads scroll with the D-pad: Close is the only focusable element, so the list scrolls itself
+				if (comments.isNotEmpty()) Column(
+					modifier = Modifier
+						.heightIn(max = 320.dp)
+						.verticalScroll(rememberScrollState()),
+					verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
+				) {
+					for ((meta, message) in comments) {
+						Column {
+							meta?.let { Text(it, style = JeType.caption, color = JeColors.textTertiary) }
+							Text(message, style = JeType.body)
+						}
+					}
+				}
+			}
+		}
 	}
 
 	private fun issueHeadline(context: Context, issue: SeerrIssue): String = listOfNotNull(
@@ -238,9 +307,4 @@ class IssueSeerrDetailsContributor(
 		},
 	).joinToString(" · ")
 
-	private fun issueSummary(context: Context, issue: SeerrIssue): String {
-		val meta = listOfNotNull(issue.createdBy?.label, SeerrDates.format(issue.createdAt)).joinToString(" · ")
-		val message = issue.message?.let { if (it.length > 120) it.take(119) + "…" else it }
-		return listOfNotNull(issueHeadline(context, issue), meta.ifEmpty { null }, message).joinToString("\n")
-	}
 }
