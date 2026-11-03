@@ -15,7 +15,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -25,13 +28,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
+import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.ui.LocalOnEnhancedHub
 import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.ErrorState
 import org.jellyfin.androidtv.enhanced.ui.design.HubTile
 import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingSkeleton
 import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.koin.android.ext.android.get
 import org.koin.android.ext.android.getKoin
@@ -59,17 +66,15 @@ class EnhancedHubFragment : Fragment() {
 		val entries = remember(state) { EnhancedHub.available(state) }
 		val counts by hubCounts.counts.collectAsState()
 		val firstFocus = remember { FocusRequester() }
+		val scope = rememberCoroutineScope()
+		// The repository's state reads "no plugin" until the first load answers; don't say so before that
+		var loading by remember { mutableStateOf(true) }
+		var retrying by remember { mutableStateOf(false) }
 
 		LaunchedEffect(Unit) {
 			enhancedRepository.ensureLoaded()
-			val page = arguments?.getString(ARG_PAGE)
-			if (page != null) {
-				val entry = EnhancedHub.entry(page)
-				if (entry != null && entry.enabled(enhancedRepository.current)) {
-					navigationRepository.navigate(entry.destination(), replace = true)
-					return@LaunchedEffect
-				}
-			}
+			loading = false
+			openPage()
 		}
 
 		// Focus the first tile once the grid has composed it; the toolbar grabs focus otherwise
@@ -91,7 +96,26 @@ class EnhancedHubFragment : Fragment() {
 		CompositionLocalProvider(LocalOnEnhancedHub provides true) {
 			PageScaffold(title = stringResource(R.string.je_hub_title)) {
 				if (!state.available) {
-					EmptyState(title = stringResource(R.string.je_hub_unavailable))
+					when {
+						state.configUnavailable -> ErrorState(
+							message = stringResource(R.string.je_hub_config_unavailable),
+							retrying = retrying,
+							onRetry = {
+								scope.launch {
+									retrying = true
+									try {
+										enhancedRepository.ensureLoaded(force = true)
+									} finally {
+										retrying = false
+									}
+									openPage()
+								}
+							},
+						)
+
+						loading -> LoadingSkeleton(SkeletonShape.Grid(columns = 3, rows = 3, height = 112.dp))
+						else -> EmptyState(title = stringResource(R.string.je_hub_unavailable))
+					}
 					return@PageScaffold
 				}
 
@@ -123,5 +147,12 @@ class EnhancedHubFragment : Fragment() {
 				}
 			}
 		}
+	}
+
+	/** Go straight to the [ARG_PAGE] page, replacing the hub, once the state says it applies. */
+	private fun openPage() {
+		val page = arguments?.getString(ARG_PAGE) ?: return
+		val entry = EnhancedHub.entry(page) ?: return
+		if (entry.enabled(enhancedRepository.current)) navigationRepository.navigate(entry.destination(), replace = true)
 	}
 }
