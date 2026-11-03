@@ -24,7 +24,7 @@ import timber.log.Timber
 
 /**
  * "Add bookmark" on movie and episode details: saves the item's current resume position, with an optional label.
- * Shown only when there is a position to save. Capturing a moment from inside the player is not part of this.
+ * Shown only when there is a position to save. Capturing a moment from inside the player is done by `playback/`.
  */
 class BookmarkDetailsContributor(
 	private val bookmarksRepository: BookmarksRepository,

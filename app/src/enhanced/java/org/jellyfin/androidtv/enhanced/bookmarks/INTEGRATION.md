@@ -7,5 +7,5 @@
   `state.bookmarks`, order 50).
 - Settings: none. Upstream hooks: none. Playback goes through upstream's `PlaybackHelper.retrieveAndPlay(ids, false,
   positionTicks, 0, context)`.
-- Not done here: capturing a bookmark from inside the player (needs a playback-overlay hook).
+- Capturing a bookmark from inside the player lives in `playback/` (the Bookmark action of the player overlay).
 - Needs `SpoilerProtection` (bound in `enhancedModule`) for the bookmark list's episode names.

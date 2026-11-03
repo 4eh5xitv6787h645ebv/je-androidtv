@@ -166,7 +166,7 @@
     <string name="je_management_set_pause_screen_desc">Show the title and details when playback has been paused for a while.</string>
     <string name="je_management_set_pause_delay">Show the pause screen after</string>
     <string name="je_management_set_seconds">%1$d seconds</string>
-    <string name="je_management_set_rating_in_player">Show the age rating when playback starts</string>
+    <string name="je_management_set_rating_in_player">Show critic and community ratings in the player</string>
     <string name="je_management_set_skip_intro">Skip intros automatically</string>
     <string name="je_management_set_skip_outro">Skip credits automatically</string>
     <string name="je_management_set_skip_desc">Saved for the web client. This app skips according to Settings › Playback › Media segments.</string>

@@ -63,10 +63,8 @@ them into `EnhancedPublicConfig` later; nothing else needs changing.
 
 `SpoilerProtection` resolves, per title, which Spoiler Guard categories apply to data the plugin doesn't filter
 (TMDB/MDBList/Seerr ratings, release dates, reviews, content warnings, Sonarr/Radarr calendar data, saved bookmark
-
-metadata, reviews, calendar and bookmarks features, so `metadataModule` must be loaded whenever any of those is. When
-convenient, move that one binding to the shared `enhancedModule` next to `SpoilerGuardRepository`; nothing else
-changes.
+names). It is bound once in the shared `enhancedModule` next to `SpoilerGuardRepository` and shared by the
+metadata, reviews, calendar and bookmarks features.
 
 `reviewsModule`'s `ReviewsDetailsContributor` takes it as a fourth constructor argument (already updated in
 `ReviewsModule.kt`).
