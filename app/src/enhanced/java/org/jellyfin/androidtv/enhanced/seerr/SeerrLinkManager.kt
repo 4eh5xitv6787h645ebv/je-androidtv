@@ -33,7 +33,7 @@ import java.util.concurrent.ConcurrentHashMap
  * where the server allows it. This class covers what's left:
  * - an unlinked (or unreadable) status gets one more look per user and app session, after the plugin's 60 s
  *   negative cache ([SeerrLink.recheckDelayMs]); blocked, disabled, unreachable and no-user never do
- *   ([SeerrLink.autoRecheck]);
+ *   ([SeerrLink.autoRecheck]), and a look still waiting is dropped when a refresh reports one of them;
  * - a Seerr call that says `unlinked` while the state still says linked reloads the state, once per user and session
  *   ([onUnlinkedError]);
  * - administrators can import every Jellyfin user into Seerr ([importUsers], `POST jellyseerr/import-users`);
@@ -46,14 +46,24 @@ class SeerrLinkManager(
 	private val enhancedRepository: EnhancedRepository,
 	private val userRepository: UserRepository,
 	private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
-	private val recheckDelay: (SeerrLinkKind) -> Long = SeerrLink::recheckDelayMs,
+	/** Waits out the time before the automatic second look ([SeerrLink.recheckDelayMs]); tests pass their own. */
+	private val waitBeforeRecheck: suspend (SeerrLinkKind) -> Unit = { delay(SeerrLink.recheckDelayMs(it)) },
+	private val clock: () -> Long = System::currentTimeMillis,
 ) {
+	companion object {
+		/** How long "no name" (not in the list, or the list failed) is kept, so the About page doesn't ask every time. */
+		const val MISSING_NAME_TTL_MS = 5 * 60_000L
+	}
+
 	private val gate = SeerrRecheckGate()
 	private var pending: Job? = null
 	private var pendingFor: UUID? = null
 
-	/** Seerr user id → display name, for the About page. */
-	private val displayNames = ConcurrentHashMap<String, String>()
+	/** A Seerr display name, or null for "none found" until [expiresAt] (names themselves never expire). */
+	private data class CachedName(val name: String?, val expiresAt: Long)
+
+	/** Server + Seerr user id → display name, for the About page. Seerr ids are per server, so the key has both. */
+	private val displayNames = ConcurrentHashMap<String, CachedName>()
 
 	init {
 		enhancedRepository.state.onEach(::onState).launchIn(scope)
@@ -68,7 +78,9 @@ class SeerrLinkManager(
 		if (pendingFor != null && pendingFor != userId) cancelPending()
 		if (userId == null) return
 		val kind = SeerrLink.kind(state)
-		if (kind == SeerrLinkKind.LINKED) {
+		// Linked, or a refresh said blocked/unreachable/no-user meanwhile: a scheduled look has nothing left to fix.
+		// Off isn't a reason (a state that isn't loaded yet says off too), and the look itself returns early then.
+		if (kind != SeerrLinkKind.OFF && !SeerrLink.autoRecheck(kind)) {
 			cancelPending()
 			return
 		}
@@ -77,9 +89,20 @@ class SeerrLinkManager(
 		Timber.i("Seerr link is %s, checking again once", kind)
 		pendingFor = userId
 		pending = scope.launch {
-			delay(recheckDelay(kind))
+			waitBeforeRecheck(kind)
+			// No longer pending once it runs: the state the look itself publishes mustn't cancel it halfway
+			if (!clearPending(userId)) return@launch
 			if (currentUserId == userId) recheck()
 		}
+	}
+
+	/** Forget the pending look of [userId] as it starts; false when it was cancelled (or replaced) meanwhile. */
+	@Synchronized
+	private fun clearPending(userId: UUID): Boolean {
+		if (pendingFor != userId) return false
+		pending = null
+		pendingFor = null
+		return true
 	}
 
 	private fun cancelPending() {
@@ -137,22 +160,27 @@ class SeerrLinkManager(
 
 	/**
 	 * The signed-in user's Seerr display name, for "Linked as …". Only administrators can read Seerr's user list
-	 * (`GET jellyseerr/user`), so it's null for everyone else, and on any failure.
+	 * (`GET jellyseerr/user`), so it's null for everyone else, and on any failure. A missing name is kept for
+	 * [MISSING_NAME_TTL_MS] so the large list isn't fetched on every visit.
 	 */
 	suspend fun linkedDisplayName(state: EnhancedState): String? {
 		val seerrUserId = state.seerr.jellyseerrUserId?.takeIf { state.seerr.linked } ?: return null
-		displayNames[seerrUserId]?.let { return it }
+		val key = "${enhancedApi.baseUrl}|$seerrUserId"
+		val now = clock()
+		displayNames[key]?.let { cached -> if (cached.name != null || now < cached.expiresAt) return cached.name }
 		if (!state.isAdmin) return null
-		return try {
+		val name = try {
 			val users = (enhancedApi.get("jellyseerr/user", mapOf("take" to 1000)) as? JsonObject)?.get("results")?.jsonArray.orEmpty()
 			val user = users.firstOrNull { (it as? JsonObject)?.string("id") == seerrUserId } as? JsonObject
-			SeerrLinkNames.displayName(user)?.also { displayNames[seerrUserId] = it }
+			SeerrLinkNames.displayName(user)
 		} catch (err: CancellationException) {
 			throw err
 		} catch (err: Exception) {
 			Timber.w(err, "Couldn't read the Seerr user list")
 			null
 		}
+		displayNames[key] = CachedName(name, now + MISSING_NAME_TTL_MS)
+		return name
 	}
 }
 
