@@ -31,7 +31,7 @@ object DiscoverHubEntries {
 		title = R.string.je_discover_title,
 		description = R.string.je_discover_description,
 		icon = R.drawable.je_ic_discover_explore,
-		enabled = { it.discover || SeerrLink.blocksPage(it, it.config.recommendationsPageEnabled) },
+		enabled = { it.discover || SeerrLink.offersPage(it, it.config.recommendationsPageEnabled) },
 		destination = DiscoverDestinations::discover,
 		order = 10,
 	)

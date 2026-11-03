@@ -68,14 +68,18 @@ object SeerrLinkTexts {
 	fun error(context: Context, err: Throwable?, isAdmin: Boolean): String? =
 		SeerrErrors.forError(err, isAdmin)?.text?.resolve(context)
 
-	/** "3 users imported into Seerr." plus the first refusal, when Seerr refused some. */
+	/**
+	 * "3 users imported into Seerr." plus the first refusal, when Seerr refused some. Nothing imported is "everyone is
+	 * already in Seerr" only when nothing was refused either.
+	 */
 	fun importResult(context: Context, result: SeerrImportResult): String {
-		val head = if (result.usersImported > 0) {
-			context.resources.getQuantityString(R.plurals.je_seerr_link_imported, result.usersImported, result.usersImported)
-		} else {
-			context.getString(R.string.je_seerr_link_imported_none)
-		}
 		val errors = result.errors.mapNotNull(SeerrErrors::sentence)
+		val head = when {
+			result.usersImported > 0 ->
+				context.resources.getQuantityString(R.plurals.je_seerr_link_imported, result.usersImported, result.usersImported)
+			errors.isNotEmpty() -> context.getString(R.string.je_seerr_link_imported_failed)
+			else -> context.getString(R.string.je_seerr_link_imported_none)
+		}
 		if (errors.isEmpty()) return head
 		return head + " " + context.resources.getQuantityString(R.plurals.je_seerr_link_import_errors, errors.size, errors.size, errors.first())
 	}
@@ -130,9 +134,12 @@ object SeerrLinkActions {
  * button takes the initial focus.
  *
  * [unlinkedCall] is for a page whose Seerr call just said `unlinked` while the state still says linked: the notice
- * shows "unlinked" until the state (reloaded by [SeerrLinkManager.onUnlinkedError]) says otherwise. [onLinked] runs
- * when the link works afterwards (after an import or a check from here, or when the state turns linked by itself
- * after having been seen not linked); the Jellyfin Enhanced state has been reloaded by then.
+ * shows "unlinked" until the state (reloaded by [SeerrLinkManager.onUnlinkedError]) says otherwise.
+ *
+ * The notice doesn't report the state turning linked: the page usually stops showing it at that very moment, so the
+ * page watches the state itself ([org.jellyfin.androidtv.enhanced.seerr.SeerrLinkRecovery]). [onLinked] covers
+ * the one case the state can't show: with [unlinkedCall], the user's own import or check from here worked while the
+ * state said linked all along.
  */
 @Composable
 fun SeerrLinkNotice(
@@ -149,25 +156,18 @@ fun SeerrLinkNotice(
 	val kind = if (unlinkedCall && stateKind == SeerrLinkKind.LINKED) SeerrLinkKind.UNLINKED else stateKind
 	val problem = SeerrErrors.forLink(kind, state.isAdmin)
 	val canCheck = kind != SeerrLinkKind.OFF && kind != SeerrLinkKind.BLOCKED && kind != SeerrLinkKind.LINKED
-	// Only a change *to* linked counts: a stale "linked" state must not reload the page into the same failure again
-	var seenNotLinked by remember { mutableStateOf(false) }
+	// Once the state has said not linked, the page sees its return to linked by itself
 	var everNotLinked by remember { mutableStateOf(false) }
 	LaunchedEffect(stateKind) {
-		if (stateKind != SeerrLinkKind.LINKED) {
-			seenNotLinked = true
-			everNotLinked = true
-		} else if (seenNotLinked) {
-			seenNotLinked = false
-			onLinked()
-		}
+		if (stateKind != SeerrLinkKind.LINKED) everNotLinked = true
 	}
 	var busy by remember { mutableStateOf(false) }
 	var outcome by remember { mutableStateOf<String?>(null) }
 	val focus = remember { FocusRequester() }
 
-	// The state reload after a successful import or check turns the kind to linked, which runs onLinked above. A page
-	// whose call said unlinked while the state said linked all along never sees that change, so after the user's own
-	// import or check it gets to try again.
+	// The state reload after a successful import or check turns the kind to linked, which the page sees. A page whose
+	// call said unlinked while the state said linked all along never sees that change, so after the user's own import
+	// or check it gets to try again.
 	fun finish() {
 		busy = false
 		if (unlinkedCall && !everNotLinked && SeerrLink.kind(enhancedRepository.current) == SeerrLinkKind.LINKED) onLinked()

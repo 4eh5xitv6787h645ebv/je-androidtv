@@ -28,8 +28,12 @@ every "not linked" error into a TV sentence.
   `enabled = { state -> state.requests }`): an unlinked user doesn't see Discover/Requests at all, so the pages'
   new link notice (with "Import Jellyfin users into Seerr" for admins) is only reachable by deep link or when the
   link breaks mid-session. To surface it, widen the gates to
-  `it.discover || SeerrLink.blocksPage(it, it.config.recommendationsPageEnabled)` and
-  `state.requests || SeerrLink.blocksPage(state, state.config.downloadsPageEnabled)`. Both pages handle that state.
+  `it.discover || SeerrLink.offersPage(it, it.config.recommendationsPageEnabled)` and
+  `state.requests || SeerrLink.offersPage(state, state.config.downloadsPageEnabled)` (done in the modules).
+  `offersPage` only counts states the notice can act on (unlinked, unreachable, unreadable, and no-user for
+  admins); blocked users and Seerr off keep the tiles hidden. Both pages handle that state, watch the state
+  themselves (`SeerrLinkRecovery`) and reload what failed when the link starts working; Requests starts no tab
+  loader while the notice shows.
   The About page (Settings › Jellyfin Enhanced › About) shows the link and the import either way.
 - `ENHANCED.md`: the "Seerr" paragraph could say linking is automatic (plugin auto-import, or an admin's "Import
   Jellyfin users into Seerr" on the About page), and the About row in "Settings pages" could mention the import.
@@ -49,7 +53,8 @@ every "not linked" error into a TV sentence.
 
 - `SeerrLinkManager` watches `EnhancedRepository.state`. An `unlinked` (or unreadable) status gets exactly one
   more `user-status` read per user and app session, 65 s later (past the 60 s negative cache); `blocked`,
-  `disabled`, `unreachable` and `no_user` never get an automatic retry. A changed link reloads the state
+  `disabled`, `unreachable` and `no_user` never get an automatic retry, and a pending retry is dropped when a
+  refresh reports one of them. A changed link reloads the state
   (`ensureLoaded(force = true)`). A Seerr call failing with `unlinked` while the state says linked reloads the
   state once per user and session (`onUnlinkedError`). `SeerrRecheckGate` enforces the "once".
 - `SeerrErrors.forError/forLink` map codes and reasons to texts: `unlinked` →

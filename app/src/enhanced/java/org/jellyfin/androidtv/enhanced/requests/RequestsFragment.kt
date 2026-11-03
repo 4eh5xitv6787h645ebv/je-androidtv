@@ -55,6 +55,7 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkRecovery
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
@@ -140,6 +141,16 @@ class RequestsFragment : Fragment() {
 	}
 
 	private var shownBefore = false
+	private val linkRecovery = SeerrLinkRecovery()
+
+	override fun onCreate(savedInstanceState: Bundle?) {
+		super.onCreate(savedInstanceState)
+		// The link starting to work (by itself, or after an import or check from the notice): the page drops the
+		// notice the moment the state says linked, so the change is watched here rather than in the notice
+		lifecycleScope.launch {
+			enhancedRepository.state.collect { state -> if (linkRecovery.recovered(SeerrLink.kind(state))) reloadAfterLink() }
+		}
+	}
 
 	override fun onStart() {
 		super.onStart()
@@ -155,8 +166,7 @@ class RequestsFragment : Fragment() {
 		val firstFocus = remember { FocusRequester() }
 
 		LaunchedEffect(Unit) {
-			val loaded = enhancedRepository.ensureLoaded()
-			if (mineOnly.value == null) mineOnly.value = loaded.config.downloadsFilterByUserRequests
+			enhancedRepository.ensureLoaded()
 			open(tab.value)
 			runCatching { firstFocus.requestFocus() }
 		}
@@ -179,7 +189,7 @@ class RequestsFragment : Fragment() {
 			if (!state.requests) {
 				if (SeerrLink.blocksPage(state, state.config.downloadsPageEnabled)) {
 					Box(modifier = Modifier.fillMaxSize()) {
-						SeerrLinkNotice(modifier = Modifier.align(Alignment.Center), onLinked = ::reloadAfterLink)
+						SeerrLinkNotice(modifier = Modifier.align(Alignment.Center))
 					}
 				} else {
 					PageMessage(stringResource(if (state.available) R.string.je_seerr_unavailable else R.string.je_loading))
@@ -206,7 +216,7 @@ class RequestsFragment : Fragment() {
 					if (current != RequestsTab.QUEUE || interval == null) return@collectLatest
 					while (true) {
 						delay(interval * 1000L)
-						refreshQueue(silent = true)
+						if (enhancedRepository.current.requests) refreshQueue(silent = true)
 					}
 				}
 			}
@@ -223,6 +233,10 @@ class RequestsFragment : Fragment() {
 
 	private fun open(value: RequestsTab) {
 		tab.value = value
+		// Nothing loads behind the link notice (or with the page off); the link starting to work opens the tab then
+		val state = enhancedRepository.current
+		if (!state.requests) return
+		if (mineOnly.value == null) mineOnly.value = state.config.downloadsFilterByUserRequests
 		when (value) {
 			RequestsTab.REQUESTS -> requests.ensureStarted()
 			RequestsTab.WATCHLIST -> watchlist.ensureStarted()
@@ -249,6 +263,7 @@ class RequestsFragment : Fragment() {
 
 	/** The Seerr link works now: whatever the tabs loaded before failed, so load them again. */
 	private fun reloadAfterLink() {
+		if (!enhancedRepository.current.requests) return
 		listOf(requests, watchlist, history, issues).forEach { if (it.state.value.started) it.reload() }
 		// Opening the current tab again refreshes the queue when that's the one on screen
 		open(tab.value)

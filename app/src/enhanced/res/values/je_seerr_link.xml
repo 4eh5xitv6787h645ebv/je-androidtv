@@ -30,6 +30,7 @@
         <item quantity="other">%1$d users imported into Seerr.</item>
     </plurals>
     <string name="je_seerr_link_imported_none">No new users to import. Everyone is already in Seerr.</string>
+    <string name="je_seerr_link_imported_failed">No users were imported.</string>
     <plurals name="je_seerr_link_import_errors">
         <item quantity="one">%1$d user couldn\'t be imported: %2$s</item>
         <item quantity="other">%1$d users couldn\'t be imported, first: %2$s</item>

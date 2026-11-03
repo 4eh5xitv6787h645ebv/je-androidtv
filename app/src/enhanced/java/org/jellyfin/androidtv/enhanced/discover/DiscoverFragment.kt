@@ -46,6 +46,7 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
+import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkRecovery
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
@@ -90,6 +91,7 @@ class DiscoverFragment : Fragment() {
 	private enum class LinkNotice { NONE, STATE, CALL }
 
 	private val linkNotice = MutableStateFlow(LinkNotice.NONE)
+	private val linkRecovery = SeerrLinkRecovery()
 	private val randomEnabled = MutableStateFlow(false)
 	private val picking = MutableStateFlow(false)
 
@@ -204,6 +206,13 @@ class DiscoverFragment : Fragment() {
 		super.onCreate(savedInstanceState)
 
 		lifecycleScope.launch { open() }
+		// The link starting to work (by itself, or after an import or check from the notice) while the notice shows:
+		// watched here rather than in the notice, which can't be relied on to see the change before it goes away
+		lifecycleScope.launch {
+			enhancedRepository.state.collect { state ->
+				if (linkRecovery.recovered(SeerrLink.kind(state)) && linkNotice.value != LinkNotice.NONE) reopen()
+			}
+		}
 	}
 
 	/** Check the gate and, when the page applies, build and load the rows. */

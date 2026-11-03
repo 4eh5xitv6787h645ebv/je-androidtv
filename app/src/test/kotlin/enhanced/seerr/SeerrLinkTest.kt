@@ -76,6 +76,38 @@ class SeerrLinkTest : FunSpec({
 		SeerrLink.blocksPage(state(SeerrUserStatus(active = true, userFound = true)), pageEnabled = true).shouldBeFalse()
 	}
 
+	test("the hub offers a Seerr page with a broken link only when its notice can fix it") {
+		fun offered(reason: String, admin: Boolean = false) =
+			SeerrLink.offersPage(state(SeerrUserStatus(active = true, userFound = false, reason = reason), admin = admin), pageEnabled = true)
+		offered("unlinked").shouldBeTrue()
+		offered("unreachable").shouldBeTrue()
+		// A failed status read (check again)
+		SeerrLink.offersPage(state(SeerrUserStatus()), pageEnabled = true).shouldBeTrue()
+		offered("no_user", admin = true).shouldBeTrue()
+		offered("no_user").shouldBeFalse()
+		offered("blocked").shouldBeFalse()
+		offered("blocked", admin = true).shouldBeFalse()
+		offered("disabled", admin = true).shouldBeFalse()
+		SeerrLink.offersPage(state(SeerrUserStatus(active = true, userFound = false, reason = "unlinked")), pageEnabled = false).shouldBeFalse()
+		// The page itself still explains a block when it's reached anyway
+		SeerrLink.blocksPage(state(SeerrUserStatus(active = true, userFound = false, reason = "blocked")), pageEnabled = true).shouldBeTrue()
+	}
+
+	test("link recovery counts only a change to linked after a not-linked state, once each time") {
+		val recovery = SeerrLinkRecovery()
+		// A state that says linked from the start (stale or not) never counts
+		recovery.recovered(SeerrLinkKind.LINKED).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.UNLINKED).shouldBeFalse()
+		// Not loaded yet / reloading in between doesn't reset it
+		recovery.recovered(SeerrLinkKind.OFF).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.LINKED).shouldBeTrue()
+		recovery.recovered(SeerrLinkKind.LINKED).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.OFF).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.LINKED).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.UNREACHABLE).shouldBeFalse()
+		recovery.recovered(SeerrLinkKind.LINKED).shouldBeTrue()
+	}
+
 	test("each automatic check can be claimed once per user and session") {
 		val gate = SeerrRecheckGate()
 		val alice = UUID.randomUUID()

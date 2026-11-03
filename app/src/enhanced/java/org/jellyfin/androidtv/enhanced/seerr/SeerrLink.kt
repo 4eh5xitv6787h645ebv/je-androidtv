@@ -92,6 +92,49 @@ object SeerrLink {
 	 */
 	fun blocksPage(state: EnhancedState, pageEnabled: Boolean): Boolean =
 		pageEnabled && kind(state).let { it != SeerrLinkKind.OFF && it != SeerrLinkKind.LINKED }
+
+	/**
+	 * Whether the user can do something about [kind] from a page's link notice: an unlinked user (import, or check
+	 * again), an unreachable or unreadable status (check again), and no-user for administrators (import). Blocked
+	 * and Seerr off are the administrator's decision; nothing on the TV changes them.
+	 */
+	fun recoverable(kind: SeerrLinkKind, isAdmin: Boolean) = when (kind) {
+		SeerrLinkKind.UNLINKED, SeerrLinkKind.UNREACHABLE, SeerrLinkKind.UNKNOWN -> true
+		SeerrLinkKind.NO_USER -> isAdmin
+		SeerrLinkKind.OFF, SeerrLinkKind.LINKED, SeerrLinkKind.BLOCKED -> false
+	}
+
+	/**
+	 * Whether to offer a page gated on Seerr in the hub although the link doesn't work yet: only when its notice has
+	 * an action that can fix it ([recoverable]). A blocked user doesn't get a tile that leads only to "disabled for
+	 * your account"; the About page explains that.
+	 */
+	fun offersPage(state: EnhancedState, pageEnabled: Boolean): Boolean =
+		pageEnabled && recoverable(kind(state), state.isAdmin)
+}
+
+/**
+ * Spots the Seerr link starting to work on a page that was showing the link notice, so the page reloads what failed.
+ * Pages feed it every state they observe (from outside the notice, which disappears as soon as the state says linked).
+ * Only a change *to* linked after a not-linked state counts: a stale "linked" state must not reload the page into the
+ * same failure again, and [SeerrLinkKind.OFF] (also what a state that isn't loaded yet says) doesn't count either way.
+ */
+class SeerrLinkRecovery {
+	private var seenNotLinked = false
+
+	/** True once each time [kind] is linked after having been neither linked nor off. */
+	@Synchronized
+	fun recovered(kind: SeerrLinkKind): Boolean {
+		when (kind) {
+			SeerrLinkKind.OFF -> Unit
+			SeerrLinkKind.LINKED -> if (seenNotLinked) {
+				seenNotLinked = false
+				return true
+			}
+			else -> seenNotLinked = true
+		}
+		return false
+	}
 }
 
 /**
