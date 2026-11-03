@@ -9,10 +9,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -22,7 +20,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.sizeIn
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -39,19 +36,25 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.design.AgeRatingTag
+import org.jellyfin.androidtv.enhanced.ui.design.HeroTitle
+import org.jellyfin.androidtv.enhanced.ui.design.InfoLeading
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JePlayerStyle
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.OsdInfo
+import org.jellyfin.androidtv.enhanced.ui.design.OverlayAgeRating
+import org.jellyfin.androidtv.enhanced.ui.design.OverlayPanel
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.browsing.composable.inforow.InfoRowCommunityRating
-import org.jellyfin.androidtv.ui.browsing.composable.inforow.InfoRowCriticRating
 import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.util.getTimeFormatter
-import org.jellyfin.design.Tokens
 import java.time.LocalDateTime
+import java.util.Locale
 import java.util.UUID
 
 /** What the pause screen shows; built from the player's (server-filtered) item DTO. */
@@ -77,8 +80,7 @@ data class RatingBadgeModel(val itemId: UUID, val rating: String, val genres: Li
 /** Community and critic ratings for the OSD title area. */
 data class OsdRatingModel(val communityRating: Float?, val criticPercent: Int?)
 
-private val OverlayBlack = Color(0xFF000000)
-private val Accent = Tokens.Color.colorBlue400
+private val OverlayBlack = Color.Black
 
 /** Everything the enhancer draws over the video: the pause screen and the rating badge. */
 @Composable
@@ -88,7 +90,7 @@ fun PlaybackOverlay(pause: PauseScreenModel?, badge: RatingBadgeModel?, osdShowi
 			visible = badge != null && pause == null && !osdShowing,
 			enter = fadeIn(tween(FADE_MS)) + slideInHorizontally(tween(FADE_MS)) { -it / 8 },
 			exit = fadeOut(tween(FADE_MS)) + slideOutHorizontally(tween(FADE_MS)) { -it / 8 },
-			modifier = Modifier.align(Alignment.TopStart).padding(top = 64.dp),
+			modifier = Modifier.align(Alignment.TopStart).padding(start = JeSpace.pageHorizontal, top = 64.dp),
 		) {
 			// Keep the last badge while it fades out
 			var shown by remember { mutableStateOf(badge) }
@@ -125,14 +127,14 @@ private fun PauseScreen(model: PauseScreenModel) {
 				.background(Brush.horizontalGradient(listOf(OverlayBlack.copy(alpha = 0.92f), OverlayBlack.copy(alpha = 0.35f))))
 		)
 
-		PauseClock(Modifier.align(Alignment.TopEnd).padding(top = 32.dp, end = 48.dp))
+		PauseClock(Modifier.align(Alignment.TopEnd).padding(top = JeSpace.pageBottom, end = JeSpace.pageHorizontal))
 
 		Column(
 			verticalArrangement = Arrangement.spacedBy(14.dp),
 			modifier = Modifier
 				.fillMaxHeight()
 				.fillMaxWidth(0.58f)
-				.padding(start = 64.dp, top = 72.dp, bottom = 40.dp),
+				.padding(start = JeSpace.pageHorizontal, top = 72.dp, bottom = 40.dp),
 		) {
 			if (model.logoUrl != null) {
 				AsyncImage(
@@ -141,17 +143,17 @@ private fun PauseScreen(model: PauseScreenModel) {
 					modifier = Modifier.sizeIn(maxWidth = 380.dp, maxHeight = 110.dp).height(110.dp).fillMaxWidth(),
 				)
 			} else {
-				Text(model.title, fontSize = 38.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 2, overflow = TextOverflow.Ellipsis)
+				HeroTitle(model.title)
 			}
 
 			model.episodeLine?.let {
-				Text(it, fontSize = 20.sp, color = Color.White, maxLines = 1, overflow = TextOverflow.Ellipsis)
+				Text(it, style = JeType.dialogTitle, maxLines = 1, overflow = TextOverflow.Ellipsis)
 			}
 
 			DetailsLine(model)
 
 			model.overview?.takeIf { it.isNotBlank() }?.let {
-				Text(it, fontSize = 16.sp, lineHeight = 24.sp, color = Tokens.Color.colorGrey100, maxLines = 6, overflow = TextOverflow.Ellipsis)
+				Text(it, style = JePlayerStyle.pauseDetails, maxLines = 6, overflow = TextOverflow.Ellipsis)
 			}
 
 			Spacer(Modifier.weight(1f))
@@ -165,20 +167,11 @@ private fun PauseScreen(model: PauseScreenModel) {
 private fun DetailsLine(model: PauseScreenModel) {
 	val parts = listOfNotNull(model.year?.toString(), model.officialRating, model.runtime)
 	if (parts.isEmpty()) return
+	val style = JePlayerStyle.pauseDetails.copy(color = JeColors.onSurface)
 	Row(horizontalArrangement = Arrangement.spacedBy(20.dp), verticalAlignment = Alignment.CenterVertically) {
-		model.year?.let { Text(it.toString(), fontSize = 18.sp, color = Color.White) }
-		model.officialRating?.let {
-			Text(
-				it,
-				fontSize = 15.sp,
-				fontWeight = FontWeight.Bold,
-				color = Color.White,
-				modifier = Modifier
-					.border(1.dp, Color.White.copy(alpha = 0.7f), RoundedCornerShape(4.dp))
-					.padding(horizontal = 6.dp, vertical = 1.dp),
-			)
-		}
-		model.runtime?.let { Text(it, fontSize = 18.sp, color = Color.White) }
+		model.year?.let { Text(it.toString(), style = style) }
+		model.officialRating?.let { AgeRatingTag(it) }
+		model.runtime?.let { Text(it, style = style) }
 	}
 }
 
@@ -206,9 +199,9 @@ private fun Progress(model: PauseScreenModel) {
 			val remainingMs = (model.durationMs - model.positionMs).coerceAtLeast(0)
 			val endsAt = now.plusNanos((remainingMs / model.speed.coerceAtLeast(0.1f)).toLong() * 1_000_000)
 			Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-				Text("${PlaybackItemInfo.clock(model.positionMs)} / ${PlaybackItemInfo.clock(model.durationMs)}", fontSize = 15.sp, color = Color.White)
-				Text(stringResource(R.string.je_playback_remaining, PlaybackItemInfo.clock(remainingMs)), fontSize = 15.sp, color = Tokens.Color.colorGrey300)
-				Text(stringResource(R.string.je_playback_ends_at, context.getTimeFormatter().format(endsAt)), fontSize = 15.sp, color = Tokens.Color.colorGrey300)
+				Text("${PlaybackItemInfo.clock(model.positionMs)} / ${PlaybackItemInfo.clock(model.durationMs)}", style = JeType.meta, color = JeColors.onSurface)
+				Text(stringResource(R.string.je_playback_remaining, PlaybackItemInfo.clock(remainingMs)), style = JeType.meta)
+				Text(stringResource(R.string.je_playback_ends_at, context.getTimeFormatter().format(endsAt)), style = JeType.meta)
 			}
 		}
 	}
@@ -219,13 +212,8 @@ private fun PauseClock(modifier: Modifier) {
 	val context = LocalContext.current
 	val now = rememberNow()
 	Column(horizontalAlignment = Alignment.End, modifier = modifier) {
-		Text(context.getTimeFormatter().format(now), fontSize = 28.sp, color = Color.White)
-		Text(
-			stringResource(R.string.je_playback_paused),
-			fontSize = 15.sp,
-			color = Tokens.Color.colorGrey300,
-			modifier = Modifier.padding(top = 2.dp),
-		)
+		Text(context.getTimeFormatter().format(now), style = JeType.pageTitle)
+		Text(stringResource(R.string.je_playback_paused), style = JeType.meta, modifier = Modifier.padding(top = 2.dp))
 	}
 }
 
@@ -244,72 +232,35 @@ private fun rememberNow(): LocalDateTime {
 
 @Composable
 private fun RatingBadge(model: RatingBadgeModel) {
-	Row(
-		modifier = Modifier
-			.height(IntrinsicSize.Min)
-			.widthIn(max = 520.dp)
-			.clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
-			.background(Color(0xB8101010))
-	) {
-		Box(Modifier.width(4.dp).fillMaxHeight().background(Accent))
-		Column(
-			verticalArrangement = Arrangement.spacedBy(6.dp),
-			modifier = Modifier.padding(start = 18.dp, end = 24.dp, top = 12.dp, bottom = 12.dp),
-		) {
-			RatingBox(model)
-			if (model.genres.isNotEmpty()) {
-				Text(
-					model.genres.joinToString(" • "),
-					fontSize = 16.sp,
-					fontWeight = FontWeight.Medium,
-					color = Color.White.copy(alpha = 0.85f),
-					maxLines = 1,
-					overflow = TextOverflow.Ellipsis,
-				)
-			}
+	OverlayPanel {
+		if (model.colored) {
+			val style = PlaybackRatingColors.bucket(model.rating).style
+			OverlayAgeRating(
+				text = PlaybackRatingColors.displayText(model.rating),
+				container = Color(style.background),
+				content = Color(style.text),
+				border = Color(style.border),
+			)
+		} else {
+			OverlayAgeRating(text = model.rating, container = Color.Transparent, content = JeColors.onSurface, border = JeColors.onSurface)
+		}
+		if (model.genres.isNotEmpty()) {
+			Text(model.genres.joinToString(" · "), style = JePlayerStyle.badgeGenres, maxLines = 1, overflow = TextOverflow.Ellipsis)
 		}
 	}
 }
 
-@Composable
-private fun RatingBox(model: RatingBadgeModel) {
-	val shape = RoundedCornerShape(5.dp)
-	if (model.colored) {
-		val style = PlaybackRatingColors.bucket(model.rating).style
-		Text(
-			PlaybackRatingColors.displayText(model.rating).uppercase(),
-			fontSize = 26.sp,
-			fontWeight = FontWeight.Bold,
-			color = Color(style.text),
-			modifier = Modifier
-				.background(Color(style.background), shape)
-				.border(2.dp, Color(style.border), shape)
-				.padding(horizontal = 10.dp, vertical = 2.dp),
-		)
-	} else {
-		Text(
-			model.rating,
-			fontSize = 26.sp,
-			fontWeight = FontWeight.Bold,
-			color = Color.White,
-			modifier = Modifier
-				.border(2.dp, Color.White, shape)
-				.padding(horizontal = 10.dp, vertical = 2.dp),
-		)
-	}
-}
-
-/** Critic then community rating, as `osd-rating.js` orders them; reuses the upstream info-row items. */
+/** Critic then community rating, as `osd-rating.js` orders them, as text on the video under the OSD title. */
 @Composable
 fun OsdRating(model: OsdRatingModel?) {
 	if (model == null || (model.communityRating == null && model.criticPercent == null)) return
-	// The info-row items fill their parent's height, so the row needs a fixed one or it grows to the OSD panel
-	Row(
-		horizontalArrangement = Arrangement.spacedBy(12.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		modifier = Modifier.height(24.dp),
-	) {
-		model.criticPercent?.let { InfoRowCriticRating(it / 100f) }
-		model.communityRating?.let { InfoRowCommunityRating(it / 10f) }
+	Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+		model.criticPercent?.let { OsdInfo(text = "$it%", leading = InfoLeading.Dot(JeColors.ratingFresh)) }
+		model.communityRating?.let {
+			OsdInfo(
+				text = String.format(Locale.getDefault(), "%.1f", it),
+				leading = InfoLeading.Icon(R.drawable.je_ic_reviews_star, JeColors.ratingStar),
+			)
+		}
 	}
 }
