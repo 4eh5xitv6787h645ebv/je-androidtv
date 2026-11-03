@@ -23,7 +23,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyGridItemScope
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -217,7 +217,6 @@ internal fun <T> PagedGrid(
 	loader: PagedLoader<T>,
 	columns: Int,
 	emptyMessage: String,
-	key: (T) -> Any,
 	modifier: Modifier = Modifier,
 	header: (@Composable () -> Unit)? = null,
 	item: @Composable LazyGridItemScope.(T) -> Unit,
@@ -246,7 +245,7 @@ internal fun <T> PagedGrid(
 				horizontalArrangement = Arrangement.spacedBy(12.dp),
 				verticalArrangement = Arrangement.spacedBy(12.dp),
 			) {
-				itemsIndexed(items, key = { _, value -> key(value) }) { _, value -> item(value) }
+				items(items, key = loader.key) { value -> item(value) }
 				if (state.error != null || state.loading) {
 					item(span = { GridItemSpan(maxLineSpan) }) {
 						Row(

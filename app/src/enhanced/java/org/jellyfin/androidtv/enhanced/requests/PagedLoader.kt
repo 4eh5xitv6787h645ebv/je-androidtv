@@ -11,11 +11,13 @@ import timber.log.Timber
 /**
  * Loads a paged list one page at a time as the user scrolls. A failed page keeps what was already loaded and is
  * tried again by [loadMore]; [reload] starts over (and drops any load in flight, so a late page from the previous
- * filter can't land in the new list). Must be driven from the main thread.
+ * filter can't land in the new list). Rows are unique by [key]: when the server's list shifts between two page loads
+ * (a new request arrives), a row seen on an earlier page is skipped. Must be driven from the main thread.
  */
 internal class PagedLoader<T>(
 	private val scope: CoroutineScope,
 	private val errorMessage: (Throwable) -> String,
+	val key: (T) -> Any,
 	private val fetch: suspend (page: Int) -> Page<T>,
 ) {
 	companion object {
@@ -63,10 +65,12 @@ internal class PagedLoader<T>(
 					val result = fetch(page)
 					nextPage = page + 1
 					val end = page >= result.totalPages
-					_state.value = _state.value.copy(items = _state.value.items + result.items, endReached = end)
+					val known = _state.value.items.mapTo(HashSet(), key)
+					val fresh = result.items.filter { known.add(key(it)) }
+					_state.value = _state.value.copy(items = _state.value.items + fresh, endReached = end)
 					// A page whose rows were all filtered out adds nothing to scroll onto, so nothing would trigger the
 					// next load: keep going for a few pages
-					emptyPages = if (result.items.isEmpty()) emptyPages + 1 else 0
+					emptyPages = if (fresh.isEmpty()) emptyPages + 1 else 0
 					if (end || emptyPages == 0 || emptyPages >= MAX_EMPTY_PAGES) break
 				}
 				_state.value = _state.value.copy(loading = false)

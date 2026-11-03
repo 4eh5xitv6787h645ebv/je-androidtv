@@ -183,7 +183,7 @@ class RequestsRepositoryTest : FunSpec({
 		val pages = mapOf(1 to listOf("a"), 2 to emptyList(), 3 to listOf("b"), 4 to listOf("c"))
 		var failPage4 = true
 		val requested = mutableListOf<Int>()
-		val loader = PagedLoader(scope, { it.message ?: "error" }) { page ->
+		val loader = PagedLoader(scope, { it.message ?: "error" }, key = { it }) { page ->
 			requested += page
 			if (page == 4 && failPage4) throw IllegalStateException("page 4 failed")
 			PagedLoader.Page(pages.getValue(page), totalPages = 4)
@@ -209,11 +209,21 @@ class RequestsRepositoryTest : FunSpec({
 		scope.cancel()
 	}
 
+	test("rows already seen on an earlier page are skipped when the list shifts") {
+		val scope = CoroutineScope(Dispatchers.Unconfined)
+		val pages = mapOf(1 to listOf("a", "b"), 2 to listOf("b", "c"))
+		val loader = PagedLoader(scope, { "error" }, key = { it }) { page -> PagedLoader.Page(pages.getValue(page), totalPages = 2) }
+		loader.ensureStarted()
+		loader.loadMore()
+		loader.state.value.items shouldContainExactly listOf("a", "b", "c")
+		scope.cancel()
+	}
+
 	test("a reload drops the page still loading for the previous filter") {
 		val scope = CoroutineScope(Dispatchers.Unconfined)
 		val gate = CompletableDeferred<Unit>()
 		var filter = "old"
-		val loader = PagedLoader(scope, { "error" }) { _ ->
+		val loader = PagedLoader(scope, { "error" }, key = { it }) { _ ->
 			val current = filter
 			if (current == "old") gate.await()
 			PagedLoader.Page(listOf(current), totalPages = 1)

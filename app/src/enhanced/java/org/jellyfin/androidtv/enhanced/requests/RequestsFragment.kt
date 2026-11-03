@@ -97,7 +97,7 @@ class RequestsFragment : Fragment() {
 	private val mineOnly = MutableStateFlow<Boolean?>(null)
 	private val canApprove = MutableStateFlow(false)
 	private val busyRequests = MutableStateFlow<Set<Int>>(emptySet())
-	private val requests = PagedLoader(lifecycleScope, ::describe) { page ->
+	private val requests = PagedLoader(lifecycleScope, ::describe, key = { card: RequestsRepository.RequestCard -> card.request.requestId ?: card.request.hashCode() }) { page ->
 		val result = requestsRepository.requests(requestFilter.value, mineOnly.value == true, page, PAGE_SIZE)
 		canApprove.value = result.canApproveRequests
 		PagedLoader.Page(result.cards, result.totalPages)
@@ -105,7 +105,7 @@ class RequestsFragment : Fragment() {
 
 	// Watchlist
 	private val syncing = MutableStateFlow(false)
-	private val watchlist = PagedLoader(lifecycleScope, ::describe) { page ->
+	private val watchlist = PagedLoader(lifecycleScope, ::describe, key = { result: SeerrResult -> result.dedupeKey }) { page ->
 		val result = requestsRepository.watchlist(page)
 		PagedLoader.Page(result.results, result.totalPages)
 	}
@@ -117,7 +117,7 @@ class RequestsFragment : Fragment() {
 
 	// History
 	private val historyVisible = MutableStateFlow(true)
-	private val history = PagedLoader(lifecycleScope, ::describe) { page ->
+	private val history = PagedLoader(lifecycleScope, ::describe, key = { item: HistoryItem -> item }) { page ->
 		val result = requestsRepository.history(page, HISTORY_PAGE_SIZE)
 		historyVisible.value = result.visible
 		PagedLoader.Page(result.items, result.totalPages)
@@ -126,7 +126,7 @@ class RequestsFragment : Fragment() {
 	// Issues
 	private val issueFilter = MutableStateFlow(IssueFilter.ALL)
 	private val issueTitles = HashMap<String, SeerrResult?>()
-	private val issues = PagedLoader(lifecycleScope, ::describe) { page ->
+	private val issues = PagedLoader(lifecycleScope, ::describe, key = { card: RequestsRepository.IssueCard -> card.issue.issueId }) { page ->
 		val result = requestsRepository.issues(issueFilter.value, page, ISSUE_PAGE_SIZE, issueTitles)
 		PagedLoader.Page(result.cards, result.totalPages)
 	}
@@ -273,7 +273,6 @@ class RequestsFragment : Fragment() {
 			loader = requests,
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_nothing_found),
-			key = { it.request.requestId ?: it.request.hashCode() },
 			header = {
 				Row(
 					horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -488,7 +487,6 @@ class RequestsFragment : Fragment() {
 			loader = watchlist,
 			columns = 3,
 			emptyMessage = stringResource(R.string.je_requests_watchlist_empty),
-			key = { it.dedupeKey },
 			header = if (canSync) {
 				{
 					Row(
@@ -602,15 +600,11 @@ class RequestsFragment : Fragment() {
 					if (result.entries.isEmpty()) {
 						item { Text(stringResource(R.string.je_requests_queue_empty), color = Tokens.Color.colorGrey300, fontSize = 18.sp, modifier = Modifier.padding(top = 24.dp)) }
 					}
-					items(result.entries, key = { entry -> entry.key() }) { entry -> QueueRow(entry) }
+					// No item keys: *arr ids aren't guaranteed unique across instances, and the list is replaced wholesale
+					items(result.entries) { entry -> QueueRow(entry) }
 				}
 			}
 		}
-	}
-
-	private fun QueueEntry.key(): String = when (this) {
-		is QueueEntry.Single -> "q-${item.source}-${item.instanceName}-${item.queueId ?: item.hashCode()}"
-		is QueueEntry.SeasonPack -> "p-${item.instanceName}-${item.title}-${item.seasonNumber}-${item.queueId}"
 	}
 
 	@Composable
@@ -681,7 +675,6 @@ class RequestsFragment : Fragment() {
 			loader = history,
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_requests_history_empty),
-			key = { item -> "${item.source}-${item.instanceName}-${item.date}-${item.title}-${item.subtitle}" },
 		) { item ->
 			PosterCard(
 				posterUrl = item.posterUrl,
@@ -716,7 +709,6 @@ class RequestsFragment : Fragment() {
 			loader = issues,
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_requests_issues_empty),
-			key = { it.issue.issueId },
 			header = {
 				Row(
 					horizontalArrangement = Arrangement.spacedBy(8.dp),
