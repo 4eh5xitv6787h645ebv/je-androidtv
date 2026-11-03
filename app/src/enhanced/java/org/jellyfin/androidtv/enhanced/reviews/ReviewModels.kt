@@ -49,18 +49,51 @@ data class TmdbAuthorDetails(
 	val rating: Double? = null,
 )
 
+/**
+ * `GET anilist/reviews?anilistId=N`: AniList's most helpful reviews of an anime. PascalCase (a C# record); the
+ * server already replaced `~!spoiler!~` sections and dropped embedded media. `SiteUrl` is absent when AniList
+ * doesn't know the id.
+ */
+@Serializable
+data class AnilistReviewList(
+	@SerialName("SiteUrl") val siteUrl: String? = null,
+	@SerialName("Reviews") val reviews: List<AnilistReview> = emptyList(),
+)
+
+@Serializable
+data class AnilistReview(
+	@SerialName("Author") val author: String? = null,
+	/** The reviewer's one-line headline. */
+	@SerialName("Summary") val summary: String? = null,
+	/** AniList Markdown. */
+	@SerialName("Content") val content: String? = null,
+	/** The reviewer's score out of 100. */
+	@SerialName("Score") val score: Int? = null,
+	/** Readers who found the review helpful, out of [ratingAmount] who voted. */
+	@SerialName("Rating") val rating: Int = 0,
+	@SerialName("RatingAmount") val ratingAmount: Int = 0,
+	/** ISO-8601 instant. */
+	@SerialName("CreatedAt") val createdAt: String? = null,
+	@SerialName("Url") val url: String? = null,
+)
+
 /** One review as the row and the reader show it, whatever its source. */
 data class ReviewEntry(
 	val source: Source,
 	val author: String,
-	/** Stars out of 5 for JE reviews, out of 10 for TMDB ones (see [source]). */
+	/** Stars out of 5 for JE reviews, out of 10 for TMDB ones, a score out of 100 for AniList ones (see [source]). */
 	val rating: Double?,
 	/** ISO-8601 date or instant. */
 	val date: String?,
 	val content: String,
 	val isOwn: Boolean = false,
+	/** The reviewer's headline (AniList). */
+	val summary: String? = null,
+	/** Readers who found the review helpful, out of [votes] (AniList). */
+	val helpful: Int = 0,
+	val votes: Int = 0,
 ) {
-	enum class Source { JELLYFIN, TMDB }
+	enum class Source { JELLYFIN, TMDB, ANILIST }
 
 	companion object {
 		fun of(review: JeReview, currentUserKey: String?) = ReviewEntry(
@@ -81,8 +114,27 @@ data class ReviewEntry(
 			date = review.createdAt,
 			content = cleanReviewText(review.content.orEmpty()),
 		)
+
+		fun of(review: AnilistReview) = ReviewEntry(
+			source = Source.ANILIST,
+			author = review.author?.takeIf { it.isNotBlank() }.orEmpty(),
+			rating = review.score?.takeIf { it > 0 }?.toDouble(),
+			date = review.createdAt,
+			content = cleanAnilistText(review.content.orEmpty()),
+			summary = review.summary?.trim()?.takeIf { it.isNotEmpty() },
+			helpful = review.rating.coerceAtLeast(0),
+			votes = review.ratingAmount.coerceAtLeast(0),
+		)
 	}
 }
+
+/**
+ * The AniList id of an item from its provider ids. The AniList metadata plugin writes `AniList`; other plugins and
+ * older versions spell it `Anilist`, so the key is matched ignoring case. Null unless it is a positive integer.
+ */
+fun anilistIdOf(providerIds: Map<String, String?>?): Int? = providerIds.orEmpty().entries
+	.firstOrNull { it.key.equals("AniList", ignoreCase = true) }
+	?.value?.trim()?.toIntOrNull()?.takeIf { it > 0 }
 
 /** Jellyfin ids come dashed or dashless and in either case. */
 fun sameUser(a: String, b: String) = a.replace("-", "").equals(b.replace("-", ""), ignoreCase = true)
@@ -132,3 +184,24 @@ fun cleanReviewText(text: String): String = text
 	.replace("&amp;", "&").replace("&quot;", "\"").replace("&#39;", "'").replace("&lt;", "<").replace("&gt;", ">")
 	.replace(blankLines, "\n\n")
 	.trim()
+
+private val anilistCenter = Regex("""~~~""")
+private val anilistHeading = Regex("""(?m)^[ \t]*#{1,6}[ \t]*""")
+private val anilistStrike = Regex("""~~(\S(?:.*?\S)?)~~""")
+// Single underscores only: `__bold__` is left to cleanReviewText
+private val anilistItalic = Regex("""(^|[\s(])_([^_\s](?:[^_\n]*?[^_\s])?)_(?=[\s.,;:!?)]|$)""", RegexOption.MULTILINE)
+private val anilistRule = Regex("""(?m)^[ \t]*(?:-{3,}|\*{3,}|_{3,})[ \t]*$""")
+private val trailingSpaces = Regex("""(?m)[ \t]+$""")
+
+/**
+ * AniList review bodies use AniList's Markdown: `~~~centred~~~` blocks, `#` headings, `__bold__`, `_italic_`,
+ * `~~strike~~` and rules, on top of what [cleanReviewText] handles. Keep the words only.
+ */
+fun cleanAnilistText(text: String): String = cleanReviewText(
+	text
+		.replace(anilistCenter, "")
+		.replace(anilistHeading, "")
+		.replace(anilistRule, "")
+		.replace(anilistStrike, "$1")
+		.replace(anilistItalic, "$1$2"),
+).replace(trailingSpaces, "").replace(blankLines, "\n\n")

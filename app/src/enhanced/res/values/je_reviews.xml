@@ -33,9 +33,29 @@
     <string name="je_reviews_source_tmdb">TMDB</string>
     <string name="je_reviews_tmdb_rating">%1$s/10</string>
     <string name="je_reviews_load_failed">Couldn\'t load reviews. Retry</string>
+    <string name="je_reviews_source_anilist">AniList</string>
+    <string name="je_reviews_anilist_score">Score %1$d</string>
+    <plurals name="je_reviews_anilist_helpful">
+        <item quantity="one">%1$d of %2$d found this helpful</item>
+        <item quantity="other">%1$d of %2$d found this helpful</item>
+    </plurals>
+    <string name="je_reviews_anonymous">Anonymous</string>
 
     <!-- Reader -->
     <string name="je_reviews_position">%1$d of %2$d</string>
     <string name="je_reviews_none">No reviews yet.</string>
     <string name="je_reviews_reader_hint">Left and right for other reviews, up and down to scroll</string>
+    <string name="je_reviews_reader_hint_translate">Left and right for other reviews, up and down to scroll, OK to translate (hold OK to change the language)</string>
+
+    <!-- Translation -->
+    <string name="je_reviews_translate">Translate</string>
+    <string name="je_reviews_translating">Translating…</string>
+    <string name="je_reviews_show_original">Show original</string>
+    <string name="je_reviews_translate_to">Translate reviews into</string>
+    <string name="je_reviews_translate_current">Current</string>
+    <string name="je_reviews_translated_to">Translated into %1$s</string>
+    <string name="je_reviews_translated_partly">Only the first part was translated</string>
+    <string name="je_reviews_translate_disabled">Review translation isn\'t enabled on this server</string>
+    <string name="je_reviews_translate_unavailable">The translation service isn\'t responding. Try again later</string>
+    <string name="je_reviews_translate_failed">Couldn\'t translate the review: %1$s</string>
 </resources>

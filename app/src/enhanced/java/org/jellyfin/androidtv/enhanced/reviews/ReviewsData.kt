@@ -8,7 +8,9 @@ import timber.log.Timber
 
 /**
  * The reviews of one library title. [key] is the JE review key (`603`, `1399:s1`, `1399:s1:e2`); [tmdbId] the
- * movie's or show's TMDB id for TMDB reviews, which exist for whole titles only.
+ * movie's or show's TMDB id for TMDB reviews, which exist for whole titles only. [anilistId] is set when AniList
+ * reviews are on and the title (or its series) has an AniList id; a title with only an AniList id has an empty
+ * [key], 0 [tmdbId] and neither JE nor TMDB reviews.
  */
 data class ReviewTarget(
 	val mediaType: String,
@@ -17,9 +19,10 @@ data class ReviewTarget(
 	val title: String,
 	val includeUser: Boolean,
 	val includeTmdb: Boolean,
+	val anilistId: Int? = null,
 )
 
-/** Loaded reviews: JE reviews first (yours, then newest), then TMDB's. A part that failed has its error set. */
+/** Loaded reviews: JE reviews first (yours, then newest), then AniList's, then TMDB's. A part that failed has its error set. */
 data class ReviewsData(
 	val summary: RatingSummary? = null,
 	val own: JeReview? = null,
@@ -28,18 +31,31 @@ data class ReviewsData(
 	val tmdbPages: Int = 0,
 	val userError: Failure? = null,
 	val tmdbError: Failure? = null,
+	val anilistError: Failure? = null,
 ) {
 	/** A failed part, with the server's message when there was one. */
 	data class Failure(val message: String?)
 
 	val hasMoreTmdb get() = tmdbPage in 1 until tmdbPages
+
+	/** The first failed part, for the row's retry card and the reader's error page. */
+	val firstError get() = userError ?: tmdbError ?: anilistError
 }
 
-/** JE reviews (own first, then newest first) followed by TMDB reviews in TMDB's order. */
-fun buildEntries(user: List<JeReview>, tmdb: List<TmdbReview>, currentUserKey: String?): List<ReviewEntry> {
+/**
+ * JE reviews (own first, then newest first), then AniList reviews in AniList's (most helpful first) order, then TMDB
+ * reviews in TMDB's order. TMDB goes last because it is the only paged source: later pages append at the end.
+ */
+fun buildEntries(
+	user: List<JeReview>,
+	tmdb: List<TmdbReview>,
+	currentUserKey: String?,
+	anilist: List<AnilistReview> = emptyList(),
+): List<ReviewEntry> {
 	val jellyfin = user.map { ReviewEntry.of(it, currentUserKey) }
 		.sortedWith(compareByDescending<ReviewEntry> { it.isOwn }.thenByDescending { it.date.orEmpty() })
-	return jellyfin + tmdb.map(ReviewEntry::of).filter { it.content.isNotBlank() }
+	val anilistEntries = anilist.map(ReviewEntry::of).filter { it.content.isNotBlank() || it.summary != null }
+	return jellyfin + anilistEntries + tmdb.map(ReviewEntry::of).filter { it.content.isNotBlank() }
 }
 
 private suspend fun <T> part(name: String, block: suspend () -> T): Result<T> = try {
@@ -55,19 +71,22 @@ private suspend fun <T> part(name: String, block: suspend () -> T): Result<T> = 
 suspend fun ReviewsRepository.load(target: ReviewTarget): ReviewsData = coroutineScope {
 	val user = if (target.includeUser) async { part("user") { userReviews(target.mediaType, target.key) } } else null
 	val tmdb = if (target.includeTmdb) async { part("TMDB") { tmdbReviews(target.mediaType, target.tmdbId, 1) } } else null
+	val anilist = target.anilistId?.let { id -> async { part("AniList") { anilistReviews(id) } } }
 	val userResult = user?.await()
 	val tmdbResult = tmdb?.await()
+	val anilistResult = anilist?.await()
 	val userReviews = userResult?.getOrNull().orEmpty()
 	val tmdbPage = tmdbResult?.getOrNull()
 
 	ReviewsData(
 		summary = if (userResult?.isSuccess == true) summarize(userReviews) else null,
 		own = currentUserKey?.let { me -> userReviews.firstOrNull { sameUser(it.userId, me) } },
-		entries = buildEntries(userReviews, tmdbPage?.results.orEmpty(), currentUserKey),
+		entries = buildEntries(userReviews, tmdbPage?.results.orEmpty(), currentUserKey, anilistResult?.getOrNull()?.reviews.orEmpty()),
 		tmdbPage = tmdbPage?.page ?: 0,
 		tmdbPages = tmdbPage?.totalPages ?: 0,
 		userError = userResult?.exceptionOrNull()?.let { ReviewsData.Failure(it.displayMessage()) },
 		tmdbError = tmdbResult?.exceptionOrNull()?.let { ReviewsData.Failure(it.displayMessage()) },
+		anilistError = anilistResult?.exceptionOrNull()?.let { ReviewsData.Failure(it.displayMessage()) },
 	)
 }
 

@@ -71,6 +71,9 @@ import timber.log.Timber
 
 private val starColor = Color(0xFFFFC107)
 
+/** AniList's brand blue, as the web client tints AniList cards. */
+private val anilistColor = Color(0xFF3DB4F2)
+
 /** Five stars for [rating] out of five, with a half star where needed. */
 @Composable
 fun StarRow(rating: Double, size: Dp = 16.dp, modifier: Modifier = Modifier) {
@@ -108,7 +111,11 @@ private fun ReviewCardSurface(onClick: () -> Unit, modifier: Modifier = Modifier
 private fun ReviewCard(entry: ReviewEntry, expanded: Boolean, onClick: () -> Unit) = ReviewCardSurface(onClick) {
 	Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
 		Text(
-			text = if (entry.isOwn) stringResource(R.string.je_reviews_you) else entry.author,
+			text = when {
+				entry.isOwn -> stringResource(R.string.je_reviews_you)
+				entry.author.isBlank() -> stringResource(R.string.je_reviews_anonymous)
+				else -> entry.author
+			},
 			color = Tokens.Color.colorWhite,
 			fontSize = 15.sp,
 			maxLines = 1,
@@ -117,30 +124,50 @@ private fun ReviewCard(entry: ReviewEntry, expanded: Boolean, onClick: () -> Uni
 		)
 		ReviewRating(entry, 14.dp)
 	}
-	val meta = listOfNotNull(
-		stringResource(R.string.je_reviews_source_tmdb).takeIf { entry.source == ReviewEntry.Source.TMDB },
-		reviewDate(entry.date),
-	).joinToString(" · ")
+	val meta = listOfNotNull(reviewSourceName(entry.source), reviewDate(entry.date)).joinToString(" · ")
 	if (meta.isNotEmpty()) Text(text = meta, color = secondaryTextColor(), fontSize = 12.sp)
+	// AniList reviews lead with the reviewer's headline; the body is for the reader
+	if (entry.summary != null) {
+		Text(
+			text = entry.summary,
+			color = Tokens.Color.colorWhite,
+			fontSize = 14.sp,
+			maxLines = 2,
+			overflow = TextOverflow.Ellipsis,
+		)
+	}
 	if (entry.content.isNotBlank()) {
 		Text(
 			text = entry.content,
 			color = Tokens.Color.colorGrey100,
 			fontSize = 14.sp,
-			maxLines = if (expanded) 8 else 3,
+			maxLines = when {
+				entry.summary != null -> if (expanded) 6 else 1
+				expanded -> 8
+				else -> 3
+			},
 			overflow = TextOverflow.Ellipsis,
 		)
 	}
 }
 
-/** Stars for JE reviews, `8/10` for TMDB ones. */
+/** Stars for JE reviews, `8/10` for TMDB ones, `Score 85` for AniList ones. */
 @Composable
 internal fun ReviewRating(entry: ReviewEntry, size: Dp) {
 	val rating = entry.rating?.takeIf { it > 0 } ?: return
 	when (entry.source) {
 		ReviewEntry.Source.JELLYFIN -> StarRow(rating, size)
 		ReviewEntry.Source.TMDB -> Text(stringResource(R.string.je_reviews_tmdb_rating, formatRating(rating)), color = starColor, fontSize = 13.sp)
+		ReviewEntry.Source.ANILIST -> Text(stringResource(R.string.je_reviews_anilist_score, rating.toInt()), color = anilistColor, fontSize = 13.sp)
 	}
+}
+
+/** The source label of external reviews; JE reviews have none. */
+@Composable
+internal fun reviewSourceName(source: ReviewEntry.Source): String? = when (source) {
+	ReviewEntry.Source.JELLYFIN -> null
+	ReviewEntry.Source.TMDB -> stringResource(R.string.je_reviews_source_tmdb)
+	ReviewEntry.Source.ANILIST -> stringResource(R.string.je_reviews_source_anilist)
 }
 
 /**
@@ -183,10 +210,11 @@ fun ReviewsRowContent(
 		itemsIndexed(data.entries, key = { index, entry -> "${entry.source}:$index" }) { index, entry ->
 			ReviewCard(entry, expanded) { onOpen(index) }
 		}
-		if (data.userError != null || data.tmdbError != null) item(key = "retry") {
+		val error = data.firstError
+		if (error != null) item(key = "retry") {
 			ReviewCardSurface(onClick = onRetry) {
 				Text(stringResource(R.string.je_reviews_load_failed), color = Tokens.Color.colorWhite, fontSize = 15.sp)
-				(data.userError?.message ?: data.tmdbError?.message)?.let { Text(it, color = secondaryTextColor(), fontSize = 13.sp) }
+				error.message?.let { Text(it, color = secondaryTextColor(), fontSize = 13.sp) }
 			}
 		}
 	}
