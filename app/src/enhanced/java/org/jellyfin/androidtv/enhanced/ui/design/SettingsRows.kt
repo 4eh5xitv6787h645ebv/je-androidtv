@@ -76,7 +76,8 @@ fun SettingsToggle(
 
 /**
  * A setting with a few values: the current one is the caption, pressing opens a [JeChoiceDialog]. [captions]
- * describes each option in the dialog.
+ * describes each option in the dialog. [caption] replaces the current value under the title ("Saving…", a stored
+ * value that isn't one of the [options]).
  */
 @Composable
 fun SettingsChoice(
@@ -87,6 +88,7 @@ fun SettingsChoice(
 	modifier: Modifier = Modifier,
 	enabled: Boolean = true,
 	captions: List<String?>? = null,
+	caption: String? = null,
 ) {
 	var open by remember { mutableStateOf(false) }
 	ListButton(
@@ -94,7 +96,7 @@ fun SettingsChoice(
 		enabled = enabled,
 		modifier = modifier,
 		headingContent = { Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-		captionContent = options.getOrNull(selected)?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
+		captionContent = (caption ?: options.getOrNull(selected))?.let { { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) } },
 	)
 	JeChoiceDialog(
 		visible = open,

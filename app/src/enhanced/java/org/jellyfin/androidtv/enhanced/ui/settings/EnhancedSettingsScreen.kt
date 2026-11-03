@@ -6,15 +6,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
-import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.list.ListButton
-import org.jellyfin.androidtv.ui.base.list.ListSection
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsIntro
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsNav
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsSection
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
 import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
@@ -38,26 +36,22 @@ fun EnhancedSettingsScreen() {
 
 	SettingsColumn {
 		item {
-			ListSection(
-				overlineContent = { Text(stringResource(R.string.settings).uppercase()) },
-				headingContent = { Text(stringResource(R.string.je_settings_title)) },
-				captionContent = {
-					Text(
-						state.pluginVersion?.let { stringResource(R.string.je_hub_version, it) }
-							?: stringResource(R.string.je_settings_caption)
-					)
-				},
-			)
+			SettingsSection(overline = stringResource(R.string.settings), heading = stringResource(R.string.je_settings_title))
+		}
+		item {
+			SettingsIntro(state.pluginVersion?.let { stringResource(R.string.je_hub_version, it) } ?: stringResource(R.string.je_settings_caption))
 		}
 
-		for (entry in featureSettingsEntries.filter { it.enabled(state) }) {
+		val entries = featureSettingsEntries.filter { it.enabled(state) }
+		for (entry in entries) {
 			item {
-				ListButton(
-					leadingContent = { Icon(painterResource(entry.icon), contentDescription = null) },
-					headingContent = { Text(stringResource(entry.title)) },
-					captionContent = { Text(stringResource(entry.caption)) },
+				SettingsNav(
+					icon = entry.icon,
+					title = stringResource(entry.title),
+					caption = stringResource(entry.caption),
 					onClick = { router.push(entry.route) },
-					modifier = Modifier.focusKey(entry.route),
+					// The focus starts on the first page, not on the heading
+					modifier = Modifier.focusKey(entry.route, initialFocus = entry === entries.first()),
 				)
 			}
 		}

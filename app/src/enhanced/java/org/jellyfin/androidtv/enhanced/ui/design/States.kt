@@ -81,6 +81,7 @@ fun <T> LoadStateContent(
  * A centred empty page (spec §6.10): optional 48 dp [icon], [title], a [body] that says how to fill the page
  * ("Press Bookmark in the player to save a moment."), and a focusable [action] (Back by default) so a D-pad user
  * always lands on something. The action takes the focus unless something else on the [PageScaffold] has it.
+ * [secondary] adds a second button after it (Catch Up's Undo).
  */
 @Composable
 fun EmptyState(
@@ -89,6 +90,7 @@ fun EmptyState(
 	@DrawableRes icon: Int? = null,
 	body: String? = null,
 	action: EmptyAction? = rememberBackAction(),
+	secondary: EmptyAction? = null,
 ) {
 	val actionFocus = remember { FocusRequester() }
 	val pageFocused = LocalPageFocused.current
@@ -99,7 +101,10 @@ fun EmptyState(
 		body = body,
 	) {
 		if (action == null) return@StateLayout
-		JeButton(text = action.label, onClick = action.onClick, modifier = Modifier.focusRequester(actionFocus))
+		Row(horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap)) {
+			JeButton(text = action.label, onClick = action.onClick, modifier = Modifier.focusRequester(actionFocus))
+			if (secondary != null) JeButton(text = secondary.label, onClick = secondary.onClick)
+		}
 		LaunchedEffect(Unit) {
 			// Let the focus settle first: a removed row's focus may still be moving to the page's own controls
 			withFrameNanos { }

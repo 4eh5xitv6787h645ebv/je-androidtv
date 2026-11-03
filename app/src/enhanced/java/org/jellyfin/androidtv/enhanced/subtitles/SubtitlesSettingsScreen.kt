@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.times
@@ -38,14 +37,15 @@ import org.jellyfin.androidtv.enhanced.management.settings.EnhancedToggleRow
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsHeader
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsLoad
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsSection
+import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsUnavailable
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsNav
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.preference.UserPreferences
-import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.form.ColorSwatch
 import org.jellyfin.androidtv.ui.base.list.ListButton
-import org.jellyfin.androidtv.ui.base.list.ListMessage
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
 import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 import org.jellyfin.androidtv.ui.settings.Routes
@@ -141,7 +141,7 @@ fun SubtitlesSettingsScreen() {
 		)
 
 		if (!enhanced.available) {
-			item { ListMessage { Text(stringResource(R.string.je_hub_unavailable)) } }
+			enhancedSettingsUnavailable { stringResource(R.string.je_hub_unavailable) }
 			return@SettingsColumn
 		}
 
@@ -159,6 +159,8 @@ fun SubtitlesSettingsScreen() {
 				),
 				checked = enabled,
 				saving = saving,
+				// The focus starts on the switch, not on the page heading
+				initialFocus = true,
 				onToggle = ::toggle,
 			)
 		}
@@ -167,10 +169,10 @@ fun SubtitlesSettingsScreen() {
 		mappingItems(current)
 
 		item(key = "native") {
-			ListButton(
-				leadingContent = { Icon(painterResource(R.drawable.je_ic_subtitles), contentDescription = null) },
-				headingContent = { Text(stringResource(R.string.je_subtitles_open_native)) },
-				captionContent = { Text(stringResource(R.string.je_subtitles_open_native_caption)) },
+			SettingsNav(
+				icon = R.drawable.je_ic_subtitles,
+				title = stringResource(R.string.je_subtitles_open_native),
+				caption = stringResource(R.string.je_subtitles_open_native_caption),
 				onClick = { router.push(Routes.CUSTOMIZATION_SUBTITLES) },
 				modifier = Modifier.focusKey("je_subtitles_native"),
 			)
@@ -235,10 +237,10 @@ private fun MappedPreview(native: NativeSubtitleStyle) {
 		edgeColor = native.strokeColor,
 		typeface = remember(weight) { TypefaceCompat.create(context, Typeface.DEFAULT, weight, false) },
 		modifier = Modifier
-			.background(Tokens.Color.colorBluegrey800, JellyfinTheme.shapes.large)
+			.background(JeColors.surface, JeShapes.container)
 			.fillMaxWidth()
 			.height(native.textSize * 3.dp)
-			.clip(JellyfinTheme.shapes.large),
+			.clip(JeShapes.container),
 	)
 	Spacer(Modifier.height(Tokens.Space.spaceSm))
 }

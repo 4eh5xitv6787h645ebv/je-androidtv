@@ -1,7 +1,6 @@
 package org.jellyfin.androidtv.enhanced.maintenance
 
 import android.app.Activity
-import android.app.AlertDialog
 import android.app.Application
 import android.content.Context
 import android.os.Bundle
@@ -43,7 +42,7 @@ class MaintenanceNotifier(
 	private val scope = MainScope()
 	private var activity: WeakReference<FragmentActivity>? = null
 	private var pending: Pending? = null
-	private var dialog: AlertDialog? = null
+	private var dialog: MaintenanceDialog? = null
 	private var dialogFor: Pending? = null
 
 	private val fragmentCallbacks = object : FragmentManager.FragmentLifecycleCallbacks() {
@@ -125,28 +124,23 @@ class MaintenanceNotifier(
 			return
 		}
 		val text = maintenanceText(activity, next.notice, now)
-		val message = listOf(text.message, text.details.joinToString("\n")).filter { it.isNotEmpty() }.joinToString("\n\n")
 		try {
-			dialog = AlertDialog.Builder(activity)
-				.setTitle(text.title)
-				.setMessage(message)
-				.setPositiveButton(android.R.string.ok, null)
-				.setOnDismissListener {
-					// Closed by the user (OK or Back): this window's dialog is done; close() clears dialogFor first
-					val shown = dialogFor
-					dialog = null
-					dialogFor = null
-					if (shown != null) {
-						store.remember(shown.serverId, shown.userId, shown.notice.windowKey)
-						if (pending === shown) pending = null
-					}
-				}
-				.show()
 			dialogFor = next
+			dialog = MaintenanceDialog.show(activity, text) {
+				// Closed by the user (OK or Back): this window's dialog is done; close() clears dialogFor first
+				val shown = dialogFor
+				dialog = null
+				dialogFor = null
+				if (shown != null) {
+					store.remember(shown.serverId, shown.userId, shown.notice.windowKey)
+					if (pending === shown) pending = null
+				}
+			}
 		} catch (err: RuntimeException) {
 			// A window token gone between the checks above and show(); try again on the next resume
 			Timber.w(err, "Failed to show the maintenance notice")
 			dialog = null
+			dialogFor = null
 		}
 	}
 

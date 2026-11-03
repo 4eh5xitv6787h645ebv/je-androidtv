@@ -18,7 +18,7 @@ import org.koin.compose.koinInject
 /**
  * Whether the toolbar belongs to the hub itself rather than to one of its feature pages: both show the Enhanced button
  * active, but only on the hub does pressing it have nothing to do. Provided by
- * [org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen].
+ * [org.jellyfin.androidtv.enhanced.ui.hub.EnhancedHubFragment] (and `EnhancedScreen(hub = true)`).
  */
 val LocalOnEnhancedHub = staticCompositionLocalOf { false }
 

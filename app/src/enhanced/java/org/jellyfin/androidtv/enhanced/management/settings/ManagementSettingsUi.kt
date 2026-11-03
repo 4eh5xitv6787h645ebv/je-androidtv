@@ -5,34 +5,30 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsChoice
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsIntro
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsSection
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsToggle
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.form.Checkbox
 import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.androidtv.ui.base.list.ListMessage
-import org.jellyfin.androidtv.ui.base.list.ListSection
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
 import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 
-/** The heading of a Jellyfin Enhanced settings page, styled like upstream's settings screens. */
+/**
+ * The heading of a Jellyfin Enhanced settings page: "JELLYFIN ENHANCED" overline, the [title], and the page intro
+ * ([caption], at most two lines, said once instead of in every row).
+ */
 fun LazyListScope.enhancedSettingsHeader(title: @Composable () -> String, caption: (@Composable () -> String)? = null) {
-	item {
-		ListSection(
-			overlineContent = { Text(stringResource(R.string.je_settings_title).uppercase()) },
-			headingContent = { Text(title()) },
-			captionContent = caption?.let { { Text(it()) } },
-		)
-	}
+	item { SettingsSection(overline = stringResource(R.string.je_settings_title), heading = title()) }
+	if (caption != null) item { SettingsIntro(caption()) }
 }
 
-/** A section heading between groups of rows. */
+/** A group of rows under an overline ("HIDDEN ON PROTECTED TITLES"), never a bold row. */
 fun LazyListScope.enhancedSettingsSection(title: @Composable () -> String, caption: (@Composable () -> String)? = null) {
-	item {
-		ListSection(
-			headingContent = { Text(title()) },
-			captionContent = caption?.let { { Text(it()) } },
-		)
-	}
+	item { SettingsSection(overline = title()) }
+	if (caption != null) item { SettingsIntro(caption()) }
 }
 
 /**
@@ -77,8 +73,8 @@ fun LazyListScope.enhancedSettingsUnavailable(message: @Composable () -> String)
 }
 
 /**
- * A checkbox row. [saving] shows the row as busy and ignores clicks until the save finishes. Give the page's first
- * row [initialFocus] so the focus starts there, not on the page's heading.
+ * A checkbox row ([SettingsToggle]). [saving] shows the row as busy and ignores clicks until the save finishes. Give
+ * the page's first row [initialFocus] so the focus starts there, not on the page's heading.
  */
 @Composable
 fun EnhancedToggleRow(
@@ -90,39 +86,36 @@ fun EnhancedToggleRow(
 	initialFocus: Boolean = false,
 	onToggle: () -> Unit,
 ) {
-	ListButton(
-		headingContent = { Text(title) },
-		captionContent = when {
-			saving -> {
-				{ Text(stringResource(R.string.je_management_saving)) }
-			}
-
-			caption != null -> {
-				{ Text(caption) }
-			}
-
-			else -> null
-		},
-		trailingContent = { Checkbox(checked = checked) },
-		onClick = { if (!saving) onToggle() },
+	SettingsToggle(
+		title = title,
+		caption = if (saving) stringResource(R.string.je_management_saving) else caption,
+		checked = checked,
+		onToggle = { if (!saving) onToggle() },
 		modifier = Modifier.focusKey("je_$key", initialFocus = initialFocus),
 	)
 }
 
-/** A row that cycles through a few values on click, showing the current one as its caption. */
+/**
+ * A setting with a few values ([SettingsChoice]): the current one is the caption, pressing opens a picker. [selected]
+ * is -1 for a stored value that isn't one of the [options]; [value] is then shown as is.
+ */
 @Composable
 fun EnhancedChoiceRow(
 	key: String,
 	title: String,
+	options: List<String>,
+	selected: Int,
 	value: String,
 	saving: Boolean,
 	initialFocus: Boolean = false,
-	onNext: () -> Unit,
+	onSelect: (Int) -> Unit,
 ) {
-	ListButton(
-		headingContent = { Text(title) },
-		captionContent = { Text(if (saving) stringResource(R.string.je_management_saving) else value) },
-		onClick = { if (!saving) onNext() },
+	SettingsChoice(
+		title = title,
+		options = options,
+		selected = selected,
+		caption = if (saving) stringResource(R.string.je_management_saving) else value,
+		onSelect = { if (!saving && it != selected) onSelect(it) },
 		modifier = Modifier.focusKey("je_$key", initialFocus = initialFocus),
 	)
 }

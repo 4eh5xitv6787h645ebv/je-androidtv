@@ -1,12 +1,12 @@
 package org.jellyfin.androidtv.enhanced.catchup
 
-import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,13 +31,25 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
-import org.jellyfin.androidtv.enhanced.calendar.PageChip
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.ActionRow
+import org.jellyfin.androidtv.enhanced.ui.design.ChipSeparator
+import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.ErrorState
+import org.jellyfin.androidtv.enhanced.ui.design.FilterChip
+import org.jellyfin.androidtv.enhanced.ui.design.HeroScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.LabeledIconButtonSpec
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingSkeleton
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
+import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.ui.base.dialog.DialogBase
+import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.PlaybackHelper
@@ -72,6 +84,10 @@ class CatchUpFragment : Fragment() {
 	/** Why the last fetch failed; only shown when there's no card to show. */
 	private val fetchError = MutableStateFlow<LoadState.Error?>(null)
 	private val picker = MutableStateFlow<SeasonPicker?>(null)
+	private val confirmingClear = MutableStateFlow(false)
+
+	/** What the "1 of 47" count is worked out from; reset whenever the deck starts over. */
+	private val tally = MutableStateFlow(CatchUpTally())
 	private var fetchJob: Job? = null
 
 	/** An action is running; further presses are ignored so one press can't act on the next card. */
@@ -96,119 +112,135 @@ class CatchUpFragment : Fragment() {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val deckState by deck.collectAsState()
+		val tallyState by tally.collectAsState()
 		val currentFilter by filter.collectAsState()
 		val isFetching by fetching.collectAsState()
 		val error by fetchError.collectAsState()
 		val openPicker by picker.collectAsState()
+		val confirmClear by confirmingClear.collectAsState()
+		val left = tallyState.left(deckState)
 
-		EnhancedScreen(
-			title = stringResource(R.string.je_catchup_title),
-			headerActions = {
-				FilterChip(R.string.je_catchup_filter_all, CatchUpFilter.ALL, currentFilter)
-				FilterChip(R.string.je_catchup_filter_movies, CatchUpFilter.MOVIES, currentFilter)
-				FilterChip(R.string.je_catchup_filter_shows, CatchUpFilter.SHOWS, currentFilter)
-				if (deckState.dismissed.isNotEmpty()) {
-					PageChip(
-						label = stringResource(R.string.je_catchup_reset_dismissed, deckState.dismissed.size),
-						selected = false,
-						onClick = ::confirmClearDismissed,
+		val current = deckState.current
+		val failed = error
+		if (session != null && current != null) {
+			Deck(current, deckState, left, currentFilter)
+		} else {
+			PageScaffold(
+				title = stringResource(R.string.je_catchup_title),
+				actions = { Filters(deckState, currentFilter) },
+			) {
+				when {
+					session == null -> EmptyState(title = stringResource(R.string.je_catchup_no_session))
+					isFetching -> LoadingSkeleton(SkeletonShape.Hero)
+					failed != null -> ErrorState(message = failed.message, onRetry = failed.retry)
+					else -> EmptyState(
+						title = stringResource(if (currentFilter == CatchUpFilter.ALL) R.string.je_catchup_empty else R.string.je_catchup_empty_filtered),
+						icon = R.drawable.je_ic_catchup_style,
+						action = EmptyAction(stringResource(R.string.je_catchup_start_over), ::reshuffle),
+						secondary = if (deckState.canUndo) EmptyAction(stringResource(R.string.je_catchup_undo), ::undo) else null,
 					)
 				}
+			}
+		}
+
+		SeasonPickerDialog(
+			picker = openPicker,
+			onToggle = { index -> picker.update { it?.copy(selected = SeasonSelection.toggle(it.selected, index)) } },
+			onAll = {
+				val shown = picker.value ?: return@SeasonPickerDialog
+				picker.value = null
+				perform(shown.series, SeasonSelection.wholeShow(shown.series))
 			},
-		) {
-			val current = deckState.current
-			val failed = error
-			when {
-				session == null -> LoadStateContent(
-					state = LoadState.Ready(Unit),
-					empty = { true },
-					emptyMessage = stringResource(R.string.je_catchup_no_session),
-				) { }
+			onConfirm = {
+				val shown = picker.value ?: return@SeasonPickerDialog
+				picker.value = null
+				SeasonSelection.action(shown.series, shown.seasons, shown.selected)?.let { perform(shown.series, it) }
+			},
+			onCancel = { picker.value = null },
+		)
 
-				current != null -> Deck(current, deckState.canUndo)
-				isFetching -> LoadStateContent(LoadState.Loading) { }
-				failed != null -> LoadStateContent(failed) { }
-				else -> Empty(deckState, currentFilter)
-			}
+		JeConfirmDialog(
+			visible = confirmClear,
+			title = stringResource(R.string.je_catchup_reset_dismissed_title),
+			body = stringResource(R.string.je_catchup_reset_dismissed_message, deckState.dismissed.size),
+			confirmLabel = stringResource(R.string.je_catchup_reset_dismissed_confirm),
+			onConfirm = ::clearDismissed,
+			onDismissRequest = { confirmingClear.value = false },
+		)
+	}
+
+	/** The type filters, then "Show dismissed again (12)" after a divider while anything is dismissed. */
+	@Composable
+	private fun Filters(deckState: CatchUpDeck, currentFilter: CatchUpFilter) {
+		for ((label, value) in FILTERS) {
+			FilterChip(label = stringResource(label), selected = value == currentFilter, onClick = { setFilter(value) })
 		}
-
-		DialogBase(visible = openPicker != null, onDismissRequest = { picker.value = null }) {
-			openPicker?.let { shown ->
-				SeasonPickerPanel(
-					picker = shown,
-					onToggle = { index -> picker.update { it?.copy(selected = SeasonSelection.toggle(it.selected, index)) } },
-					onAll = {
-						picker.value = null
-						perform(shown.series, SeasonSelection.wholeShow(shown.series))
-					},
-					onConfirm = {
-						picker.value = null
-						SeasonSelection.action(shown.series, shown.seasons, shown.selected)?.let { perform(shown.series, it) }
-					},
-					onCancel = { picker.value = null },
-				)
-			}
+		if (deckState.dismissed.isNotEmpty()) {
+			ChipSeparator()
+			FilterChip(
+				label = stringResource(R.string.je_catchup_reset_dismissed, deckState.dismissed.size),
+				selected = false,
+				onClick = { confirmingClear.value = true },
+			)
 		}
 	}
 
 	@Composable
-	private fun FilterChip(@StringRes label: Int, value: CatchUpFilter, current: CatchUpFilter) {
-		PageChip(label = stringResource(label), selected = value == current, onClick = { setFilter(value) })
-	}
-
-	@Composable
-	private fun Deck(item: CatchUpItem, canUndo: Boolean) {
+	private fun Deck(item: CatchUpItem, deckState: CatchUpDeck, left: Int?, currentFilter: CatchUpFilter) {
 		val requesters = remember { DeckButton.entries.associateWith { FocusRequester() } }
 		// The button that last had focus; it gets it back after the deck moves on or the page is shown again
 		var focused by rememberSaveable { mutableIntStateOf(DeckButton.WATCH.ordinal) }
+		val upNext = deckState.cards.drop(1).take(UP_NEXT).map { session?.posterUrl(it, UP_NEXT_IMAGE_WIDTH) }
 
-		CatchUpCard(
-			item = item,
-			posterUrl = session?.posterUrl(item),
+		fun Modifier.deckButton(button: DeckButton) = focusRequester(requesters.getValue(button))
+			.onFocusChanged { if (it.hasFocus) focused = button.ordinal }
+
+		HeroScaffold(
 			backdropUrl = session?.backdropUrl(item),
-		) {
-			DeckButton.entries.forEach { button ->
-				CatchUpActionButton(
-					icon = button.icon,
-					label = stringResource(button.label),
-					onClick = { onButton(button) },
-					dimmed = button == DeckButton.UNDO && !canUndo,
-					modifier = Modifier
-						.focusRequester(requesters.getValue(button))
-						.onFocusChanged { if (it.hasFocus) focused = button.ordinal },
+			topEnd = {
+				if (left != null) {
+					Text(
+						text = listOfNotNull(
+							stringResource(R.string.je_catchup_left, left),
+							deckState.dismissed.size.takeIf { it > 0 }?.let { stringResource(R.string.je_catchup_dismissed_count, it) },
+						).joinToString(" · "),
+						style = JeType.caption,
+						modifier = Modifier.padding(end = JeSpace.chipGap),
+					)
+				}
+				Filters(deckState, currentFilter)
+			},
+			header = { CatchUpHeader(item, left) },
+			actions = {
+				ActionRow(
+					primary = {
+						JeButton(
+							text = stringResource(DeckButton.WATCH.label),
+							icon = DeckButton.WATCH.icon,
+							onClick = { onButton(DeckButton.WATCH) },
+							modifier = Modifier.deckButton(DeckButton.WATCH),
+						)
+					},
+					secondary = DeckButton.entries.drop(1).map { button ->
+						LabeledIconButtonSpec(
+							icon = button.icon,
+							label = stringResource(button.label),
+							onClick = { onButton(button) },
+							// Undo stays focusable while it has the focus, so taking back the last action never drops it
+							enabled = button != DeckButton.UNDO || deckState.canUndo || focused == button.ordinal,
+							modifier = Modifier.deckButton(button),
+						)
+					},
 				)
-			}
-		}
+			},
+			aside = { CatchUpUpNext(upNext) },
+		)
 
 		// Compose may not have attached the buttons on the first frame, and the toolbar grabs focus otherwise
 		LaunchedEffect(Unit) {
 			repeat(10) {
 				withFrameNanos { }
 				if (runCatching { requesters.getValue(DeckButton.entries[focused]).requestFocus() }.isSuccess) return@LaunchedEffect
-			}
-		}
-	}
-
-	@Composable
-	private fun Empty(deckState: CatchUpDeck, currentFilter: CatchUpFilter) {
-		val firstFocus = remember { FocusRequester() }
-		CatchUpEmpty(
-			message = stringResource(if (currentFilter == CatchUpFilter.ALL) R.string.je_catchup_empty else R.string.je_catchup_empty_filtered),
-		) {
-			CatchUpActionButton(
-				icon = R.drawable.je_ic_catchup_style,
-				label = stringResource(R.string.je_catchup_start_over),
-				onClick = ::reshuffle,
-				modifier = Modifier.focusRequester(firstFocus),
-			)
-			if (deckState.canUndo) {
-				CatchUpActionButton(icon = R.drawable.je_ic_catchup_undo, label = stringResource(R.string.je_catchup_undo), onClick = ::undo)
-			}
-		}
-		LaunchedEffect(Unit) {
-			repeat(10) {
-				withFrameNanos { }
-				if (runCatching { firstFocus.requestFocus() }.isSuccess) return@LaunchedEffect
 			}
 		}
 	}
@@ -280,6 +312,7 @@ class CatchUpFragment : Fragment() {
 			busy = false
 			result.onSuccess { applied ->
 				deck.update { it.after(item, applied) }
+				tally.update { it.handled(item, applied) }
 				if (applied is CatchUpAction.Dismiss) session.saveDismissed(deck.value.dismissed)
 				session.log(CatchUpEvents.forAction(CatchUpDone(item, applied), ok = true))
 				val name = item.name.orEmpty()
@@ -313,6 +346,7 @@ class CatchUpFragment : Fragment() {
 			)
 			result.onSuccess {
 				deck.update { it.undo()?.first ?: it }
+				tally.update { it.undone(last.item, last.action) }
 				if (last.action is CatchUpAction.Dismiss) session.saveDismissed(deck.value.dismissed)
 				toast { getString(R.string.je_catchup_undone, last.item.name.orEmpty()) }
 			}.onFailure { err ->
@@ -343,8 +377,12 @@ class CatchUpFragment : Fragment() {
 		fetchJob = lifecycleScope.launch {
 			try {
 				while (deck.value.needsMore) {
-					val items = session.batch(requested)
-					deck.update { it.withBatch(items) }
+					val page = session.batch(requested)
+					deck.update { it.withBatch(page.items) }
+					// A server that leaves the count out sends 0: keep the last known one then
+					if (page.totalRecordCount >= page.items.size && (page.totalRecordCount > 0 || page.items.isEmpty())) {
+						tally.update { it.read(page.totalRecordCount) }
+					}
 				}
 				fetching.value = false
 			} catch (err: CancellationException) {
@@ -363,6 +401,7 @@ class CatchUpFragment : Fragment() {
 		fetchJob?.cancel()
 		fetching.value = false
 		deck.update { it.restart(value) }
+		tally.value = CatchUpTally()
 		refill()
 	}
 
@@ -370,22 +409,14 @@ class CatchUpFragment : Fragment() {
 		fetchJob?.cancel()
 		fetching.value = false
 		deck.update { it.reshuffle() }
+		tally.value = CatchUpTally()
 		refill()
 	}
 
-	private fun confirmClearDismissed() {
-		val context = context ?: return
-		val count = deck.value.dismissed.size
-		AlertDialog.Builder(context)
-			.setTitle(R.string.je_catchup_reset_dismissed_title)
-			.setMessage(getString(R.string.je_catchup_reset_dismissed_message, count))
-			.setPositiveButton(R.string.je_catchup_reset_dismissed_confirm) { _, _ ->
-				deck.update { it.clearDismissed() }
-				session?.saveDismissed(emptySet())
-				refill()
-			}
-			.setNegativeButton(R.string.je_catchup_cancel, null)
-			.show()
+	private fun clearDismissed() {
+		deck.update { it.clearDismissed() }
+		session?.saveDismissed(emptySet())
+		refill()
 	}
 
 	/** After returning from a title: drop it if it was watched (or is gone), refresh it otherwise. */
@@ -420,5 +451,15 @@ class CatchUpFragment : Fragment() {
 	private companion object {
 		/** From this many items, marking says up front that it's working. */
 		const val SLOW_MARK_COUNT = 24
+
+		/** Posters in the up-next stack, and their image width (96 dp at TV density). */
+		const val UP_NEXT = 3
+		const val UP_NEXT_IMAGE_WIDTH = 200
+
+		val FILTERS = listOf(
+			R.string.je_catchup_filter_all to CatchUpFilter.ALL,
+			R.string.je_catchup_filter_movies to CatchUpFilter.MOVIES,
+			R.string.je_catchup_filter_shows to CatchUpFilter.SHOWS,
+		)
 	}
 }

@@ -2,4 +2,9 @@
 <resources>
     <!-- Focusable action under an empty hub page -->
     <string name="je_hub_back">Back</string>
+    <!-- Count pill on the Requests hub tile -->
+    <plurals name="je_hub_count_pending">
+        <item quantity="one">%1$d pending</item>
+        <item quantity="other">%1$d pending</item>
+    </plurals>
 </resources>

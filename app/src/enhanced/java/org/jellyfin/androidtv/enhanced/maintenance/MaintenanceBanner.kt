@@ -1,13 +1,7 @@
 package org.jellyfin.androidtv.enhanced.maintenance
 
 import android.content.Context
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -15,22 +9,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
 import org.jellyfin.androidtv.enhanced.ui.hub.HubNotice
-import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.JellyfinTheme
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.design.Tokens
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.time.Duration.Companion.seconds
@@ -82,27 +69,11 @@ internal fun maintenanceText(context: Context, notice: MaintenanceNotice, now: I
 private fun MaintenanceBanner(notice: MaintenanceNotice, now: Instant) {
 	val context = LocalContext.current
 	val text = remember(notice, now) { maintenanceText(context, notice, now) }
-	Row(
-		horizontalArrangement = Arrangement.spacedBy(16.dp),
-		verticalAlignment = Alignment.CenterVertically,
-		modifier = Modifier
-			.padding(start = 48.dp, end = 48.dp, bottom = 8.dp)
-			.fillMaxWidth()
-			.background(if (notice.adminOnly) Tokens.Color.colorGrey700 else Tokens.Color.colorRed800, JellyfinTheme.shapes.medium)
-			.padding(horizontal = 20.dp, vertical = 12.dp),
-	) {
-		Icon(
-			painter = painterResource(R.drawable.je_ic_maintenance_construction),
-			contentDescription = null,
-			tint = Color.White,
-			modifier = Modifier.size(28.dp),
-		)
-		Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-			Text(text = text.title, fontSize = 16.sp, color = Color.White)
-			Text(text = text.message, fontSize = 14.sp, color = Color.White, maxLines = 3)
-			if (text.details.isNotEmpty()) {
-				Text(text = text.details.joinToString("  ·  "), fontSize = 13.sp, color = Color.White, modifier = Modifier.alpha(0.85f))
-			}
-		}
-	}
+	Notice(
+		kind = NoticeKind.Warning,
+		title = text.title,
+		body = (listOf(text.message) + text.details).joinToString(" · "),
+		icon = R.drawable.je_ic_maintenance_construction,
+		modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom),
+	)
 }

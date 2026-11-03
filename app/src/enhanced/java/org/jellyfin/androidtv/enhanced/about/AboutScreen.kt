@@ -17,7 +17,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.calendar.attempt
@@ -28,6 +27,10 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLink
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkKind
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsIntro
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsNav
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsSection
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
 import org.jellyfin.androidtv.enhanced.ui.seerr.resolve
@@ -122,21 +125,12 @@ fun AboutSettingsScreen() {
 	} ?: unknown
 
 	SettingsColumn {
-		item {
-			ListSection(
-				overlineContent = { Text(stringResource(R.string.je_settings_title).uppercase()) },
-				headingContent = { Text(stringResource(R.string.je_about_title)) },
-			)
-		}
+		item { SettingsSection(overline = stringResource(R.string.je_settings_title), heading = stringResource(R.string.je_about_title)) }
 
-		infoItem("plugin_version", R.string.je_about_plugin_version, pluginVersion, R.drawable.je_ic_about_info)
+		item { SettingsSection(overline = stringResource(R.string.je_about_section_versions)) }
+		// The focus starts on the first row, not on the page heading
+		infoItem("plugin_version", R.string.je_about_plugin_version, pluginVersion, R.drawable.je_ic_about_info, initialFocus = true)
 		infoItem("server_version", R.string.je_about_server_version, serverCaption, onClick = (serverVersion as? LoadState.Error)?.retry)
-		item(key = "seerr") { SeerrLinkRow(state) }
-		if (SeerrLink.importOffered(SeerrLink.kind(state), state.isAdmin)) {
-			item(key = "seerr_import") { SeerrImportRow() }
-		}
-		infoItem("features", R.string.je_about_features, features)
-
 		item {
 			val caption = when (val loaded = release) {
 				LoadState.Loading -> stringResource(R.string.je_about_loading)
@@ -144,19 +138,32 @@ fun AboutSettingsScreen() {
 				is LoadState.Ready -> loaded.value?.let { it.name ?: it.tagName } ?: stringResource(R.string.je_about_release_unavailable)
 			}
 			val available = (release as? LoadState.Ready)?.value != null
-			ListButton(
-				headingContent = { Text(stringResource(R.string.je_about_release_notes)) },
-				captionContent = { Text(caption) },
+			SettingsNav(
+				title = stringResource(R.string.je_about_release_notes),
+				caption = caption,
 				enabled = available,
 				onClick = { router.push(AboutRoutes.RELEASE_NOTES) },
 				modifier = Modifier.focusKey("je_about_release_notes"),
 			)
 		}
 
+		item { SettingsSection(overline = stringResource(R.string.je_about_seerr)) }
+		item(key = "seerr") { SeerrLinkRow(state) }
+		if (SeerrLink.importOffered(SeerrLink.kind(state), state.isAdmin)) {
+			item(key = "seerr_import") { SeerrImportRow() }
+		}
+
+		// A long list: a section caption, not a paragraph in a row
+		item(key = "features") {
+			ListSection(
+				overlineContent = { Text(stringResource(R.string.je_about_features).uppercase()) },
+				headingContent = {},
+				captionContent = { Text(features) },
+			)
+		}
+
 		if (state.isAdmin) {
-			item {
-				ListSection(headingContent = { Text(stringResource(R.string.je_about_admin)) })
-			}
+			item { SettingsSection(overline = stringResource(R.string.je_about_admin)) }
 
 			infoItem("host_compat", R.string.je_about_compat, compatCaption, onClick = (hostCompat as? LoadState.Error)?.retry)
 
@@ -183,7 +190,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.whatsNewItems(
 
 	item(key = "whats_new_section") {
 		ListSection(
-			headingContent = { Text(stringResource(R.string.je_about_whats_new_section)) },
+			overlineContent = { Text(stringResource(R.string.je_about_whats_new_section).uppercase()) },
+			headingContent = {},
 			captionContent = { Text(pluralStringResource(R.plurals.je_about_whats_new_section_caption, sorted.size, sorted.size)) },
 		)
 	}
@@ -199,8 +207,8 @@ private fun androidx.compose.foundation.lazy.LazyListScope.whatsNewItems(
 	if (preview != null) {
 		if (sorted.size > shown.size) {
 			item(key = "whats_new_all") {
-				ListButton(
-					headingContent = { Text(stringResource(R.string.je_about_whats_new_show_all, sorted.size)) },
+				SettingsNav(
+					title = stringResource(R.string.je_about_whats_new_show_all, sorted.size),
 					onClick = onShowAll,
 					modifier = Modifier.focusKey("je_about_whats_new_all"),
 				)
@@ -263,13 +271,8 @@ fun WhatsNewSettingsScreen() {
 	}
 
 	SettingsColumn {
-		item {
-			ListSection(
-				overlineContent = { Text(stringResource(R.string.je_about_title).uppercase()) },
-				headingContent = { Text(stringResource(R.string.je_about_whats_new)) },
-				captionContent = loadCaption(whatsNew)?.let { { Text(it) } },
-			)
-		}
+		item { SettingsSection(overline = stringResource(R.string.je_about_title), heading = stringResource(R.string.je_about_whats_new)) }
+		item { loadCaption(whatsNew)?.let { SettingsIntro(it) } }
 		if (newSettings.isNotEmpty()) whatsNewItems(newSettings)
 	}
 }
@@ -376,6 +379,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.infoItem(
 	caption: String,
 	icon: Int? = null,
 	onClick: (() -> Unit)? = null,
+	initialFocus: Boolean = false,
 ) = item(key = key) {
 	val heading = stringResource(title)
 	ListButton(
@@ -383,7 +387,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.infoItem(
 		headingContent = { Text(heading) },
 		captionContent = { Text(caption) },
 		onClick = onClick ?: copyAction(ClipData.newPlainText(heading, caption)),
-		modifier = Modifier.focusKey("je_about_$key"),
+		modifier = Modifier.focusKey("je_about_$key", initialFocus = initialFocus),
 	)
 }
 
@@ -397,24 +401,24 @@ fun ReleaseNotesSettingsScreen() {
 
 	SettingsColumn {
 		item {
-			ListSection(
-				overlineContent = { Text(stringResource(R.string.je_about_release_notes).uppercase()) },
-				headingContent = { Text(loaded?.name ?: loaded?.tagName ?: stringResource(R.string.je_about_title)) },
-				captionContent = {
-					Text(
-						when {
-							release == LoadState.Loading -> stringResource(R.string.je_about_loading)
-							loaded == null -> stringResource(R.string.je_about_release_unavailable)
-							else -> loaded.tagName.orEmpty()
-						}
-					)
-				},
+			SettingsSection(
+				overline = stringResource(R.string.je_about_release_notes),
+				heading = loaded?.name ?: loaded?.tagName ?: stringResource(R.string.je_about_title),
+			)
+		}
+		item {
+			SettingsIntro(
+				when {
+					release == LoadState.Loading -> stringResource(R.string.je_about_loading)
+					loaded == null -> stringResource(R.string.je_about_release_unavailable)
+					else -> loaded.tagName.orEmpty()
+				}
 			)
 		}
 
 		itemsIndexed(lines) { index, line ->
 			ListButton(
-				headingContent = { Text(line, fontSize = 15.sp) },
+				headingContent = { Text(line, fontSize = JeType.body.fontSize, lineHeight = JeType.body.lineHeight) },
 				onClick = {},
 				modifier = Modifier.focusKey("je_release_line_$index"),
 			)

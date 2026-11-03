@@ -26,6 +26,12 @@
     <string name="je_catchup_untitled">Untitled</string>
     <string name="je_catchup_movie">Movie</string>
     <string name="je_catchup_show">Show</string>
+    <!-- Hero overline: "Catch Up · Show · 1 of 47" (47 = titles left, the current one included) -->
+    <string name="je_catchup_position">Catch Up · %1$s · 1 of %2$d</string>
+    <string name="je_catchup_overline">Catch Up · %1$s</string>
+    <string name="je_catchup_left">%1$d left</string>
+    <string name="je_catchup_dismissed_count">%1$d dismissed</string>
+    <string name="je_catchup_up_next">Up next</string>
 
     <string name="je_catchup_done_watched">Marked as watched: %1$s</string>
     <string name="je_catchup_done_watchlist">Added to your watchlist: %1$s</string>

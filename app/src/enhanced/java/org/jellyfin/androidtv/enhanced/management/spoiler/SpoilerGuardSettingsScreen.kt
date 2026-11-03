@@ -92,10 +92,7 @@ fun SpoilerGuardSettingsScreen() {
 		val categories = SpoilerGuardCategories.available(enhanced.config)
 
 		if (categories.isNotEmpty()) {
-			enhancedSettingsSection(
-				title = { stringResource(R.string.je_management_sg_categories) },
-				caption = { stringResource(R.string.je_management_sg_categories_caption) },
-			)
+			enhancedSettingsSection(title = { stringResource(R.string.je_management_sg_categories) })
 			items(categories, key = { it.key }) { category ->
 				EnhancedToggleRow(
 					key = "sg_${category.key}",
