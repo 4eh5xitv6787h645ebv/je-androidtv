@@ -13,6 +13,7 @@ import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
@@ -58,6 +59,7 @@ class RandomPickFragment : Fragment() {
 	private val navigationRepository by inject<NavigationRepository>()
 
 	private val state = MutableStateFlow<LoadState<Unit>>(LoadState.Loading)
+	private var job: Job? = null
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val current by state.collectAsState()
@@ -69,8 +71,9 @@ class RandomPickFragment : Fragment() {
 	}
 
 	private fun pick() {
+		if (job?.isActive == true) return
 		state.value = LoadState.Loading
-		lifecycleScope.launch {
+		job = lifecycleScope.launch {
 			try {
 				val pick = discoverRepository.randomPick()
 				val context = context ?: return@launch
