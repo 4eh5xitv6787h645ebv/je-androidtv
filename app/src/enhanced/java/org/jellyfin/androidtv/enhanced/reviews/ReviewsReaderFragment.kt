@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -131,7 +132,8 @@ class ReviewsReaderFragment : Fragment() {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		var state by remember { mutableStateOf<LoadState<ReviewsData>>(LoadState.Loading) }
-		var index by remember { mutableIntStateOf(arguments?.getInt(ARG_START) ?: 0) }
+		// Survives a recreation (rotation, process death): the reader reopens on the review that was showing
+		var index by rememberSaveable { mutableIntStateOf(arguments?.getInt(ARG_START) ?: 0) }
 		var loadingMore by remember { mutableStateOf(false) }
 		val scope = rememberCoroutineScope()
 
