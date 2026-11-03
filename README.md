@@ -1,3 +1,9 @@
+> **Jellyfin Enhanced for Android TV.** This is the official Jellyfin Android TV client with a native
+> [Jellyfin Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) layer on top: Spoiler Guard, Hidden Content,
+> Seerr discovery and requests, calendar, bookmarks, reviews, a Catch Up deck, player extras and more, all gated on
+> the plugin being installed on your server. See [ENHANCED.md](ENHANCED.md) for the feature list, screenshots,
+> install and build notes. Everything below is the upstream README.
+
 <h1 align="center">Jellyfin for Android TV</h1>
 <h3 align="center">Part of the <a href="https://jellyfin.org">Jellyfin Project</a></h3>
 
