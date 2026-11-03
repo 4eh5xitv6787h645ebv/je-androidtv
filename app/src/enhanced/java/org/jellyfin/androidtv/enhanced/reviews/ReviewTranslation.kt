@@ -71,8 +71,15 @@ sealed interface TranslationFailure {
 /**
  * Translates reviews through [service] and keeps the results in memory for the session, per review text and
  * target language, so flipping between a translation and the original (or coming back to a review) costs nothing.
+ *
+ * [session] identifies the signed-in session (server, user and token); the cache is per session, so another account
+ * never gets a translation made through someone else's server or access. A result is only cached if its request
+ * finished in the session it started in, so a call still running across a switch can't fill the new session's cache.
  */
-class ReviewTranslator(private val service: TranslationService) {
+class ReviewTranslator(
+	private val service: TranslationService,
+	private val session: () -> Any?,
+) {
 	companion object {
 		/** The plugin's limit on the text of one translate call. */
 		const val MAX_TEXT_LENGTH = 20_000
@@ -80,9 +87,11 @@ class ReviewTranslator(private val service: TranslationService) {
 	}
 
 	private val mutex = Mutex()
-	private val cache = object : LinkedHashMap<Pair<String, String>, String>(16, 0.75f, true) {
-		override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<String, String>, String>?) = size > CACHE_SIZE
+	private val cache = object : LinkedHashMap<CacheKey, String>(16, 0.75f, true) {
+		override fun removeEldestEntry(eldest: MutableMap.MutableEntry<CacheKey, String>?) = size > CACHE_SIZE
 	}
+
+	private data class CacheKey(val session: Any, val text: String, val target: String)
 
 	suspend fun languages(): List<String> = service.languages().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
 
@@ -96,10 +105,16 @@ class ReviewTranslator(private val service: TranslationService) {
 	}
 
 	private suspend fun translate(text: String, target: String): String {
-		val key = text to target
+		val session = session() ?: error("No signed-in user")
+		val key = CacheKey(session, text, target)
 		mutex.withLock { cache[key] }?.let { return it }
 		val translated = service.translate(text, target).trim()
-		mutex.withLock { cache[key] = translated }
+		mutex.withLock {
+			// Other sessions' entries can't be hit again, and a call that outlived its session mustn't add one
+			val current = session()
+			cache.keys.removeAll { it.session != current }
+			if (current == session) cache[key] = translated
+		}
 		return translated
 	}
 }

@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -27,11 +28,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -132,12 +133,14 @@ class ReviewsReaderFragment : Fragment() {
 		var loadingMore by remember { mutableStateOf(false) }
 		val scope = rememberCoroutineScope()
 
-		// Translation: offered only when the server can; results for the current language, per review
+		// Translation: offered only when the server can
 		var canTranslate by remember { mutableStateOf(false) }
-		var language by remember { mutableStateOf(targetStore.get()) }
-		val translations = remember { mutableStateMapOf<ReviewEntry, TranslatedReview>() }
-		val showing = remember { mutableStateMapOf<ReviewEntry, Boolean>() }
-		var translating by remember { mutableStateOf<ReviewEntry?>(null) }
+		val translations = remember {
+			ReaderTranslations(translator, scope, targetStore.get()) { failure ->
+				if (failure == TranslationFailure.Disabled) canTranslate = false
+				toast(failure)
+			}
+		}
 		var refocus by remember { mutableIntStateOf(0) }
 
 		fun load() {
@@ -179,40 +182,16 @@ class ReviewsReaderFragment : Fragment() {
 			}
 		}
 
-		fun translate(entry: ReviewEntry, code: String) {
-			if (translating != null) return
-			translating = entry
-			scope.launch {
-				try {
-					translations[entry] = translator.translate(entry, code)
-					showing[entry] = true
-				} catch (err: CancellationException) {
-					throw err
-				} catch (err: Exception) {
-					Timber.w(err, "Failed to translate a review")
-					val failure = TranslationFailure.of(err)
-					if (failure == TranslationFailure.Disabled) canTranslate = false
-					toast(failure)
-				} finally {
-					translating = null
-				}
-			}
-		}
-
 		fun pickLanguage(then: (String) -> Unit) {
 			showComposeDialog(this@ReviewsReaderFragment, alignment = Alignment.Center) { dismiss ->
 				TranslationLanguageDialog(
 					translator = translator,
-					current = language,
+					current = translations.language,
 					onPick = { code ->
 						dismiss()
 						refocus++
 						targetStore.set(code)
-						if (code != language) {
-							language = code
-							translations.clear()
-							showing.clear()
-						}
+						translations.changeLanguage(code)
 						then(code)
 					},
 					onFailure = { failure ->
@@ -222,15 +201,6 @@ class ReviewsReaderFragment : Fragment() {
 						toast(failure)
 					},
 				)
-			}
-		}
-
-		fun toggleTranslation(entry: ReviewEntry) {
-			when {
-				translating != null -> Unit
-				showing[entry] == true -> showing[entry] = false
-				translations[entry] != null -> showing[entry] = true
-				else -> language?.let { translate(entry, it) } ?: pickLanguage { translate(entry, it) }
 			}
 		}
 
@@ -254,7 +224,7 @@ class ReviewsReaderFragment : Fragment() {
 			) {
 				LoadStateContent(state, empty = { it.entries.isEmpty() }, emptyMessage = stringResource(R.string.je_reviews_none)) { data ->
 					val entry = data.entries[index.coerceIn(data.entries.indices)]
-					val translation = translations[entry]?.takeIf { showing[entry] == true }
+					val translation = translations.shown(entry)
 					val translatable = canTranslate && (entry.content.isNotBlank() || entry.summary != null)
 					ReviewPage(
 						title = target.title,
@@ -263,15 +233,15 @@ class ReviewsReaderFragment : Fragment() {
 						translation = translation,
 						translationStatus = when {
 							!translatable -> TranslationStatus.UNAVAILABLE
-							translating == entry -> TranslationStatus.TRANSLATING
+							translations.translating == entry -> TranslationStatus.TRANSLATING
 							translation != null -> TranslationStatus.SHOWN
 							else -> TranslationStatus.ORIGINAL
 						},
-						languageName = language?.let(::translationLanguageName),
+						languageName = translations.language?.let(::translationLanguageName),
 						refocus = refocus,
 						onMove = ::move,
-						onTranslate = { toggleTranslation(entry) },
-						onChangeLanguage = { pickLanguage { translate(entry, it) } },
+						onTranslate = { translations.toggle(entry) { pickLanguage { translations.translate(entry, it) } } },
+						onChangeLanguage = { pickLanguage { translations.translate(entry, it) } },
 					)
 				}
 			}
@@ -448,6 +418,7 @@ private fun TranslationLanguageDialog(
 ) {
 	var languages by remember { mutableStateOf<List<String>?>(null) }
 	val initialFocus = remember { FocusRequester() }
+	val listState = rememberLazyListState()
 
 	LaunchedEffect(Unit) {
 		try {
@@ -468,7 +439,7 @@ private fun TranslationLanguageDialog(
 			Text(stringResource(R.string.je_loading), color = secondaryTextColor())
 		} else {
 			val selected = current?.takeIf { it in list } ?: defaultTranslationTarget(list) ?: list.firstOrNull()
-			LazyColumn(modifier = Modifier.weight(1f, fill = false)) {
+			LazyColumn(state = listState, modifier = Modifier.weight(1f, fill = false)) {
 				items(list, key = { it }) { code ->
 					ListButton(
 						headingContent = { Text(translationLanguageName(code)) },
@@ -481,7 +452,12 @@ private fun TranslationLanguageDialog(
 				}
 			}
 			LaunchedEffect(list) {
-				if (selected != null) runCatching { initialFocus.requestFocus() }
+				val position = list.indexOf(selected)
+				if (position < 0) return@LaunchedEffect
+				// A language further down isn't composed (so can't take focus) until it has been scrolled to
+				listState.scrollToItem(position)
+				withFrameNanos { }
+				runCatching { initialFocus.requestFocus() }
 			}
 		}
 	}
