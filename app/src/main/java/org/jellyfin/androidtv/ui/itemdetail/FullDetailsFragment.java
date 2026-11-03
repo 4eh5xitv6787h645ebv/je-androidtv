@@ -475,6 +475,7 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
             ps.addClassPresenter(MyDetailsOverviewRow.class, mDorPresenter);
             mListRowPresenter = new CustomListRowPresenter(Utils.convertDpToPixel(requireContext(), 10));
             ps.addClassPresenter(ListRow.class, mListRowPresenter);
+            ps.addClassPresenter(org.jellyfin.androidtv.enhanced.ui.details.EnhancedComposeRow.class, new org.jellyfin.androidtv.enhanced.ui.details.EnhancedComposeRowPresenter());
             mRowsAdapter = new MutableObjectAdapter<Row>(ps);
             mRowsFragment.setAdapter(mRowsAdapter);
             mRowsAdapter.add(detailsOverviewRow);

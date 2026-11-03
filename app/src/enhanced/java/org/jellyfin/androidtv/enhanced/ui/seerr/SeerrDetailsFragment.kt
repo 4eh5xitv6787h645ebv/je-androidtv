@@ -98,8 +98,14 @@ class SeerrDetailsFragment : Fragment() {
 		 * user, already filtered by the plugin (direct, collection-inherited and watched-state rules alike).
 		 */
 		val libraryStory: LibraryStory? = null,
+		/** Feature contributions (see [SeerrDetailsContributor]). */
+		val extraActions: List<SeerrDetailsAction> = emptyList(),
+		val sections: List<@Composable () -> Unit> = emptyList(),
 		val busy: Boolean = false,
 	)
+
+	private val contributors: List<SeerrDetailsContributor>
+		get() = org.koin.java.KoinJavaComponent.getKoin().getAll()
 
 	/**
 	 * Story fields and artwork of the library copy of a title, as the server returns them for this user. Null fields
@@ -165,6 +171,26 @@ class SeerrDetailsFragment : Fragment() {
 					// story fields from the server's own (filtered) copy instead
 					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
 					val libraryStory = if (enhanced.spoilerGuard && libraryId != null) libraryStory(libraryId) else null
+					val contributionContext = SeerrDetailsContext(
+						fragment = this@SeerrDetailsFragment,
+						mediaType = mediaType,
+						tmdbId = tmdbId,
+						details = details,
+						state = enhanced,
+						libraryId = libraryId,
+						spoilerGuarded = libraryStory != null,
+						reload = { reload() },
+					)
+					val extraActions = contributors.flatMap { contributor ->
+						runCatching { contributor.actions(contributionContext) }
+							.onFailure { Timber.w(it, "Seerr details actions from %s failed", contributor::class.simpleName) }
+							.getOrDefault(emptyList())
+					}
+					val sections = contributors.mapNotNull { contributor ->
+						runCatching { contributor.section(contributionContext) }
+							.onFailure { Timber.w(it, "Seerr details section from %s failed", contributor::class.simpleName) }
+							.getOrNull()
+					}
 					UiState(
 						loading = false,
 						details = details,
@@ -173,6 +199,8 @@ class SeerrDetailsFragment : Fragment() {
 						quota = quotaCall.await(),
 						spoilerPending = spoilerState?.let { spoilerGuardRepository.isPending(it, mediaType, tmdbId) },
 						libraryStory = libraryStory,
+						extraActions = extraActions,
+						sections = sections,
 					)
 				}
 				state.value = loaded
@@ -329,7 +357,13 @@ class SeerrDetailsFragment : Fragment() {
 							Text(stringResource(if (ui.spoilerPending) R.string.je_spoiler_pending else R.string.je_spoiler_enable_pending))
 						}
 					}
+
+					for (action in ui.extraActions) {
+						Button(onClick = action.onClick, enabled = !ui.busy, modifier = Modifier.firstFocus()) { Text(action.label) }
+					}
 				}
+
+				for (section in ui.sections) section()
 
 				if (!ui.enhanced.seerrUsable) {
 					Text(stringResource(R.string.je_seerr_unavailable), color = Tokens.Color.colorGrey300)

@@ -122,7 +122,7 @@ object Routes {
 	const val LICENSE = "/license/{artifactId}"
 }
 
-val routes = mapOf<String, RouteComposable>(
+val routes = org.jellyfin.androidtv.enhanced.ui.settings.enhancedSettingsRoutes + mapOf<String, RouteComposable>(
 	Routes.MAIN to {
 		SettingsMainScreen()
 	},

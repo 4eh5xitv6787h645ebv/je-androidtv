@@ -73,10 +73,21 @@ class EnhancedRepository(
 		scope.launch { ensureLoaded(force = true) }
 	}
 
+	/** Publish freshly saved user settings without re-fetching everything. */
+	fun updateUserSettings(settings: EnhancedUserSettings) {
+		_state.value = _state.value.copy(userSettings = settings)
+	}
+
+	/** Publish freshly saved Hidden Content settings without re-fetching everything. */
+	fun updateHiddenSettings(settings: HiddenContentSettings?) {
+		_state.value = _state.value.copy(hiddenSettings = settings)
+	}
+
 	private suspend fun load(userId: UUID): EnhancedState = kotlinx.coroutines.coroutineScope {
 		val userKey = userId.toString().replace("-", "")
 		val configCall = async { enhancedApi.get("public-config") }
 		val settingsCall = async { runCatching { enhancedApi.get("user-settings/$userKey/settings.json") }.getOrNull() }
+		val versionCall = async { runCatching { enhancedApi.getText("version").text.trim().ifEmpty { null } }.getOrNull() }
 
 		val config = EnhancedApi.json.decodeFromJsonElement<EnhancedPublicConfig>(configCall.await())
 		val settings = settingsCall.await()
@@ -95,6 +106,14 @@ class EnhancedRepository(
 			}.getOrNull()
 		} else null
 
-		EnhancedState(available = true, config = config, userSettings = settings, seerr = seerr, hiddenSettings = hiddenSettings)
+		EnhancedState(
+			available = true,
+			config = config,
+			userSettings = settings,
+			seerr = seerr,
+			hiddenSettings = hiddenSettings,
+			pluginVersion = versionCall.await(),
+			isAdmin = userRepository.currentUser.value?.policy?.isAdministrator == true,
+		)
 	}
 }

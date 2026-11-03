@@ -55,6 +55,10 @@ object EnhancedDetails {
 	private val seerrRepository by inject<SeerrRepository>(SeerrRepository::class.java)
 	private val navigationRepository by inject<NavigationRepository>(NavigationRepository::class.java)
 
+	/** Feature contributions registered with Koin (see [DetailsContributor]). */
+	private val contributors: List<DetailsContributor>
+		get() = org.koin.java.KoinJavaComponent.getKoin().getAll()
+
 	private const val ROW_PREVIEW_SIZE = 20
 
 	private val Fragment.isAlive get() = lifecycle.currentState.isAtLeast(Lifecycle.State.CREATED) && context != null
@@ -142,6 +146,38 @@ object EnhancedDetails {
 
 			if (moreFromAction != null && moreFromEntries(context, item, state).isNotEmpty()) {
 				moreFromAction.wanted = true
+			}
+
+			// Feature contributions: least important (highest priority number) last, so they overflow first
+			val detailsContext = DetailsContext(fragment, item, state) { reload.run() }
+			val contributed = contributors.flatMap { contributor ->
+				runCatching { contributor.actions(detailsContext) }
+					.onFailure { Timber.w(it, "Details actions from %s failed", contributor::class.simpleName) }
+					.getOrDefault(emptyList())
+			}.sortedBy { it.priority }
+			if (!fragment.isAlive) return@launch
+			for (contribution in contributed) {
+				lateinit var action: EnhancedAction
+				val button = TextUnderButton.create(context, contribution.icon, buttonSize, 2, contribution.label) { view -> action.run(view) }
+				button.isVisible = false
+				action = EnhancedAction(button) { anchor -> contribution.onClick(anchor) }
+				action.wanted = true
+				row.addAction(button)
+				actions += action
+			}
+			// The upstream "⋯" button must stay last in the row
+			if (contributed.isNotEmpty()) {
+				val more = row.actions.firstOrNull { it !in actions.map { a -> a.button } && it.binding.label.text?.toString() == context.getString(R.string.lbl_other_options) }
+				if (more != null) {
+					val ordered = row.actions.filter { it !== more } + more
+					row.clearActions()
+					ordered.forEach(row::addAction)
+					(more.parent as? ViewGroup)?.let { parent ->
+						parent.removeView(more)
+						actions.forEach { a -> if (a.button.parent == null) parent.addView(a.button) }
+						parent.addView(more)
+					}
+				}
 			}
 
 			if (fragment.isAlive) fitActions(row, actions)
@@ -400,10 +436,10 @@ object EnhancedDetails {
 
 		fragment.lifecycleScope.launch {
 			val state = enhancedRepository.ensureLoaded()
-			if (!state.seerrUsable || !fragment.isAlive) return@launch
+			if (!state.available || !fragment.isAlive) return@launch
 			val config = state.config
 
-			when (item.type) {
+			if (state.seerrUsable) when (item.type) {
 				BaseItemKind.MOVIE, BaseItemKind.SERIES -> tmdbId(item)?.let { id ->
 					val type = mediaType(item)
 					if (config.jellyseerrShowRecommended) addSourceRow(fragment, rowsAdapter, context.getString(R.string.je_row_recommended),
@@ -428,6 +464,16 @@ object EnhancedDetails {
 				}
 
 				else -> Unit
+			}
+
+			// Feature contributions
+			val detailsContext = DetailsContext(fragment, item, state) { }
+			for (contributor in contributors) {
+				val rows = runCatching { contributor.rows(detailsContext) }
+					.onFailure { Timber.w(it, "Details rows from %s failed", contributor::class.simpleName) }
+					.getOrDefault(emptyList())
+				if (!fragment.isAlive) return@launch
+				rows.forEach(rowsAdapter::add)
 			}
 		}
 	}

@@ -84,4 +84,12 @@
     <string name="je_nothing_yet">Nothing to show yet.</string>
     <string name="je_tvdb_pick_title">Pick the matching show</string>
     <string name="je_tvdb_no_match">TMDB has no TVDB match for this show and Sonarr found none. Request it from the web to enter one.</string>
+
+    <!-- Hub / settings -->
+    <string name="je_toolbar_enhanced">Enhanced</string>
+    <string name="je_hub_title">Jellyfin Enhanced</string>
+    <string name="je_hub_version">Plugin %1$s</string>
+    <string name="je_hub_unavailable">This server does not have the Jellyfin Enhanced plugin.</string>
+    <string name="je_settings_title">Jellyfin Enhanced</string>
+    <string name="je_settings_caption">Spoiler Guard, hidden content, Seerr and other plugin features</string>
 </resources>

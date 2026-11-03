@@ -64,6 +64,8 @@ fun SettingsMainScreen() {
 			)
 		}
 
+		item { org.jellyfin.androidtv.enhanced.ui.settings.EnhancedSettingsEntry() }
+
 		item {
 			ListButton(
 				leadingContent = { Icon(painterResource(R.drawable.ic_error), contentDescription = null) },

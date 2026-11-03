@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.auth.repository.SessionRepository
 import org.jellyfin.androidtv.auth.repository.UserRepository
+import org.jellyfin.androidtv.enhanced.ui.EnhancedToolbarButton
 import org.jellyfin.androidtv.ui.NowPlayingComposable
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -49,6 +50,7 @@ enum class MainToolbarActiveButton {
 	User,
 	Home,
 	Search,
+	Enhanced,
 
 	None,
 }
@@ -151,6 +153,7 @@ private fun MainToolbar(
 						colors = if (activeButton == MainToolbarActiveButton.Search) activeButtonColors else ButtonDefaults.colors(),
 						content = { Text(stringResource(R.string.lbl_search)) }
 					)
+					EnhancedToolbarButton(active = activeButton == MainToolbarActiveButton.Enhanced, activeButtonColors = activeButtonColors)
 				}
 			}
 		},

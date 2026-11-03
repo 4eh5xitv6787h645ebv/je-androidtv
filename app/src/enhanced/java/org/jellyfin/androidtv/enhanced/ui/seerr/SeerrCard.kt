@@ -162,8 +162,16 @@ private fun SeerrViewAllContent(focused: Boolean) {
 	)
 }
 
-/** Leanback presenter for [SeerrResult] and [SeerrViewAllCard] items, used in rows on the details screen. */
-class SeerrCardPresenter : Presenter() {
+/**
+ * Leanback presenter for [SeerrResult] and [SeerrViewAllCard] items, used in rows on the details screen and in
+ * grids. The menu key / long press opens the [SeerrCardMenu]; [onRemoveCard] lets a menu entry (such as Hide)
+ * take the card out of its row.
+ */
+class SeerrCardPresenter(
+	private val onRemoveCard: ((SeerrResult) -> Unit)? = null,
+) : Presenter() {
+	private val enhancedRepository by org.koin.java.KoinJavaComponent.inject<org.jellyfin.androidtv.enhanced.data.EnhancedRepository>(org.jellyfin.androidtv.enhanced.data.EnhancedRepository::class.java)
+
 	override fun onCreateViewHolder(parent: ViewGroup): ViewHolder {
 		val view = ComposeView(parent.context).apply {
 			setParentCompositionContext(parent.findViewTreeCompositionContext())
@@ -172,7 +180,14 @@ class SeerrCardPresenter : Presenter() {
 			isFocusable = true
 			isFocusableInTouchMode = true
 		}
-		return CardViewHolder(view)
+		val holder = CardViewHolder(view)
+		view.setOnLongClickListener { showMenu(holder) }
+		return holder
+	}
+
+	private fun showMenu(holder: CardViewHolder): Boolean {
+		val result = holder.item.value as? SeerrResult ?: return false
+		return SeerrCardMenu.show(holder.view.context, holder.view, result, enhancedRepository.current) { onRemoveCard?.invoke(result) }
 	}
 
 	override fun onBindViewHolder(viewHolder: ViewHolder, item: Any?) {
@@ -197,8 +212,13 @@ class SeerrCardPresenter : Presenter() {
 				}
 			}
 			composeView.onFocusChangeListener = android.view.View.OnFocusChangeListener { _, hasFocus -> focused.value = hasFocus }
-			// Swallow the menu key: these cards have no context menu
-			composeView.setOnKeyListener { _, keyCode, _ -> keyCode == KeyEvent.KEYCODE_MENU }
+			// The menu key opens the card menu (same as a long press); swallow it either way so upstream's
+			// KeyProcessor doesn't try to treat the card as a library item
+			composeView.setOnKeyListener { _, keyCode, event ->
+				if (keyCode != KeyEvent.KEYCODE_MENU) return@setOnKeyListener false
+				if (event.action == KeyEvent.ACTION_UP) composeView.performLongClick()
+				true
+			}
 		}
 	}
 }
