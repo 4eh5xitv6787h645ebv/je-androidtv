@@ -165,12 +165,14 @@ class SeerrLinkManager(
 	 */
 	suspend fun linkedDisplayName(state: EnhancedState): String? {
 		val seerrUserId = state.seerr.jellyseerrUserId?.takeIf { state.seerr.linked } ?: return null
-		val key = "${enhancedApi.baseUrl}|$seerrUserId"
+		// Pinned, so a server switch between the key and the request can't file another server's user under this key
+		val api = enhancedApi.pinned()
+		val key = "${api.baseUrl}|$seerrUserId"
 		val now = clock()
 		displayNames[key]?.let { cached -> if (cached.name != null || now < cached.expiresAt) return cached.name }
 		if (!state.isAdmin) return null
 		val name = try {
-			val users = (enhancedApi.get("jellyseerr/user", mapOf("take" to 1000)) as? JsonObject)?.get("results")?.jsonArray.orEmpty()
+			val users = (api.get("jellyseerr/user", mapOf("take" to 1000)) as? JsonObject)?.get("results")?.jsonArray.orEmpty()
 			val user = users.firstOrNull { (it as? JsonObject)?.string("id") == seerrUserId } as? JsonObject
 			SeerrLinkNames.displayName(user)
 		} catch (err: CancellationException) {

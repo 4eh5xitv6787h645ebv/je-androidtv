@@ -215,6 +215,13 @@ class ActivityFragment : Fragment() {
 
 			if (entries == null || entryKeys == null) {
 				if (currentStreams !is Streams.Ready) item(key = "feed-off") { PageNotice(stringResource(R.string.je_activity_feed_off)) }
+				if (sessions.isEmpty()) {
+					item(key = "back") {
+						Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus)) {
+							Text(stringResource(R.string.je_hub_back))
+						}
+					}
+				}
 				return@LazyColumn
 			}
 

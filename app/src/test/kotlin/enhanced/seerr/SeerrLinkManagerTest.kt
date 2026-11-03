@@ -49,7 +49,7 @@ class SeerrLinkManagerTest : FunSpec({
 		clock: () -> Long = { 0L },
 	) {
 		var server = "http://lab"
-		val api = mockk<EnhancedApi> { every { baseUrl } answers { server } }
+		val api = mockk<EnhancedApi> { every { baseUrl } answers { server } }.also { every { it.pinned() } returns it }
 		val states = MutableStateFlow(initial)
 		val users = MutableStateFlow<UserDto?>(user(UUID.randomUUID()))
 		val repository = mockk<EnhancedRepository> {

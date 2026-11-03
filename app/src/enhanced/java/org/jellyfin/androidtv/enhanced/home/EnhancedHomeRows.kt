@@ -69,7 +69,9 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 	/** Server and user the rows were loaded for; another one starts every row over. */
 	private var identity: Pair<String?, UUID?>? = null
 	/** Items hidden from the card menu while this screen lives, kept out of loads that were already under way. */
-	private val hiddenIds = mutableSetOf<UUID>()
+	/** Ids hidden from a card menu, each with the latest load generation that may still carry the card. */
+	private val hiddenIds = mutableMapOf<UUID, Long>()
+	private var loadGeneration = 0L
 	private var rowsAdapter: MutableObjectAdapter<Row>? = null
 	private var cardPresenter: CardPresenter? = null
 	private val zone: ZoneId = ZoneId.systemDefault()
@@ -142,11 +144,15 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		val slot = slots.getValue(kind)
 		val previous = slot.cards
 		slot.job?.cancel()
+		val generation = ++loadGeneration
 		slot.job = fragment.lifecycleScope.launch {
 			// The SDK's HTTP client blocks the calling dispatcher, as upstream's rows do, so load off the main thread
 			attempt { withContext(Dispatchers.IO) { cards(kind, if (refresh) previous else null) } }
 				.onSuccess { cards ->
-					slot.cards = hiddenIds.fold(cards) { kept, id -> kept?.let { withoutHidden(it, id) } }
+					// A hide announced before this load started is already reflected by the server (and may have been
+					// restored since); only hides that raced with the load are still applied locally
+					hiddenIds.entries.removeAll { it.value < generation }
+					slot.cards = hiddenIds.keys.fold(cards) { kept, id -> kept?.let { withoutHidden(it, id) } }
 					render(kind)
 				}
 				.onFailure { err ->
@@ -263,7 +269,7 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 
 	/** An item hidden from the card menu leaves every row (and a row goes once it has no titles left). */
 	private fun onHidden(id: UUID) {
-		hiddenIds += id
+		hiddenIds[id] = loadGeneration
 		for (slot in slots.values) {
 			val cards = slot.cards ?: continue
 			val kept = withoutHidden(cards, id)
