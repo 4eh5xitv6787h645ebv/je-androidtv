@@ -23,4 +23,8 @@
     </plurals>
     <string name="je_seerrdetails_runtime">%1$dh %2$dm</string>
     <string name="je_seerrdetails_more_requests">and %1$d more</string>
+    <!-- Labels under the hero's round action buttons: one line each (88 dp) -->
+    <string name="je_seerrdetails_library">Library</string>
+    <string name="je_seerrdetails_spoiler_guard">Spoiler Guard</string>
+    <string name="je_seerrdetails_spoiler_pending">Guard pending</string>
 </resources>

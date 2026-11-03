@@ -42,6 +42,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -196,7 +197,8 @@ fun Backdrop(
  * Without [below] (Catch Up) the hero sits at the bottom of the screen. [topEnd] holds controls at the top right
  * under the toolbar (Catch Up's filter chips); [aside] is drawn over the whole screen for decorations such as the
  * up-next stack (align it yourself). Items in [below] set their own horizontal padding, so rows can scroll edge to
- * edge.
+ * edge. [belowClipGap] moves the edge where scrolled rows are clipped that far below the hero (taken from the
+ * rows' top padding, so the unscrolled layout stays the same), keeping a half-scrolled row clear of the action labels.
  */
 @Composable
 fun HeroScaffold(
@@ -210,6 +212,7 @@ fun HeroScaffold(
 	aside: (@Composable BoxScope.() -> Unit)? = null,
 	listState: LazyListState = rememberLazyListState(),
 	below: (LazyListScope.() -> Unit)? = null,
+	belowClipGap: Dp = 0.dp,
 ) {
 	var collapsed by remember { mutableStateOf(false) }
 	JellyfinTheme {
@@ -252,13 +255,15 @@ fun HeroScaffold(
 					)
 				}
 				if (below != null) {
+					val clipGap = belowClipGap.coerceIn(0.dp, JeSpace.sectionGap)
 					LazyColumn(
 						state = listState,
 						modifier = Modifier
 							.weight(1f)
 							.fillMaxWidth()
+							.padding(top = clipGap)
 							.onFocusChanged { collapsed = it.hasFocus },
-						contentPadding = PaddingValues(top = JeSpace.sectionGap, bottom = JeSpace.pageBottom),
+						contentPadding = PaddingValues(top = JeSpace.sectionGap - clipGap, bottom = JeSpace.pageBottom),
 						verticalArrangement = Arrangement.spacedBy(JeSpace.sectionGap),
 						content = below,
 					)

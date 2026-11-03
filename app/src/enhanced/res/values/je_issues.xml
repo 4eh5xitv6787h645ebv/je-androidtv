@@ -2,6 +2,8 @@
 <resources>
     <!-- Reporting problems (Seerr issues) -->
     <string name="je_issues_report">Report a problem</string>
+    <!-- The one-line label under the round action button on Seerr details -->
+    <string name="je_issues_report_short">Report</string>
     <string name="je_issues_report_title">Report a problem with %1$s</string>
     <string name="je_issues_type_video">Video</string>
     <string name="je_issues_type_audio">Audio</string>

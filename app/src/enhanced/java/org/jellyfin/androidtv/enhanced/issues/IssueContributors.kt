@@ -148,7 +148,7 @@ class IssueSeerrDetailsContributor(
 	override suspend fun actions(context: SeerrDetailsContext): List<SeerrDetailsAction> {
 		val mediaId = context.details.mediaInfo?.id ?: return emptyList()
 		if (!context.state.canReportIssues()) return emptyList()
-		val label = context.fragment.context?.getString(R.string.je_issues_report) ?: return emptyList()
+		val label = context.fragment.context?.getString(R.string.je_issues_report_short) ?: return emptyList()
 		return listOf(SeerrDetailsAction(label, R.drawable.je_ic_issue_report) { reportFlow(context, mediaId).start() })
 	}
 

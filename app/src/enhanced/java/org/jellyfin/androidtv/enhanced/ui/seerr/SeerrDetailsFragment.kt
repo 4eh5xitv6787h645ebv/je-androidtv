@@ -390,6 +390,8 @@ class SeerrDetailsFragment : Fragment() {
 				}
 			},
 			actions = { DetailsActions(ui, details, firstAction) },
+			// Rows scrolled under the hero stop short of the action labels instead of running into them
+			belowClipGap = JeSpace.sectionGap,
 			below = {
 				// Feature sections (ratings and providers, issues…), each handling its own loading and failures
 				ui.sections.forEachIndexed { index, section ->
@@ -501,7 +503,7 @@ class SeerrDetailsFragment : Fragment() {
 		}
 
 		if (requestLabel != null && openInLibrary != null) {
-			LabeledIconButton(icon = R.drawable.ic_folder, label = stringResource(R.string.je_open_in_library), onClick = openInLibrary, modifier = Modifier.firstFocus())
+			LabeledIconButton(icon = R.drawable.ic_folder, label = stringResource(R.string.je_seerrdetails_library), onClick = openInLibrary, modifier = Modifier.firstFocus())
 		}
 
 		// Pre-acquisition Spoiler Guard opt-in, promoted by the plugin when the title arrives
@@ -511,8 +513,8 @@ class SeerrDetailsFragment : Fragment() {
 				icon = if (pending) R.drawable.je_ic_blur_on else R.drawable.je_ic_blur_off,
 				label = stringResource(when {
 					ui.busy == Busy.PENDING -> R.string.je_seerr_saving
-					pending -> R.string.je_spoiler_pending
-					else -> R.string.je_spoiler_enable_pending
+					pending -> R.string.je_seerrdetails_spoiler_pending
+					else -> R.string.je_seerrdetails_spoiler_guard
 				}),
 				busy = ui.busy == Busy.PENDING,
 				onClick = { if (ui.busy == null) toggleSpoilerPending(details, !pending) },
@@ -522,22 +524,12 @@ class SeerrDetailsFragment : Fragment() {
 
 		for (action in ui.extraActions) {
 			LabeledIconButton(
-				icon = action.icon ?: fallbackIcon(action),
+				icon = action.icon ?: R.drawable.ic_more,
 				label = action.label,
 				onClick = { if (ui.busy == null) action.onClick() },
 				modifier = Modifier.firstFocus(),
 			)
 		}
-	}
-
-	/**
-	 * An icon for a contributed action that doesn't bring one. Hide/Unhide (Hidden Content's contributor) is known by
-	 * its label until it passes its own icon.
-	 */
-	private fun fallbackIcon(action: SeerrDetailsAction): Int = when (action.label) {
-		getString(R.string.je_hide) -> R.drawable.je_ic_visibility_off
-		getString(R.string.je_unhide) -> R.drawable.je_ic_visibility
-		else -> R.drawable.ic_more
 	}
 
 	/** A titled horizontal row under the hero; the cards scroll edge to edge, the header keeps the page inset. */
