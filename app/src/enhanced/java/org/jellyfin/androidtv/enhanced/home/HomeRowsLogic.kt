@@ -19,6 +19,7 @@ import org.jellyfin.sdk.model.api.BaseItemDto
 import org.jellyfin.sdk.model.api.BaseItemKind
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * The optional Jellyfin Enhanced rows of the home screen, in the order they are added below upstream's rows. Each is
@@ -32,11 +33,18 @@ enum class HomeRowKind(
 	/** What the row shows, for its switch on the settings page. */
 	@StringRes val caption: Int,
 	val gate: (EnhancedState) -> Boolean,
+	/**
+	 * Whether the client applies Spoiler Guard or Hidden Content to the row's cards itself (episode names, air dates,
+	 * hidden Seerr titles). A failed refresh of such a row clears it, since its old cards can't be re-validated; the
+	 * others keep their cards.
+	 */
+	val protectionSensitive: Boolean,
 ) {
-	COMING_UP("coming_up", R.string.je_home_coming_up, R.string.je_home_settings_coming_up, { it.calendar }),
-	JUMP_BACK_IN("jump_back_in", R.string.je_home_jump_back_in, R.string.je_home_settings_jump_back_in, { it.bookmarks }),
-	TRENDING("trending", R.string.je_home_trending, R.string.je_home_settings_trending, { it.discover }),
-	CATCH_UP("catch_up", R.string.je_home_catch_up, R.string.je_home_settings_catch_up, { it.available && it.config.catchUpEnabled });
+	COMING_UP("coming_up", R.string.je_home_coming_up, R.string.je_home_settings_coming_up, { it.calendar }, protectionSensitive = true),
+	JUMP_BACK_IN("jump_back_in", R.string.je_home_jump_back_in, R.string.je_home_settings_jump_back_in, { it.bookmarks }, protectionSensitive = true),
+	TRENDING("trending", R.string.je_home_trending, R.string.je_home_settings_trending, { it.discover }, protectionSensitive = true),
+	// The server's own items, which it filters and whose artwork it serves under its rules
+	CATCH_UP("catch_up", R.string.je_home_catch_up, R.string.je_home_settings_catch_up, { it.available && it.config.catchUpEnabled }, protectionSensitive = false);
 
 	companion object {
 		fun fromKey(key: String): HomeRowKind? = entries.firstOrNull { it.key == key }
@@ -220,4 +228,17 @@ object HomeRowsLogic {
 		}
 		.distinctBy { it.id }
 		.take(limit)
+
+	/**
+	 * [cards] without those of [hiddenId], an item just hidden from the card menu: the item itself and, when it's a
+	 * show or season, its episodes and seasons. [item] gives a card's library item (null for buttons and Seerr cards,
+	 * which are never library titles here). Returns [cards] itself when nothing matched, and an empty list when only
+	 * buttons would be left.
+	 */
+	fun <T : Any> withoutHidden(cards: List<T>, hiddenId: UUID, item: (T) -> BaseItemDto?): List<T> {
+		fun matches(card: T) = item(card)?.let { it.id == hiddenId || it.seriesId == hiddenId || it.seasonId == hiddenId } == true
+		if (cards.none(::matches)) return cards
+		val kept = cards.filterNot(::matches)
+		return if (kept.none { item(it) != null }) emptyList() else kept
+	}
 }

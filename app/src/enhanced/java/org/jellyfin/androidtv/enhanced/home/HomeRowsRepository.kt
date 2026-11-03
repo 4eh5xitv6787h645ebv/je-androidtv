@@ -104,7 +104,11 @@ class HomeRowsRepository(
 			.mapNotNull { entry -> items[normalizeItemId(entry.item.id.toString())]?.let { JumpBackIn(entry, it) } }
 	}
 
-	/** Seerr's trending titles, discovery-filtered (hidden, blocklisted), without library or pending guarded titles. */
+	/**
+	 * Seerr's trending titles, discovery-filtered (hidden, blocklisted), without library or pending guarded titles.
+	 * Every page is filtered against a fresh read of the Hidden Content document: [SeerrRepository.loadNext] throws
+	 * when it can't be read, so the row is left out (or cleared) rather than showing titles the user hid.
+	 */
 	suspend fun trending(title: String): List<SeerrResult> {
 		val spoiler = spoilerProtection.snapshot()
 		// Pending Spoiler Guard opt-ins can't be told apart without the lists

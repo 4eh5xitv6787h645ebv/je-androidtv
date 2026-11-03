@@ -15,15 +15,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.bookmarks.BookmarkLogic
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.menu.EnhancedItemMenu
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
 import org.jellyfin.androidtv.ui.home.HomeFragmentRow
 import org.jellyfin.androidtv.ui.itemhandling.BaseItemDtoBaseRowItem
+import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.GridButtonBaseRowItem
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.presentation.CardPresenter
@@ -37,6 +40,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.TextStyle
 import java.util.Locale
+import java.util.UUID
 
 /**
  * The optional Jellyfin Enhanced rows of the home screen ([HomeRowKind]), added after upstream's rows.
@@ -44,12 +48,14 @@ import java.util.Locale
  * Created by the home fragment in `onCreate`; loading starts at once, in parallel with upstream's rows, and each row
  * appears when its data is ready (never before upstream's rows are in place, see [addToRowsAdapter]). A row that
  * fails to load is left out (logged). Rows come and go live with the user's choices on the settings page and with the
- * server's gates, and are reloaded when the home screen is resumed. Nothing is added on a server without the plugin
- * or when every row is off.
+ * server's gates, are reloaded when the home screen is resumed and start over when the signed-in user changes. Cards
+ * hidden from the card menu leave the rows at once. Nothing is added on a server without the plugin or when every
+ * row is off.
  */
 class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinComponent {
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val repository by inject<HomeRowsRepository>()
+	private val userRepository by inject<UserRepository>()
 
 	private class Slot(val kind: HomeRowKind) {
 		var job: Job? = null
@@ -60,6 +66,10 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 
 	private val slots = HomeRowKind.entries.associateWith { Slot(it) }
 	private var shown: List<HomeRowKind> = emptyList()
+	/** Server and user the rows were loaded for; another one starts every row over. */
+	private var identity: Pair<String?, UUID?>? = null
+	/** Items hidden from the card menu while this screen lives, kept out of loads that were already under way. */
+	private val hiddenIds = mutableSetOf<UUID>()
 	private var rowsAdapter: MutableObjectAdapter<Row>? = null
 	private var cardPresenter: CardPresenter? = null
 	private val zone: ZoneId = ZoneId.systemDefault()
@@ -72,9 +82,14 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 
 	private fun start(store: HomeRowsStore) {
 		fragment.lifecycleScope.launch {
-			combine(store.enabled, enhancedRepository.state) { enabled, state -> HomeRowKind.shown(enabled, state) }
+			combine(store.enabled, enhancedRepository.state, userRepository.currentUser) { enabled, state, user ->
+				HomeRowKind.shown(enabled, state) to (user?.serverId to user?.id)
+			}
 				.distinctUntilChanged()
-				.collect(::show)
+				.collect { (kinds, identity) -> show(kinds, identity) }
+		}
+		fragment.lifecycleScope.launch {
+			EnhancedItemMenu.hidden.collect { onHidden(it.id) }
 		}
 		fragment.lifecycleScope.launch {
 			var first = true
@@ -92,7 +107,18 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		HomeRowKind.entries.forEach(::render)
 	}
 
-	private fun show(kinds: List<HomeRowKind>) {
+	private fun show(kinds: List<HomeRowKind>, identity: Pair<String?, UUID?>) {
+		// Another account: nothing of the previous one's rows may stay, so every row loads afresh
+		if (this.identity != null && this.identity != identity) {
+			hiddenIds.clear()
+			for (slot in slots.values) {
+				slot.job?.cancel()
+				slot.cards = null
+				render(slot.kind)
+			}
+			shown = emptyList()
+		}
+		this.identity = identity
 		val previous = shown
 		shown = kinds
 		for (kind in HomeRowKind.entries) {
@@ -108,7 +134,10 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		}
 	}
 
-	/** Loads a row; a failed refresh keeps the cards already shown, a failed first load leaves the row out. */
+	/**
+	 * Loads a row. A failed first load leaves the row out; a failed refresh keeps the cards already shown, except on
+	 * [HomeRowKind.protectionSensitive] rows, which are cleared: protection may have changed meanwhile.
+	 */
 	private fun load(kind: HomeRowKind, refresh: Boolean) {
 		val slot = slots.getValue(kind)
 		val previous = slot.cards
@@ -117,12 +146,12 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 			// The SDK's HTTP client blocks the calling dispatcher, as upstream's rows do, so load off the main thread
 			attempt { withContext(Dispatchers.IO) { cards(kind, if (refresh) previous else null) } }
 				.onSuccess { cards ->
-					slot.cards = cards
+					slot.cards = hiddenIds.fold(cards) { kept, id -> kept?.let { withoutHidden(it, id) } }
 					render(kind)
 				}
 				.onFailure { err ->
 					Timber.w(err, "Jellyfin Enhanced home row %s not loaded", kind.key)
-					if (!refresh) {
+					if (!refresh || kind.protectionSensitive) {
 						slot.cards = null
 						render(kind)
 					}
@@ -231,6 +260,21 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		if (next != null) rowsAdapter.add(next, row) else rowsAdapter.add(row)
 		slot.row = row
 	}
+
+	/** An item hidden from the card menu leaves every row (and a row goes once it has no titles left). */
+	private fun onHidden(id: UUID) {
+		hiddenIds += id
+		for (slot in slots.values) {
+			val cards = slot.cards ?: continue
+			val kept = withoutHidden(cards, id)
+			if (kept !== cards) {
+				slot.cards = kept
+				render(slot.kind)
+			}
+		}
+	}
+
+	private fun withoutHidden(cards: List<Any>, id: UUID) = HomeRowsLogic.withoutHidden(cards, id) { (it as? BaseRowItem)?.baseItem }
 
 	/** A Seerr card hidden from its menu leaves the row (and the row goes once empty). */
 	private fun removeCard(slot: Slot, result: SeerrResult) {

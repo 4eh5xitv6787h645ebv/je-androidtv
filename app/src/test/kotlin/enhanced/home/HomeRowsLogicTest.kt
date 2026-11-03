@@ -299,4 +299,30 @@ class HomeRowsLogicTest : FunSpec({
 		val many = (1..15).map { movieItem() }
 		HomeRowsLogic.catchUp(many, emptySet()) shouldContainExactly many.take(HomeRowsLogic.CATCH_UP_LIMIT)
 	}
+
+	test("a hidden item leaves the rows with its episodes and seasons, and a row of buttons only goes") {
+		val showId = UUID.randomUUID()
+		val seasonId = UUID.randomUUID()
+		val show = BaseItemDto(id = showId, type = BaseItemKind.SERIES)
+		val episodeOfShow = BaseItemDto(id = UUID.randomUUID(), type = BaseItemKind.EPISODE, seriesId = showId, seasonId = seasonId)
+		val season = BaseItemDto(id = seasonId, type = BaseItemKind.SEASON, seriesId = showId)
+		val other = BaseItemDto(id = UUID.randomUUID(), type = BaseItemKind.MOVIE)
+		val button = "Open Catch Up"
+		val item = { card: Any -> card as? BaseItemDto }
+
+		val cards = listOf<Any>(button, show, episodeOfShow, season, other)
+		HomeRowsLogic.withoutHidden(cards, showId, item) shouldContainExactly listOf(button, other)
+		HomeRowsLogic.withoutHidden(cards, seasonId, item) shouldContainExactly listOf(button, show, other)
+		HomeRowsLogic.withoutHidden(cards, other.id, item) shouldContainExactly listOf(button, show, episodeOfShow, season)
+
+		// Nothing matched: the same list, so the row isn't redrawn
+		(HomeRowsLogic.withoutHidden(cards, UUID.randomUUID(), item) === cards) shouldBe true
+		// Only the Catch Up button would be left
+		HomeRowsLogic.withoutHidden(listOf<Any>(button, other), other.id, item).shouldBeEmpty()
+	}
+
+	test("only rows the client protects itself are cleared by a failed refresh") {
+		HomeRowKind.entries.filter { it.protectionSensitive } shouldContainExactly
+			listOf(HomeRowKind.COMING_UP, HomeRowKind.JUMP_BACK_IN, HomeRowKind.TRENDING)
+	}
 })

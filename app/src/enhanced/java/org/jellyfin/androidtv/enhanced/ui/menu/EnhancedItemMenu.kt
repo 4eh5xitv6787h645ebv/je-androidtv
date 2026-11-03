@@ -9,6 +9,9 @@ import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.constant.QueryType
@@ -25,6 +28,7 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 import java.lang.ref.WeakReference
+import java.util.UUID
 
 /**
  * Jellyfin Enhanced entries for the card context menu (long-press OK or the menu key):
@@ -41,6 +45,16 @@ object EnhancedItemMenu {
 	private const val MENU_REMOVE_NEXT_UP = 9002
 	private const val MENU_HIDE = 9003
 	private const val MENU_SPOILER_GUARD = 9004
+
+	/**
+	 * Items hidden from the menu, for rows that don't use an [ItemRowAdapter] (the Jellyfin Enhanced home rows) and
+	 * drop the matching cards themselves. Main thread only; nobody collecting means nobody needs it.
+	 */
+	private val _hidden = MutableSharedFlow<HiddenItem>(extraBufferCapacity = 8)
+	val hidden: SharedFlow<HiddenItem> = _hidden.asSharedFlow()
+
+	/** An item just hidden everywhere: [id] is the item, or its show when the whole series was hidden. */
+	data class HiddenItem(val id: UUID)
 
 	private var selectedItem = WeakReference<BaseRowItem>(null)
 	private var selectedRow = WeakReference<ListRow>(null)
@@ -130,6 +144,7 @@ object EnhancedItemMenu {
 						runCatching { hiddenContentRepository.hide(item, wholeSeries) }
 							.onSuccess {
 								removeFromRow(row, rowItem)
+								_hidden.tryEmit(HiddenItem(if (wholeSeries) item.seriesId ?: item.id else item.id))
 								val name = if (wholeSeries) item.seriesName ?: item.name else item.name
 								Toast.makeText(activity, activity.getString(R.string.je_hidden_toast, name.orEmpty()), Toast.LENGTH_SHORT).show()
 							}

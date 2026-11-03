@@ -100,8 +100,15 @@ server's DTOs, so card size, focus, background, Menu key and Spoiler Guard artwo
   is always the server's. Unreadable JE config → no row.
 - Jump back in names episodes through `BookmarkLogic.name` (neutral "Series · Season 2, Episode 1" for guarded
   episodes). Unreadable JE config → no row.
-- Trending leaves out pending Spoiler Guard opt-ins; with Spoiler Guard on but its lists unreadable → no row.
+- Trending leaves out pending Spoiler Guard opt-ins; with Spoiler Guard on but its lists unreadable → no row. With
+  Hidden Content on, `SeerrRepository.loadNext` throws when the Hidden Content document can't be read (it no longer
+  filters with an empty list), so the row is left out too.
 - Catch Up and every library card come from the server's normal item queries, which apply both features.
+- A failed refresh (home resumed) clears Coming up, Jump back in and Trending (`HomeRowKind.protectionSensitive`):
+  protection may have changed meanwhile and their cards can't be re-validated. Catch Up keeps its cards.
+- Hide from the card menu on a library card (`EnhancedItemMenu`, which emits `EnhancedItemMenu.hidden`) drops the
+  item, and for a show or season its episodes, from every JE row and from the rows' cached cards.
+- Another signed-in server/user (`UserRepository.currentUser`'s `serverId` + `id`) clears every row and loads afresh.
 
 ## Routes called
 
