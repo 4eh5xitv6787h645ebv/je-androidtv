@@ -1,59 +1,58 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
-import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import android.widget.ImageView
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import java.util.Locale
+import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.doubleOrNull
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.jsonObject
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
@@ -79,17 +78,34 @@ import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrMediaRequest
 import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrRequestStatus
 import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrSeasonAvailability
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.design.AgeRatingTag
+import org.jellyfin.androidtv.enhanced.ui.design.ErrorState
+import org.jellyfin.androidtv.enhanced.ui.design.HeroHeader
+import org.jellyfin.androidtv.enhanced.ui.design.HeroScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.InfoLeading
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeChoiceDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.LabeledIconButton
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingSkeleton
+import org.jellyfin.androidtv.enhanced.ui.design.MediaCard
+import org.jellyfin.androidtv.enhanced.ui.design.MetaLine
+import org.jellyfin.androidtv.enhanced.ui.design.MetaRating
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.SeasonCard
+import org.jellyfin.androidtv.enhanced.ui.design.SectionHeader
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
+import org.jellyfin.androidtv.enhanced.ui.design.StatusBadge
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
-import java.util.Locale
-import java.util.UUID
 
 /** Details for a Seerr movie or show with request controls, the TV counterpart of JE's "More info" modal. */
 class SeerrDetailsFragment : Fragment() {
@@ -153,6 +169,19 @@ class SeerrDetailsFragment : Fragment() {
 	)
 
 	private val state = MutableStateFlow(UiState())
+
+	/** A choice the user is making (TVDB match, seasons to request), shown as a [JeChoiceDialog]. */
+	private class ChoiceDialog(
+		val title: String,
+		val options: List<String>,
+		val captions: List<String?>? = null,
+		val multi: Boolean = false,
+		val selected: Set<Int> = emptySet(),
+		val confirmLabel: String? = null,
+		val onConfirm: (Set<Int>) -> Unit,
+	)
+
+	private val dialog = MutableStateFlow<ChoiceDialog?>(null)
 
 	/** [SpoilerGuardRepository.generation] when the shown protection was resolved; a change means it may be stale. */
 	private var spoilerGeneration = -1L
@@ -267,224 +296,275 @@ class SeerrDetailsFragment : Fragment() {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val ui by state.collectAsState()
+		val choice by dialog.collectAsState()
 		val details = ui.details
 
 		JellyfinTheme {
-		Box(modifier = Modifier.fillMaxSize()) {
-			val story = ui.libraryStory
-			(if (story != null) story.backdropUrl else SeerrImages.backdrop(details?.backdropPath))?.let { url ->
-				coil3.compose.AsyncImage(
-					model = url,
-					contentDescription = null,
-					contentScale = ContentScale.Crop,
-					modifier = Modifier.fillMaxSize(),
-				)
-			}
-			Box(
-				modifier = Modifier
-					.fillMaxSize()
-					.background(
-						Brush.horizontalGradient(
-							0f to Color.Black.copy(alpha = 0.95f),
-							0.65f to Color.Black.copy(alpha = 0.75f),
-							1f to Color.Black.copy(alpha = 0.45f),
-						)
-					)
-			)
-
-			when {
-				details != null -> DetailsContent(ui, details)
-				ui.error != null -> Column(
-					modifier = Modifier.align(Alignment.Center),
-					horizontalAlignment = Alignment.CenterHorizontally,
-					verticalArrangement = Arrangement.spacedBy(16.dp),
-				) {
-					val retryFocus = remember { FocusRequester() }
-					Text(ui.error!!, color = Tokens.Color.colorGrey100, fontSize = 20.sp)
-					Button(onClick = { state.value = state.value.copy(error = null, loading = true); reload() }, modifier = Modifier.focusRequester(retryFocus)) {
-						Text(stringResource(R.string.je_retry))
-					}
-					LaunchedEffect(Unit) { runCatching { retryFocus.requestFocus() } }
+			if (details != null) {
+				DetailsContent(ui, details)
+			} else {
+				Box(modifier = Modifier.fillMaxSize().background(JeColors.background)) {
+					val error = ui.error
+					if (error != null) ErrorState(message = error, onRetry = { reload() })
+					else LoadingSkeleton(SkeletonShape.Hero)
 				}
-				else -> Text(stringResource(R.string.je_loading), color = Tokens.Color.colorGrey100, modifier = Modifier.align(Alignment.Center), fontSize = 20.sp)
 			}
-		}
+
+			choice?.let { current ->
+				// Keyed so a dialog that follows another (TVDB pick → seasons) starts with its own selection
+				key(current) {
+					JeChoiceDialog(
+						visible = true,
+						title = current.title,
+						options = current.options,
+						selected = current.selected,
+						multi = current.multi,
+						captions = current.captions,
+						confirmLabel = current.confirmLabel ?: stringResource(R.string.je_design_done),
+						onConfirm = current.onConfirm,
+						// Only this dialog: a choice may already have opened the next one
+						onDismissRequest = { dialog.compareAndSet(current, null) },
+					)
+				}
+			}
 		}
 	}
 
 	@Composable
 	private fun DetailsContent(ui: UiState, details: SeerrDetails) {
-		val focusRequester = remember { FocusRequester() }
+		val firstAction = remember { FocusRequester() }
 		val media = details.mediaInfo
 		val status = media?.effectiveStatus
 		val story = ui.libraryStory
 		val overview = if (story != null) story.overview else details.overview
-		val tagline = if (story != null) story.tagline else details.tagline
 		val rating = if (story != null) story.rating else details.voteAverage
 		val year = if (story != null) story.year else details.year
+		val requests = requesterLines(ui.extras.standardRequests)
+		val seasons = if (isTv) seasonEntries(ui, details) else emptyList()
+		val cast = castEntries(ui)
+		val statusSpec = JeStatuses.seerrMedia(status)
+		// Age rating and original title come from Seerr/TMDB only, so not for protected library titles
+		val certification = if (story == null) ui.extras.certification(certificationCountries()) else null
+		val originalTitle = if (story == null) ui.extras.originalTitleIfDifferent(details.displayTitle) else null
 
-		Row(
-			modifier = Modifier
-				.fillMaxSize()
-				.padding(horizontal = 48.dp, vertical = 40.dp),
-			horizontalArrangement = Arrangement.spacedBy(32.dp),
-		) {
-			Box(modifier = Modifier.size(200.dp, 300.dp)) {
-				AsyncImage(
-					url = if (ui.libraryStory != null) ui.libraryStory.posterUrl else SeerrImages.poster(details.posterPath, "w500"),
-					aspectRatio = 2f / 3f,
-					scaleType = ImageView.ScaleType.CENTER_CROP,
-					modifier = Modifier.fillMaxSize(),
+		HeroScaffold(
+			backdropUrl = if (story != null) story.backdropUrl else SeerrImages.backdrop(details.backdropPath),
+			showToolbar = false,
+			header = { collapsed ->
+				HeroHeader(
+					title = details.displayTitle,
+					status = if (statusSpec == null && requests.isEmpty()) null else {
+						{
+							statusSpec?.let { StatusBadge(it) }
+							requests.firstOrNull()?.let { Text(text = it, color = JeColors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+						}
+					},
+					meta = {
+						val seasonCount = details.seasons.count { it.seasonNumber > 0 }
+						listOfNotNull(
+							year,
+							details.runtime?.takeIf { it > 0 }?.let { stringResource(R.string.je_seerrdetails_runtime, it / 60, it % 60) },
+							seasonCount.takeIf { isTv && it > 0 }?.let { pluralStringResource(R.plurals.je_seerrdetails_season_count, it, it) },
+						).forEach { Text(text = it, color = JeColors.onSurface, maxLines = 1) }
+						certification?.let { AgeRatingTag(it) }
+						rating?.takeIf { it > 0 }?.let {
+							MetaRating(String.format(Locale.getDefault(), "%.1f", it), InfoLeading.Icon(R.drawable.ic_star, JeColors.ratingStar))
+						}
+						MetaLine(details.genres.map { it.name })
+					},
+					overview = overview?.takeIf { it.isNotBlank() },
+					collapsed = collapsed,
+					extra = {
+						HeroNotes(ui, requests.drop(1), originalTitle)
+					},
 				)
-			}
-
-			// Scrolls so the rows below the buttons can be reached; focus brings them into view
-			Column(
-				modifier = Modifier
-					.fillMaxWidth()
-					.verticalScroll(rememberScrollState()),
-				verticalArrangement = Arrangement.spacedBy(10.dp),
-			) {
-				Text(text = details.displayTitle, fontSize = 32.sp, color = Tokens.Color.colorWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
-
-				val meta = listOfNotNull(
-					year,
-					details.runtime?.takeIf { it > 0 }?.let { "${it / 60}h ${it % 60}m" },
-					details.seasons.count { it.seasonNumber > 0 }.takeIf { isTv && it > 0 }?.let { "$it ${if (it == 1) "season" else "seasons"}" },
-					rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
-					details.genres.joinToString(", ") { it.name }.ifEmpty { null },
-				).joinToString("   ·   ")
-				if (meta.isNotEmpty()) Text(text = meta, color = secondaryTextColor(), fontSize = 16.sp)
-				// Age rating and original title come from Seerr/TMDB only, so not for protected library titles
-				if (story == null) SeerrDetailsMetaStrip(extraMeta(ui, details))
-
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-					SeerrStatusBadge(status)
-				}
-
-				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = secondaryTextColor(), fontSize = 16.sp) }
-				overview?.takeIf { it.isNotBlank() }?.let {
-					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
-				}
-
 				ui.error?.let { error ->
-					val retryFocus = remember { FocusRequester() }
-					Row(
-						horizontalArrangement = Arrangement.spacedBy(12.dp),
-						verticalAlignment = Alignment.CenterVertically,
-					) {
-						Text(error, color = Tokens.Color.colorGrey100, fontSize = 16.sp)
-						Button(onClick = { reload() }, enabled = !ui.loading, modifier = Modifier.focusRequester(retryFocus)) {
-							Text(stringResource(R.string.je_retry))
-						}
-					}
-					LaunchedEffect(error) { runCatching { retryFocus.requestFocus() } }
-				}
-
-				Spacer(modifier = Modifier.height(8.dp))
-
-				Row(
-					horizontalArrangement = Arrangement.spacedBy(12.dp),
-					modifier = Modifier.focusGroup(),
-				) {
-					var first = true
-					fun Modifier.firstFocus(): Modifier = if (first) {
-						first = false
-						focusRequester(focusRequester)
-					} else this
-
-					if (ui.enhanced.seerrUsable) {
-						requestLabel(ui, details)?.let { label ->
-							// Stays enabled while busy so focus doesn't jump away; the label says what's happening
-							Button(onClick = { if (ui.busy == null) startRequest(details) }, modifier = Modifier.firstFocus()) {
-								Text(stringResource(if (ui.busy == Busy.REQUEST) R.string.je_seerr_requesting else label))
-							}
-						}
-					}
-
-					val jellyfinId = media?.jellyfinMediaId ?: media?.jellyfinMediaId4k
-					jellyfinId?.let(::parseUuid)?.let { id ->
-						Button(onClick = { navigationRepository.navigate(Destinations.itemDetails(id)) }, modifier = Modifier.firstFocus()) {
-							Text(stringResource(R.string.je_open_in_library))
-						}
-					}
-
-					// Pre-acquisition Spoiler Guard opt-in, promoted by the plugin when the title arrives
-					if (ui.spoilerPending != null && jellyfinId == null) {
-						Button(onClick = { if (ui.busy == null) toggleSpoilerPending(details, !ui.spoilerPending) }, modifier = Modifier.firstFocus()) {
-							Text(stringResource(when {
-								ui.busy == Busy.PENDING -> R.string.je_seerr_saving
-								ui.spoilerPending -> R.string.je_spoiler_pending
-								else -> R.string.je_spoiler_enable_pending
-							}))
-						}
-					}
-
-					for (action in ui.extraActions) {
-						Button(onClick = { if (ui.busy == null) action.onClick() }, modifier = Modifier.firstFocus()) { Text(action.label) }
+					// A reload failed while the last details stay on screen
+					Spacer(Modifier.height(JeSpace.sectionHeaderGap))
+					Row(horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap), verticalAlignment = Alignment.CenterVertically) {
+						Notice(kind = NoticeKind.Error, title = error, inline = true, modifier = Modifier.weight(1f, fill = false))
+						val retryFocus = remember { FocusRequester() }
+						JeButton(text = stringResource(R.string.je_retry), onClick = { reload() }, busy = ui.loading, modifier = Modifier.focusRequester(retryFocus))
+						LaunchedEffect(error) { runCatching { retryFocus.requestFocus() } }
 					}
 				}
-
-				if (!ui.enhanced.seerrUsable) {
-					// Why, when it's the user's Seerr link (not linked, blocked, unreachable)
-					val link = SeerrLink.kind(ui.enhanced)
-					Text(
-						text = if (link == SeerrLinkKind.OFF || link == SeerrLinkKind.LINKED) stringResource(R.string.je_seerr_unavailable)
-						else SeerrErrors.forLink(link, ui.enhanced.isAdmin).text.resolve(),
-						color = secondaryTextColor(),
-					)
-				}
-
-				ui.quota?.let { quota ->
-					val side = if (isTv) quota.tv else quota.movie
-					val limit = side?.limit ?: 0
-					if (side != null && limit > 0) {
-						Text(
-							text = stringResource(
-								R.string.je_quota,
-								stringResource(if (isTv) R.string.je_quota_tv else R.string.je_quota_movie),
-								side.remaining ?: (limit - (side.used ?: 0)),
-								limit,
-								side.days ?: 0,
-							),
-							color = secondaryTextColor(),
-							fontSize = 14.sp,
-						)
+			},
+			actions = { DetailsActions(ui, details, firstAction) },
+			below = {
+				// Feature sections (ratings and providers, issues…), each handling its own loading and failures
+				ui.sections.forEachIndexed { index, section ->
+					item(key = "section-$index") {
+						Box(modifier = Modifier.padding(horizontal = JeSpace.pageHorizontal)) { section() }
 					}
 				}
-
-				SeerrDetailsRequesters(requesterLines(ui.extras.standardRequests))
-
-				// Feature sections (issues…), each handling its own loading and failures
-				for (section in ui.sections) section()
-
-				if (isTv) {
-					SeerrDetailsSeasonsRow(seasonEntries(ui, details)) { season ->
-						if (season.requestable && ui.enhanced.seerrUsable && ui.busy == null && requestLabel(ui, details) != null) startRequest(details)
-					}
-				}
-
-				SeerrDetailsCastRow(castEntries(ui)) { person ->
-					navigationRepository.navigate(
-						EnhancedDestinations.seerrDiscovery(
-							SeerrSource.Person(
-								jellyfinPersonId = person.jellyfinPersonId,
-								tmdbPersonId = person.tmdbPersonId,
-								name = person.name,
-								title = getString(R.string.je_more_with_title, person.name),
+				if (seasons.isNotEmpty()) item(key = "seasons") {
+					DetailsRow(stringResource(R.string.je_seerrdetails_seasons)) {
+						items(seasons, key = { it.seasonNumber }) { season ->
+							SeasonCard(
+								name = season.label,
+								episodes = season.episodeCount.takeIf { it > 0 }?.let { pluralStringResource(R.plurals.je_seerrdetails_episodes, it, it) },
+								status = JeStatuses.seerrSeason(season.status),
+								onClick = {
+									if (season.requestable && ui.enhanced.seerrUsable && ui.busy == null && requestLabel(ui, details) != null) startRequest(details)
+								},
 							)
-						)
-					)
+						}
+					}
 				}
-
-				Spacer(modifier = Modifier.height(8.dp))
-			}
-		}
+				if (cast.isNotEmpty()) item(key = "cast") {
+					DetailsRow(stringResource(R.string.je_seerrdetails_cast)) {
+						items(cast, key = { "${it.tmdbPersonId}-${it.jellyfinPersonId}-${it.name}" }) { person ->
+							MediaCard(
+								imageUrl = person.imageUrl,
+								title = person.name,
+								subtitle = person.role?.takeIf { it.isNotBlank() },
+								fallbackIcon = R.drawable.ic_user,
+								onClick = { openPerson(person) },
+							)
+						}
+					}
+				}
+			},
+		)
 
 		// Buttons come and go as the status changes; keep focus on the first one rather than losing it
 		LaunchedEffect(details.id, status, ui.spoilerPending, ui.loading, ui.error) {
-			if (!ui.loading && ui.error == null) runCatching { focusRequester.requestFocus() }
+			if (!ui.loading && ui.error == null) runCatching { firstAction.requestFocus() }
 		}
+	}
+
+	/** The hero's secondary lines, hidden while the rows below have the focus: more requests, quota, why Seerr is off. */
+	@Composable
+	private fun HeroNotes(ui: UiState, moreRequests: List<String>, originalTitle: String?) {
+		val lines = buildList {
+			originalTitle?.let { add(stringResource(R.string.je_seerrdetails_original_title, it)) }
+			addAll(moreRequests)
+			ui.quota?.let { quota ->
+				val side = if (isTv) quota.tv else quota.movie
+				val limit = side?.limit ?: 0
+				if (side != null && limit > 0) add(
+					stringResource(
+						R.string.je_quota,
+						stringResource(if (isTv) R.string.je_quota_tv else R.string.je_quota_movie),
+						side.remaining ?: (limit - (side.used ?: 0)),
+						limit,
+						side.days ?: 0,
+					)
+				)
+			}
+		}
+		for (line in lines) Text(text = line, style = JeType.caption, maxLines = 1, overflow = TextOverflow.Ellipsis)
+		if (!ui.enhanced.seerrUsable) {
+			// Why, when it's the user's Seerr link (not linked, blocked, unreachable)
+			val link = SeerrLink.kind(ui.enhanced)
+			Notice(
+				kind = NoticeKind.Warning,
+				title = if (link == SeerrLinkKind.OFF || link == SeerrLinkKind.LINKED) stringResource(R.string.je_seerr_unavailable)
+				else SeerrErrors.forLink(link, ui.enhanced.isAdmin).text.resolve(),
+				inline = true,
+			)
+		}
+	}
+
+	/**
+	 * The hero's action row: the main action as a text button (Request / Request more, else Open in library), then the
+	 * rest as labelled icon buttons. [firstAction] goes to whichever comes first.
+	 */
+	@Composable
+	private fun RowScope.DetailsActions(ui: UiState, details: SeerrDetails, firstAction: FocusRequester) {
+		val media = details.mediaInfo
+		val jellyfinId = (media?.jellyfinMediaId ?: media?.jellyfinMediaId4k)?.let(::parseUuid)
+		val requestLabel = if (ui.enhanced.seerrUsable) requestLabel(ui, details) else null
+		val openInLibrary = jellyfinId?.let { id -> { navigationRepository.navigate(Destinations.itemDetails(id)) } }
+		var first = true
+		fun Modifier.firstFocus(): Modifier = if (first) {
+			first = false
+			focusRequester(firstAction)
+		} else this
+
+		// Primary: centred on the 48 dp icon circles like ActionRow does
+		if (requestLabel != null || openInLibrary != null) {
+			Box(modifier = Modifier.height(48.dp).padding(end = 4.dp), contentAlignment = Alignment.CenterStart) {
+				if (requestLabel != null) {
+					// Stays focusable while busy so focus doesn't jump away; the label says what's happening
+					JeButton(
+						text = stringResource(if (ui.busy == Busy.REQUEST) R.string.je_seerr_requesting else requestLabel),
+						icon = R.drawable.ic_add,
+						busy = ui.busy == Busy.REQUEST,
+						onClick = { if (ui.busy == null) startRequest(details) },
+						modifier = Modifier.firstFocus(),
+					)
+				} else if (openInLibrary != null) {
+					JeButton(text = stringResource(R.string.je_open_in_library), icon = R.drawable.ic_folder, onClick = openInLibrary, modifier = Modifier.firstFocus())
+				}
+			}
+		}
+
+		if (requestLabel != null && openInLibrary != null) {
+			LabeledIconButton(icon = R.drawable.ic_folder, label = stringResource(R.string.je_open_in_library), onClick = openInLibrary, modifier = Modifier.firstFocus())
+		}
+
+		// Pre-acquisition Spoiler Guard opt-in, promoted by the plugin when the title arrives
+		val pending = ui.spoilerPending
+		if (pending != null && jellyfinId == null) {
+			LabeledIconButton(
+				icon = if (pending) R.drawable.je_ic_blur_on else R.drawable.je_ic_blur_off,
+				label = stringResource(when {
+					ui.busy == Busy.PENDING -> R.string.je_seerr_saving
+					pending -> R.string.je_spoiler_pending
+					else -> R.string.je_spoiler_enable_pending
+				}),
+				busy = ui.busy == Busy.PENDING,
+				onClick = { if (ui.busy == null) toggleSpoilerPending(details, !pending) },
+				modifier = Modifier.firstFocus(),
+			)
+		}
+
+		for (action in ui.extraActions) {
+			LabeledIconButton(
+				icon = action.icon ?: fallbackIcon(action),
+				label = action.label,
+				onClick = { if (ui.busy == null) action.onClick() },
+				modifier = Modifier.firstFocus(),
+			)
+		}
+	}
+
+	/**
+	 * An icon for a contributed action that doesn't bring one. Hide/Unhide (Hidden Content's contributor) is known by
+	 * its label until it passes its own icon.
+	 */
+	private fun fallbackIcon(action: SeerrDetailsAction): Int = when (action.label) {
+		getString(R.string.je_hide) -> R.drawable.je_ic_visibility_off
+		getString(R.string.je_unhide) -> R.drawable.je_ic_visibility
+		else -> R.drawable.ic_more
+	}
+
+	/** A titled horizontal row under the hero; the cards scroll edge to edge, the header keeps the page inset. */
+	@Composable
+	private fun DetailsRow(title: String, content: LazyListScope.() -> Unit) {
+		Column(verticalArrangement = Arrangement.spacedBy(JeSpace.sectionHeaderGap)) {
+			SectionHeader(text = title, modifier = Modifier.padding(horizontal = JeSpace.pageHorizontal))
+			LazyRow(
+				modifier = Modifier.focusRestorer().focusGroup(),
+				horizontalArrangement = Arrangement.spacedBy(JeSpace.gridGap),
+				contentPadding = PaddingValues(horizontal = JeSpace.pageHorizontal),
+				content = content,
+			)
+		}
+	}
+
+	private fun openPerson(person: SeerrDetailsCastEntry) {
+		navigationRepository.navigate(
+			EnhancedDestinations.seerrDiscovery(
+				SeerrSource.Person(
+					jellyfinPersonId = person.jellyfinPersonId,
+					tmdbPersonId = person.tmdbPersonId,
+					name = person.name,
+					title = getString(R.string.je_more_with_title, person.name),
+				)
+			)
+		)
 	}
 
 	/** The label for the request button, or null when nothing can be requested. */
@@ -500,14 +580,8 @@ class SeerrDetailsFragment : Fragment() {
 		}
 	}
 
-	/** Secondary metadata from Seerr: age rating and original title. */
-	private fun extraMeta(ui: UiState, details: SeerrDetails): List<String> {
-		val countries = listOf(Locale.getDefault().country, "US").filter { it.isNotBlank() }.distinct()
-		return listOfNotNull(
-			ui.extras.certification(countries)?.let { getString(R.string.je_seerrdetails_rated, it) },
-			ui.extras.originalTitleIfDifferent(details.displayTitle)?.let { getString(R.string.je_seerrdetails_original_title, it) },
-		)
-	}
+	/** Where the age rating is looked up: the TV's country, then the US. */
+	private fun certificationCountries() = listOf(Locale.getDefault().country, "US").filter { it.isNotBlank() }.distinct()
 
 	/** "Requested by X · date · status · seasons" for the latest few standard requests. */
 	private fun requesterLines(requests: List<SeerrMediaRequest>): List<String> {
@@ -528,7 +602,7 @@ class SeerrDetailsFragment : Fragment() {
 				request.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
 					.takeIf { isTv && it.isNotEmpty() }
 					?.let { getString(R.string.je_seerrdetails_request_seasons, it.joinToString(", ")) },
-			).joinToString("   ·   ")
+			).joinToString(" · ")
 		}
 		return if (requests.size > shown) lines + getString(R.string.je_seerrdetails_more_requests, requests.size - shown) else lines
 	}
@@ -610,12 +684,10 @@ class SeerrDetailsFragment : Fragment() {
 				}
 				// Only offer the choice while the screen is showing; the user has moved on otherwise
 				val context = context?.takeIf { lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) } ?: return@launch
-				val labels = candidates.map { c -> listOfNotNull(c.title, c.year?.toString(), "TVDB ${c.tvdbId}").joinToString(" · ") }.toTypedArray()
-				AlertDialog.Builder(context)
-					.setTitle(R.string.je_tvdb_pick_title)
-					.setItems(labels) { _, which -> pickSeasons(details, candidates[which].tvdbId) }
-					.setNegativeButton(android.R.string.cancel, null)
-					.show()
+				dialog.value = ChoiceDialog(
+					title = context.getString(R.string.je_tvdb_pick_title),
+					options = candidates.map { c -> listOfNotNull(c.title, c.year?.toString(), "TVDB ${c.tvdbId}").joinToString(" · ") },
+				) { picked -> picked.firstOrNull()?.let { pickSeasons(details, candidates[it].tvdbId) } }
 			}
 			return
 		}
@@ -643,29 +715,26 @@ class SeerrDetailsFragment : Fragment() {
 
 		// The same labels as the season cards, so a protected title's season names stay withheld here too
 		val guarded = ui.libraryStory != null
-		val labels = requestable.map { season ->
-			"${seasonLabel(season, guarded)}  (${getString(R.string.je_episodes_count, season.episodeCount)})"
-		}.toTypedArray()
+		val labels = requestable.map { season -> seasonLabel(season, guarded) }
+		val captions = requestable.map { season -> getString(R.string.je_episodes_count, season.episodeCount) }
 
-		if (ui.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
-			AlertDialog.Builder(context)
-				.setTitle(R.string.je_request_seasons)
-				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), tvdbId) }
-				.setNegativeButton(android.R.string.cancel, null)
-				.show()
-			return
-		}
-
-		val checked = BooleanArray(requestable.size) { true }
-		AlertDialog.Builder(context)
-			.setTitle(R.string.je_request_seasons)
-			.setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
-			.setPositiveButton(R.string.je_request) { _, _ ->
-				val seasons = requestable.filterIndexed { index, _ -> checked[index] }.map { it.seasonNumber }
+		dialog.value = if (ui.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
+			ChoiceDialog(title = getString(R.string.je_request_seasons), options = labels, captions = captions) { picked ->
+				picked.firstOrNull()?.let { submitRequest(details, listOf(requestable[it].seasonNumber), tvdbId) }
+			}
+		} else {
+			ChoiceDialog(
+				title = getString(R.string.je_request_seasons),
+				options = labels,
+				captions = captions,
+				multi = true,
+				selected = requestable.indices.toSet(),
+				confirmLabel = getString(R.string.je_request),
+			) { picked ->
+				val seasons = requestable.filterIndexed { index, _ -> index in picked }.map { it.seasonNumber }
 				if (seasons.isNotEmpty()) submitRequest(details, seasons, tvdbId)
 			}
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		}
 	}
 
 	/** Seasons that can still be requested, considering open requests and the library's own seasons. */

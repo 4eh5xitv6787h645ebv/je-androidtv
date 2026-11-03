@@ -110,6 +110,8 @@ private fun SeerrMetadataSection(info: MetadataInfo) {
 		onProgressMode = {},
 		onAwards = { awards = it },
 		reload = { info },
+		// Not a leanback row: the D-pad skips plain facts, only awards (which opens a list) takes the focus
+		focusableFacts = false,
 	)
 	DialogBase(
 		visible = awards != null,

@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -8,25 +7,22 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.FocusHighlight
@@ -50,14 +46,21 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrSort
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
 import org.jellyfin.androidtv.enhanced.seerr.sortable
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.design.ChipRow
+import org.jellyfin.androidtv.enhanced.ui.design.ChipSeparator
+import org.jellyfin.androidtv.enhanced.ui.design.FilterChip
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.PageHeader
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.dp
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
+import org.koin.compose.koinInject
 import timber.log.Timber
 
 /**
@@ -301,74 +304,78 @@ class SeerrDiscoveryFragment : Fragment() {
 		val currentPaused by paused.collectAsState()
 		val currentEmpty by empty.collectAsState()
 
-		Column(
-			modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 27.dp),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
-		) {
-			Text(text = source.title, fontSize = 28.sp, color = Tokens.Color.colorWhite)
-			// Scrolls sideways: with every filter, sort, status and Retry the row can be wider than the screen
-			Row(
-				horizontalArrangement = Arrangement.spacedBy(8.dp),
-				verticalAlignment = Alignment.CenterVertically,
-				modifier = Modifier.horizontalScroll(rememberScrollState()),
+		Column(modifier = Modifier.padding(top = HeaderTop)) {
+			PageHeader(
+				title = source.title,
+				actions = { GridStatus(currentStatus, currentFailed, currentPaused, currentEmpty, retryFocus = false, onLoadMore = { loadMore() }) },
+			)
+			// Scrolls sideways: with every filter and sort the row can be wider than the screen
+			if (!singleMediaType || source.sortable) ChipRow(
+				modifier = Modifier
+					.horizontalScroll(rememberScrollState())
+					.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom),
 			) {
 				if (!singleMediaType) listOf(
 					Filter.ALL to R.string.je_filter_all,
 					Filter.MOVIES to R.string.je_filter_movies,
 					Filter.TV to R.string.je_filter_tv,
 				).forEach { (value, label) ->
-					Button(
+					FilterChip(
+						label = stringResource(label),
+						selected = currentFilter == value,
 						onClick = {
 							if (filter.value != value) {
 								filter.value = value
 								applyFilter()
 							}
 						},
-						colors = if (currentFilter == value) ButtonDefaults.colors(
-							containerColor = JellyfinTheme.colorScheme.buttonActive,
-							contentColor = JellyfinTheme.colorScheme.onButtonActive,
-						) else ButtonDefaults.colors(),
-					) {
-						Text(stringResource(label))
-					}
+					)
 				}
 				if (source.sortable) {
-					Text(
-						text = stringResource(R.string.je_discover_sort),
-						color = secondaryTextColor(),
-						modifier = Modifier.padding(start = if (singleMediaType) 0.dp else 16.dp),
-					)
+					if (!singleMediaType) ChipSeparator()
+					Text(text = stringResource(R.string.je_discover_sort), style = JeType.caption, modifier = Modifier.padding(end = 4.dp))
 					listOf(
 						SeerrSort.POPULAR to R.string.je_discover_sort_popular,
 						SeerrSort.TOP_RATED to R.string.je_discover_sort_top_rated,
 						SeerrSort.NEWEST to R.string.je_discover_sort_newest,
 						SeerrSort.OLDEST to R.string.je_discover_sort_oldest,
 					).forEach { (value, label) ->
-						Button(
-							onClick = { changeSort(value) },
-							colors = if (currentSort == value) ButtonDefaults.colors(
-								containerColor = JellyfinTheme.colorScheme.buttonActive,
-								contentColor = JellyfinTheme.colorScheme.onButtonActive,
-							) else ButtonDefaults.colors(),
-						) {
-							Text(stringResource(label))
-						}
+						FilterChip(label = stringResource(label), selected = currentSort == value, onClick = { changeSort(value) })
 					}
-				}
-				currentStatus?.let { Text(text = it, color = secondaryTextColor(), modifier = Modifier.padding(start = 16.dp)) }
-				if (currentFailed) {
-					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_retry)) }
-				} else if (currentPaused) {
-					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_load_more)) }
-				} else if (currentEmpty) {
-					// Nothing to show and nothing more to load: the grid has no card to focus, so offer a way out
-					val backFocus = remember { FocusRequester() }
-					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(backFocus)) {
-						Text(stringResource(R.string.je_seerr_back))
-					}
-					LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
 				}
 			}
 		}
+	}
+}
+
+/** Top inset of a grid page's header: these pages have no toolbar, so the header starts at the overscan margin. */
+internal val HeaderTop = 27.dp
+
+/**
+ * The status end of a Seerr grid's header: the state as an inline notice ("Nothing found", the server's error),
+ * then Retry after a failure, Load more when paging paused, or Back when the grid ended empty (it has no card to land
+ * on then, so Back takes the focus; with [retryFocus], so does Retry on an empty grid).
+ */
+@Composable
+internal fun GridStatus(
+	status: String?,
+	failed: Boolean,
+	paused: Boolean,
+	empty: Boolean,
+	retryFocus: Boolean,
+	onLoadMore: () -> Unit,
+) {
+	val navigationRepository = koinInject<NavigationRepository>()
+	status?.let { Notice(kind = if (failed) NoticeKind.Error else NoticeKind.Info, title = it, inline = true) }
+	if (failed) {
+		val focus = remember { FocusRequester() }
+		JeButton(text = stringResource(R.string.je_retry), onClick = onLoadMore, modifier = Modifier.focusRequester(focus))
+		if (retryFocus) LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+	} else if (paused) {
+		JeButton(text = stringResource(R.string.je_load_more), onClick = onLoadMore)
+	} else if (empty) {
+		val backFocus = remember { FocusRequester() }
+		JeButton(text = stringResource(R.string.je_seerr_back), onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(backFocus))
+		LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
 	}
 }

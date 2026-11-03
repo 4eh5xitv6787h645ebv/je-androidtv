@@ -1,40 +1,40 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
-import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.delay
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.rememberFocusedState
 import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
@@ -42,8 +42,11 @@ import org.jellyfin.androidtv.ui.base.dialog.DialogBase
 import org.jellyfin.design.Tokens
 
 /**
- * A small focusable pill for the details info rows. Every chip can take focus so the row can be reached and
- * scrolled to with the D-pad; [onClick] makes it actionable.
+ * A fact chip of the details info rows (spec §6.9): the [InfoChip] look (rounded rectangle on `surface`) at rest.
+ * Leanback rows can only be reached by focusing something in them, so on the library details screen every chip can
+ * take the focus ([focusable]) and inverts like upstream's buttons when it has it. Actionable chips ([onClick]) are
+ * pill-shaped with an outline, the "press me" shape of a [FilterChip]. Off leanback (Seerr details) pass
+ * [focusable] false so plain facts are skipped by the D-pad.
  */
 @Composable
 fun MetadataChip(
@@ -51,41 +54,40 @@ fun MetadataChip(
 	modifier: Modifier = Modifier,
 	icon: Int? = null,
 	leading: (@Composable () -> Unit)? = null,
-	highlight: Boolean = false,
 	onClick: (() -> Unit)? = null,
+	focusable: Boolean = true,
 ) {
-	val interactionSource = remember { MutableInteractionSource() }
-	val focused by interactionSource.collectIsFocusedAsState()
-	val shape = RoundedCornerShape(8.dp)
-	val background = when {
-		focused -> JellyfinTheme.colorScheme.buttonFocused
-		highlight -> Tokens.Color.colorRed300.copy(alpha = 0.35f)
-		else -> Color.White.copy(alpha = 0.08f)
-	}
-	val content = if (focused) JellyfinTheme.colorScheme.onButtonFocused else Tokens.Color.colorGrey100
-	val interaction = if (onClick != null) {
-		Modifier.clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-	} else {
-		Modifier.focusable(interactionSource = interactionSource)
+	val focus = rememberFocusedState()
+	val scheme = JellyfinTheme.colorScheme
+	val focused = focus.focused
+	val shape = if (onClick != null) JeShapes.pill else JeShapes.image
+	val content = if (focused) scheme.onButtonFocused else JeColors.onSurface
+	val interaction = when {
+		onClick != null -> Modifier.clickable(interactionSource = focus.interactionSource, indication = null, onClick = onClick)
+		focusable -> Modifier.focusable(interactionSource = focus.interactionSource)
+		else -> Modifier
 	}
 
 	Row(
 		modifier = modifier
 			.then(interaction)
-			.background(background, shape)
-			.border(1.dp, if (highlight && !focused) Tokens.Color.colorRed300 else Color.Transparent, shape)
-			.heightIn(min = 32.dp)
-			.padding(horizontal = 10.dp, vertical = 6.dp),
+			.background(if (focused) scheme.buttonFocused else JeColors.surfaceOverArt, shape)
+			.then(if (onClick != null && !focused) Modifier.border(1.dp, JeColors.outline, shape) else Modifier)
+			.height(30.dp)
+			.padding(horizontal = if (onClick != null) 13.dp else 10.dp),
 		horizontalArrangement = Arrangement.spacedBy(6.dp),
 		verticalAlignment = Alignment.CenterVertically,
 	) {
-		if (icon != null) Icon(painterResource(icon), contentDescription = null, tint = content, modifier = Modifier.size(18.dp))
+		if (icon != null) Icon(painterResource(icon), contentDescription = null, tint = content, modifier = Modifier.size(16.dp))
 		leading?.invoke()
-		Text(text = text, color = content, fontSize = 14.sp, maxLines = 1)
+		Text(text = text, style = JeType.meta, color = content, maxLines = 1)
 	}
 }
 
-/** The surface of our dialogs: a titled column on the side of the screen, like the settings panel. */
+/**
+ * The surface of our side-panel dialogs (awards, content warnings, rating, translation): a titled column on the side
+ * of the screen like the settings drawer, with [JeDialog]'s colours, corners, padding and title style.
+ */
 @Composable
 fun MetadataDialogPanel(
 	title: String,
@@ -99,12 +101,12 @@ fun MetadataDialogPanel(
 			.padding(Tokens.Space.spaceMd)
 			.width(width)
 			.fillMaxHeight()
-			.background(JellyfinTheme.colorScheme.surface, JellyfinTheme.shapes.large)
+			.background(JeColors.surface, JeShapes.dialog)
 			.padding(24.dp),
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
-		Text(text = title, fontSize = 22.sp, color = Tokens.Color.colorWhite)
-		if (subtitle != null) Text(text = subtitle, fontSize = 14.sp, color = secondaryTextColor())
+		Text(text = title, style = JeType.dialogTitle, maxLines = 2, overflow = TextOverflow.Ellipsis)
+		if (subtitle != null) Text(text = subtitle, style = JeType.caption)
 		content()
 	}
 }
@@ -117,23 +119,45 @@ fun showComposeDialog(
 	fragment: Fragment,
 	alignment: Alignment = Alignment.CenterEnd,
 	content: @Composable (dismiss: () -> Unit) -> Unit,
+) = showDialogHost(fragment) { visible, dismiss ->
+	DialogBase(
+		visible = visible,
+		onDismissRequest = dismiss,
+		contentAlignment = alignment,
+	) {
+		content(dismiss)
+	}
+}
+
+/**
+ * Host a dialog composable that brings its own `DialogBase` ([JeDialog], [JeChoiceDialog]) over any screen, View-based
+ * or Compose: [content] gets whether it is showing and a `dismiss` callback to pass as its `onDismissRequest`. Each
+ * call gets its own host, so one dialog can open the next from its confirm callback. The host is dropped once the
+ * dialog has faded out, or with the fragment's view.
+ */
+fun showDialogHost(
+	fragment: Fragment,
+	content: @Composable (visible: Boolean, dismiss: () -> Unit) -> Unit,
 ) {
 	val activity = fragment.activity ?: return
-	val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 	val owner = fragment.viewLifecycleOwnerLiveData.value ?: return
+	showDialogHost(activity, owner, content)
+}
+
+/** [showDialogHost] for places that only have the activity (card menus); the host goes with [owner]. */
+fun showDialogHost(
+	activity: FragmentActivity,
+	owner: LifecycleOwner = activity,
+	content: @Composable (visible: Boolean, dismiss: () -> Unit) -> Unit,
+) {
+	val root = activity.findViewById<ViewGroup>(android.R.id.content) ?: return
 	val host = ComposeView(activity)
 	val visible = mutableStateOf(true)
 	val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_DESTROY) root.removeView(host) }
 
 	host.setContent {
 		JellyfinTheme {
-			DialogBase(
-				visible = visible.value,
-				onDismissRequest = { visible.value = false },
-				contentAlignment = alignment,
-			) {
-				content { visible.value = false }
-			}
+			content(visible.value) { visible.value = false }
 		}
 		LaunchedEffect(visible.value) {
 			if (!visible.value) {

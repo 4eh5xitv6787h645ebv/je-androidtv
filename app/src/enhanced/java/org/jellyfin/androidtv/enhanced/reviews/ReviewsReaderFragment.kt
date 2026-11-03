@@ -5,7 +5,6 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
@@ -15,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -22,7 +22,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,7 +36,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
@@ -46,6 +44,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
@@ -56,15 +55,18 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.metadata.MetadataDialogPanel
 import org.jellyfin.androidtv.enhanced.metadata.displayMessage
 import org.jellyfin.androidtv.enhanced.metadata.showComposeDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeColors
+import org.jellyfin.androidtv.enhanced.ui.design.JeShapes
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingRow
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import org.jellyfin.androidtv.ui.base.Icon
-import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.androidtv.ui.navigation.fragmentDestination
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 
@@ -216,20 +218,18 @@ class ReviewsReaderFragment : Fragment() {
 			}
 		}
 
-		JellyfinTheme {
-			Box(
-				modifier = Modifier
-					.fillMaxSize()
-					.background(JellyfinTheme.colorScheme.background),
-			) {
-				LoadStateContent(state, empty = { it.entries.isEmpty() }, emptyMessage = stringResource(R.string.je_reviews_none)) { data ->
+		val loaded = (state as? LoadState.Ready)?.value?.entries
+		PageScaffold(
+			title = target.title,
+			subtitle = loaded?.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.je_reviews_position, index.coerceIn(it.indices) + 1, it.size) },
+			showToolbar = false,
+		) {
+			LoadStateContent(state, empty = { it.entries.isEmpty() }, emptyMessage = stringResource(R.string.je_reviews_none)) { data ->
 					val entry = data.entries[index.coerceIn(data.entries.indices)]
 					val translation = translations.shown(entry)
 					val translatable = canTranslate && (entry.content.isNotBlank() || entry.summary != null)
 					ReviewPage(
-						title = target.title,
 						entry = entry,
-						position = stringResource(R.string.je_reviews_position, index + 1, data.entries.size),
 						translation = translation,
 						translationStatus = when {
 							!translatable -> TranslationStatus.UNAVAILABLE
@@ -243,7 +243,6 @@ class ReviewsReaderFragment : Fragment() {
 						onTranslate = { translations.toggle(entry) { pickLanguage { translations.translate(entry, it) } } },
 						onChangeLanguage = { pickLanguage { translations.translate(entry, it) } },
 					)
-				}
 			}
 		}
 	}
@@ -254,9 +253,7 @@ private enum class TranslationStatus { UNAVAILABLE, ORIGINAL, TRANSLATING, SHOWN
 
 @Composable
 private fun ReviewPage(
-	title: String,
 	entry: ReviewEntry,
-	position: String,
 	translation: TranslatedReview?,
 	translationStatus: TranslationStatus,
 	languageName: String?,
@@ -282,7 +279,7 @@ private fun ReviewPage(
 	Column(
 		modifier = Modifier
 			.fillMaxSize()
-			.padding(horizontal = 96.dp, vertical = 40.dp)
+			.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.pageBottom)
 			.focusRequester(focus)
 			.onPreviewKeyEvent { event ->
 				val code = event.key.nativeKeyCode
@@ -316,10 +313,6 @@ private fun ReviewPage(
 			.focusable(),
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
-		Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-			Text(text = title, fontSize = 26.sp, color = Tokens.Color.colorWhite, modifier = Modifier.weight(1f))
-			Text(text = position, fontSize = 16.sp, color = secondaryTextColor())
-		}
 		Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 			Text(
 				text = when {
@@ -327,8 +320,7 @@ private fun ReviewPage(
 					entry.author.isBlank() -> stringResource(R.string.je_reviews_anonymous)
 					else -> entry.author
 				},
-				fontSize = 20.sp,
-				color = Tokens.Color.colorWhite,
+				style = JeType.sectionHeader,
 			)
 			ReviewRating(entry, 22.dp)
 			val meta = listOfNotNull(
@@ -336,7 +328,7 @@ private fun ReviewPage(
 				reviewDate(entry.date),
 				if (entry.votes > 0) pluralStringResource(R.plurals.je_reviews_anilist_helpful, entry.votes, entry.helpful, entry.votes) else null,
 			).joinToString(" · ")
-			if (meta.isNotEmpty()) Text(text = meta, fontSize = 16.sp, color = secondaryTextColor(), modifier = Modifier.weight(1f, fill = false))
+			if (meta.isNotEmpty()) Text(text = meta, style = JeType.meta, maxLines = 1, modifier = Modifier.weight(1f, fill = false))
 			if (canTranslate) TranslateChip(translationStatus)
 		}
 		if (translation != null) {
@@ -345,8 +337,7 @@ private fun ReviewPage(
 					languageName?.let { stringResource(R.string.je_reviews_translated_to, it) },
 					stringResource(R.string.je_reviews_translated_partly).takeIf { translation.truncated },
 				).joinToString(" · "),
-				fontSize = 15.sp,
-				color = secondaryTextColor(),
+				style = JeType.caption,
 			)
 		}
 		Box(
@@ -361,36 +352,34 @@ private fun ReviewPage(
 				verticalArrangement = Arrangement.spacedBy(16.dp),
 			) {
 				val summary = if (translation != null) translation.summary ?: entry.summary else entry.summary
-				if (summary != null) Text(text = summary, fontSize = 24.sp, lineHeight = 34.sp, color = Tokens.Color.colorWhite)
-				Text(
-					text = translation?.content ?: entry.content,
-					fontSize = 22.sp,
-					lineHeight = 34.sp,
-					color = Tokens.Color.colorGrey100,
-				)
+				if (summary != null) Text(text = summary, style = ReadingStyle.copy(fontWeight = FontWeight.W500, color = JeColors.onSurface))
+				Text(text = translation?.content ?: entry.content, style = ReadingStyle)
 			}
 		}
 		Text(
 			text = stringResource(if (canTranslate) R.string.je_reviews_reader_hint_translate else R.string.je_reviews_reader_hint),
-			fontSize = 14.sp,
-			color = Tokens.Color.colorGrey500,
+			style = JeType.caption,
+			color = JeColors.textTertiary,
 		)
 	}
 }
 
+/** Review text in the reader: read from across the room, so larger than body text (20 sp, airy lines). */
+private val ReadingStyle = JeType.bodyLarge.copy(fontSize = JeType.dialogTitle.fontSize, lineHeight = JeType.dialogTitle.fontSize * 1.6f)
+
 /** The Translate action's state next to the review's details; OK on the page acts on it. */
 @Composable
 private fun TranslateChip(status: TranslationStatus) {
-	val shape = RoundedCornerShape(16.dp)
+	// Pill-shaped like a chip (OK on the page presses it), but never focused itself
 	Row(
 		modifier = Modifier
-			.background(Color.White.copy(alpha = 0.1f), shape)
-			.border(1.dp, Tokens.Color.colorGrey500, shape)
-			.padding(horizontal = 12.dp, vertical = 4.dp),
+			.height(30.dp)
+			.border(1.dp, JeColors.outline, JeShapes.pill)
+			.padding(horizontal = 13.dp),
 		verticalAlignment = Alignment.CenterVertically,
 		horizontalArrangement = Arrangement.spacedBy(6.dp),
 	) {
-		Icon(painterResource(R.drawable.je_ic_reviews_translate), null, tint = Tokens.Color.colorWhite, modifier = Modifier.size(18.dp))
+		Icon(painterResource(R.drawable.je_ic_reviews_translate), null, tint = JeColors.onSurface, modifier = Modifier.size(16.dp))
 		Text(
 			text = stringResource(
 				when (status) {
@@ -399,8 +388,8 @@ private fun TranslateChip(status: TranslationStatus) {
 					else -> R.string.je_reviews_translate
 				}
 			),
-			fontSize = 15.sp,
-			color = Tokens.Color.colorWhite,
+			style = JeType.chip,
+			color = JeColors.onSurface,
 		)
 	}
 }
@@ -436,7 +425,7 @@ private fun TranslationLanguageDialog(
 	MetadataDialogPanel(title = stringResource(R.string.je_reviews_translate_to)) {
 		val list = languages
 		if (list == null) {
-			Text(stringResource(R.string.je_loading), color = secondaryTextColor())
+			LoadingRow()
 		} else {
 			val selected = current?.takeIf { it in list } ?: defaultTranslationTarget(list) ?: list.firstOrNull()
 			LazyColumn(state = listState, modifier = Modifier.weight(1f, fill = false)) {
@@ -444,7 +433,7 @@ private fun TranslationLanguageDialog(
 					ListButton(
 						headingContent = { Text(translationLanguageName(code)) },
 						trailingContent = if (code == current) {
-							{ Text(stringResource(R.string.je_reviews_translate_current), color = secondaryTextColor()) }
+							{ Text(stringResource(R.string.je_reviews_translate_current), style = JeType.caption) }
 						} else null,
 						onClick = { onPick(code) },
 						modifier = if (code == selected) Modifier.focusRequester(initialFocus) else Modifier,

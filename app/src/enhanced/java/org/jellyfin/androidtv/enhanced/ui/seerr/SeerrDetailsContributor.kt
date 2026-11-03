@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
+import androidx.annotation.DrawableRes
 import androidx.compose.runtime.Composable
 import androidx.fragment.app.Fragment
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
@@ -19,16 +20,20 @@ class SeerrDetailsContext(
 	val reload: () -> Unit,
 )
 
-/** An extra button on the Seerr details screen. */
+/**
+ * An extra button on the Seerr details screen, shown as a labelled round icon button in the hero's action row.
+ * Give it an [icon] (a Material Symbols drawable); without one the screen picks a generic icon.
+ */
 class SeerrDetailsAction(
 	val label: String,
+	@DrawableRes val icon: Int? = null,
 	val onClick: () -> Unit,
 )
 
 /**
  * A feature's additions to the Seerr details screen. Registered with Koin as `SeerrDetailsContributor` and
- * collected by [SeerrDetailsFragment]. [Section] is composed below the overview; keep it compact (one row of
- * chips, a short list) and handle its own loading state.
+ * collected by [SeerrDetailsFragment]. [section] is composed in the rows under the hero (with the page's horizontal
+ * inset already applied); keep it compact (one row of chips, a short list) and handle its own loading state.
  */
 interface SeerrDetailsContributor {
 	suspend fun actions(context: SeerrDetailsContext): List<SeerrDetailsAction> = emptyList()

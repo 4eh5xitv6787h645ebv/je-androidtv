@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import androidx.annotation.StringRes
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -24,15 +23,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.launch
-import org.jellyfin.androidtv.R
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.design.Tokens
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.launch
+import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.ui.base.Text
 
 /**
  * Everything the "Enhanced info" row shows, loaded before the row is added. Absent parts are null/empty; [failures]
@@ -76,7 +75,7 @@ private fun ChipLine(content: @Composable RowScope.() -> Unit) {
 		modifier = Modifier
 			.fillMaxWidth()
 			.horizontalScroll(rememberScrollState()),
-		horizontalArrangement = Arrangement.spacedBy(8.dp),
+		horizontalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
 		verticalAlignment = Alignment.CenterVertically,
 		content = content,
 	)
@@ -86,7 +85,8 @@ private fun ChipLine(content: @Composable RowScope.() -> Unit) {
  * The content of the "Enhanced info" row: stats, release dates, ratings, awards, providers and person facts, a line
  * each. The state lives outside the composition ([infoState], [progressModeState]) because leanback rebinds rows
  * when they scroll back into view. [onProgressMode] persists a new watch-progress display mode; [onAwards] opens the full awards list;
- * [reload] loads everything again (for the retry chip).
+ * [reload] loads everything again (for the retry chip). [focusableFacts] false (screens that aren't leanback rows)
+ * leaves only the actionable chips focusable.
  */
 @Composable
 fun MetadataInfoContent(
@@ -95,6 +95,7 @@ fun MetadataInfoContent(
 	onProgressMode: (WatchProgressMode) -> Unit,
 	onAwards: (Awards) -> Unit,
 	reload: suspend () -> MetadataInfo,
+	focusableFacts: Boolean = true,
 ) {
 	var info by infoState
 	var progressMode by progressModeState
@@ -102,9 +103,12 @@ fun MetadataInfoContent(
 	val context = LocalContext.current
 
 	Column(
-		modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
+		modifier = Modifier.padding(vertical = 4.dp),
 		verticalArrangement = Arrangement.spacedBy(10.dp),
 	) {
+		@Composable
+		fun Fact(text: String, leading: (@Composable () -> Unit)? = null) = MetadataChip(text = text, leading = leading, focusable = focusableFacts)
+
 		val stats = info.stats
 		val statsLine = stats != null && (info.showProgress || info.showSize)
 		if (statsLine || info.audioLanguages.isNotEmpty() || info.releases.isNotEmpty()) ChipLine {
@@ -118,10 +122,10 @@ fun MetadataInfoContent(
 				)
 			}
 			if (stats != null && info.showSize && (stats.size ?: 0) > 0) {
-				MetadataChip(text = stringResource(R.string.je_metadata_size, formatSize(stats.size!!)))
+				Fact(stringResource(R.string.je_metadata_size, formatSize(stats.size!!)))
 			}
 			if (info.audioLanguages.isNotEmpty()) {
-				MetadataChip(text = stringResource(R.string.je_metadata_audio, info.audioLanguages.joinToString(", ") { languageDisplayName(it) }))
+				Fact(stringResource(R.string.je_metadata_audio, info.audioLanguages.joinToString(", ") { languageDisplayName(it) }))
 			}
 			val today = LocalDate.now()
 			for (release in info.releases) {
@@ -137,13 +141,13 @@ fun MetadataInfoContent(
 						else -> R.string.je_metadata_last_episode
 					}
 				}
-				MetadataChip(text = stringResource(label, date))
+				Fact(stringResource(label, date))
 			}
 		}
 
 		val awards = info.awards?.takeIf { it.found && (it.wins > 0 || it.nominations > 0) }
 		if (info.ratings.isNotEmpty() || awards != null) ChipLine {
-			for (rating in info.ratings) MetadataChip(text = "${rating.label} ${rating.value}")
+			for (rating in info.ratings) Fact("${rating.label} ${rating.value}")
 			if (awards != null) {
 				MetadataChip(
 					text = awardsSummary(awards),
@@ -155,10 +159,10 @@ fun MetadataInfoContent(
 
 		if (info.providers.isNotEmpty()) ChipLine {
 			info.providerRegion?.let {
-				Text(text = stringResource(R.string.je_metadata_providers, it), color = secondaryTextColor(), fontSize = 14.sp)
+				Text(text = stringResource(R.string.je_metadata_providers, it), style = JeType.meta)
 			}
 			for (provider in info.providers) {
-				MetadataChip(
+				Fact(
 					text = provider.providerName,
 					leading = provider.logoUrl?.let { url ->
 						{
@@ -189,7 +193,7 @@ fun MetadataInfoContent(
 				},
 				person.birthPlace?.takeIf { it.isNotBlank() },
 			)
-			if (chips.isNotEmpty()) ChipLine { chips.forEach { MetadataChip(text = it) } }
+			if (chips.isNotEmpty()) ChipLine { chips.forEach { Fact(it) } }
 		}
 
 		if (info.failures.isNotEmpty()) ChipLine {
