@@ -153,6 +153,8 @@ class ReviewsReaderFragment : Fragment() {
 				state = try {
 					val data = repository.load(target)
 					val failure = data.firstError
+					// A restored index may point past the first page that a fresh load brings back: keep it on a real review
+					index = index.coerceIn(0, (data.entries.size - 1).coerceAtLeast(0))
 					if (data.entries.isEmpty() && failure != null) LoadState.Error(failure.message, ::load) else LoadState.Ready(data)
 				} catch (err: CancellationException) {
 					throw err
@@ -165,7 +167,7 @@ class ReviewsReaderFragment : Fragment() {
 
 		fun move(delta: Int) {
 			val data = (state as? LoadState.Ready)?.value ?: return
-			val next = index + delta
+			val next = index.coerceIn(0, (data.entries.size - 1).coerceAtLeast(0)) + delta
 			if (next in data.entries.indices) {
 				index = next
 			} else if (next == data.entries.size && data.hasMoreTmdb && !loadingMore) {
