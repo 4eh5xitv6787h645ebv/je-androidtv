@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_bookmarks_title">Bookmarks</string>
+    <string name="je_bookmarks_description">Jump back to moments you saved</string>
+    <string name="je_bookmarks_empty">No bookmarks yet. Use \"Add bookmark\" on a movie or episode you\'ve started.</string>
+    <string name="je_bookmarks_count">%1$d saved</string>
+    <string name="je_bookmarks_at">at %1$s</string>
+    <string name="je_bookmarks_saved_on">saved %1$s</string>
+    <string name="je_bookmarks_stale">No longer in your library</string>
+    <string name="je_bookmarks_unresolved">Couldn\'t check which items are still in your library.</string>
+    <string name="je_bookmarks_untitled">Untitled</string>
+    <string name="je_bookmarks_play_from">Play from %1$s</string>
+    <string name="je_bookmarks_open_details">Open details</string>
+    <string name="je_bookmarks_delete">Delete bookmark</string>
+    <string name="je_bookmarks_deleted">Bookmark deleted</string>
+    <string name="je_bookmarks_delete_failed">Couldn\'t delete the bookmark: %1$s</string>
+    <string name="je_bookmarks_stale_title">This item is gone</string>
+    <string name="je_bookmarks_stale_message">The bookmarked item isn\'t in your library any more. Delete the bookmark?</string>
+    <string name="je_bookmarks_add">Add bookmark</string>
+    <string name="je_bookmarks_add_title">Bookmark at %1$s</string>
+    <string name="je_bookmarks_label_hint">Label (optional)</string>
+    <string name="je_bookmarks_save">Save</string>
+    <string name="je_bookmarks_added">Bookmark saved at %1$s</string>
+    <string name="je_bookmarks_add_failed">Couldn\'t save the bookmark: %1$s</string>
+</resources>

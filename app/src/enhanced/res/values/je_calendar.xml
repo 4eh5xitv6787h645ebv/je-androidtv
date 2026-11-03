@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_calendar_title">Calendar</string>
+    <string name="je_calendar_description">Upcoming episodes and movie releases</string>
+    <string name="je_calendar_range">%1$s – %2$s</string>
+    <string name="je_calendar_previous_week">Previous week</string>
+    <string name="je_calendar_next_week">Next week</string>
+    <string name="je_calendar_today">Today</string>
+    <string name="je_calendar_movies">Movies</string>
+    <string name="je_calendar_episodes">Episodes</string>
+    <string name="je_calendar_has_file">Downloaded</string>
+    <string name="je_calendar_requested">My requests</string>
+    <string name="je_calendar_empty">Nothing is coming out in these two weeks.</string>
+    <string name="je_calendar_empty_filtered">Nothing matches these filters in these two weeks.</string>
+    <string name="je_calendar_source_failed">%1$s: %2$s</string>
+    <string name="je_calendar_requests_failed">Your requests couldn\'t be loaded, so requested titles aren\'t marked.</string>
+    <string name="je_calendar_day_today">Today · %1$s</string>
+    <string name="je_calendar_day_tomorrow">Tomorrow · %1$s</string>
+    <string name="je_calendar_release_episode">Episode</string>
+    <string name="je_calendar_release_cinema">In cinemas</string>
+    <string name="je_calendar_release_digital">Digital release</string>
+    <string name="je_calendar_release_physical">Physical release</string>
+    <string name="je_calendar_finale_series">Series finale</string>
+    <string name="je_calendar_finale_season">Season finale</string>
+    <string name="je_calendar_finale_midseason">Midseason finale</string>
+    <string name="je_calendar_marker_downloaded">✓ Downloaded</string>
+    <string name="je_calendar_marker_requested">★ Requested</string>
+    <string name="je_calendar_not_in_library">Not in your library, and Seerr isn\'t available to show details.</string>
+</resources>
