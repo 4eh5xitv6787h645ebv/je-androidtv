@@ -169,7 +169,9 @@
     <string name="je_management_set_rating_in_player">Show critic and community ratings in the player</string>
     <string name="je_management_set_skip_intro">Skip intros automatically</string>
     <string name="je_management_set_skip_outro">Skip credits automatically</string>
-    <string name="je_management_set_skip_desc">Saved for the web client. This app skips according to Settings › Playback › Media segments.</string>
+    <string name="je_management_set_skip_desc">Web client only. This app skips by its own Media segments setting below.</string>
+    <string name="je_management_set_media_segments">Media segments in this app</string>
+    <string name="je_management_set_media_segments_desc">Choose what this app does at intros, credits and recaps</string>
     <string name="je_management_set_server_default">Server default</string>
     <string name="je_management_set_on">On</string>
     <string name="je_management_set_off">Off</string>

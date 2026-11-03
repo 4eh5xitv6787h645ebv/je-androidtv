@@ -2,7 +2,8 @@ package org.jellyfin.androidtv.enhanced.activity
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.Protection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 
 /** `GET /JellyfinEnhanced/activity`: a camelCase wrapper around PascalCase entries. */
 @Serializable
@@ -112,23 +113,29 @@ object ActivityLogic {
 		.sortedByDescending { it.timestampMs }
 
 	/**
-	 * Whether the entry's item belongs to a title the user protects with Spoiler Guard. Activity rows carry raw
-	 * library names and review text, so fail closed when the guard list couldn't be read ([state] null).
+	 * What to withhold for an activity or stream item, as the server protects it: episodes and seasons follow their
+	 * series, movies their own entry or a guarded collection they belong to. Activity rows carry raw library names and
+	 * review text, so anything the [snapshot] can't resolve fails closed. The rows are other users' activity, so the
+	 * signed-in user's watched state can't relax anything.
 	 */
-	fun isGuarded(itemId: String?, seriesId: String?, spoilerGuardEnabled: Boolean, state: SpoilerGuardState?): Boolean {
-		if (!spoilerGuardEnabled) return false
-		if (state == null) return true
-		val keys = listOfNotNull(itemId, seriesId).map { normalise(it) }
-		return listOf(state.series.keys, state.movies.keys).any { guarded -> guarded.any { normalise(it) in keys } }
+	fun protection(snapshot: SpoilerSnapshot, itemType: String, itemId: String?, seriesId: String?): Protection = when {
+		!snapshot.enabled -> Protection.NONE
+		itemType.equals("Episode", ignoreCase = true) || itemType.equals("Season", ignoreCase = true) -> snapshot.forSeries(seriesId)
+		itemType.equals("Series", ignoreCase = true) -> snapshot.forSeries(itemId, series = true)
+		itemType.equals("Movie", ignoreCase = true) -> snapshot.forMovie(itemId)
+		itemType.equals("BoxSet", ignoreCase = true) -> snapshot.forCollection(itemId)
+		!seriesId.isNullOrBlank() -> snapshot.forSeries(seriesId)
+		itemId.isNullOrBlank() -> Protection.FULL
+		// Unknown type: guarded if the id is listed under any kind
+		else -> listOf(snapshot.forMovie(itemId), snapshot.forSeries(itemId, series = true), snapshot.forCollection(itemId))
+			.firstOrNull { it.guarded } ?: Protection.NONE
 	}
 
-	private fun normalise(id: String) = id.replace("-", "").lowercase()
-
-	/** `Series · S1:E3 · Name`; the episode name is dropped when [guarded]. */
-	fun displayName(name: String, seriesName: String?, season: Int?, episode: Int?, guarded: Boolean): String {
+	/** `Series · S1:E3 · Name`; the episode name is dropped when [hideTitle]. */
+	fun displayName(name: String, seriesName: String?, season: Int?, episode: Int?, hideTitle: Boolean): String {
 		if (seriesName.isNullOrBlank()) return name
 		val code = if (season != null && episode != null) "S$season:E$episode" else null
-		return listOfNotNull(seriesName, code, name.takeIf { !guarded && it.isNotBlank() }).joinToString(" · ")
+		return listOfNotNull(seriesName, code, name.takeIf { !hideTitle && it.isNotBlank() }).joinToString(" · ")
 	}
 
 	/** Compact age like the web feed: `null` for under a minute ("just now"), otherwise `5m`, `2h`, `3d`, `1w`, `4mo`, `1y`. */

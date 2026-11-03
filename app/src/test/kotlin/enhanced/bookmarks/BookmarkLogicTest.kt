@@ -95,4 +95,27 @@ class BookmarkLogicTest : FunSpec({
 		val titlesKept = snapshot(guarded.state, SpoilerGuardPrefs(replaceEpisodeTitles = false))
 		BookmarkLogic.name(episode, resolved, titlesKept) shouldBe BookmarkName(resolved.displayName)
 	}
+
+	test("lookups go top-down without repeats, and an unknown policy withholds resolved episode titles") {
+		val entries = BookmarkLogic.sorted(EnhancedApi.json.decodeFromString<BookmarkDocument>(json))
+		val episodeId = UUID.fromString("fd8067ea-9ef3-5106-714e-66075a2df7ae")
+		val goneId = UUID.fromString("00000000-0000-0000-0000-000000000001")
+		// "abc" and "def" aren't ids: nothing to look up
+		BookmarkLogic.lookupBatches(entries, 1) shouldBe listOf(listOf(goneId), listOf(episodeId))
+		BookmarkLogic.lookupBatches(entries + entries, 50) shouldBe listOf(listOf(goneId, episodeId))
+
+		val episode = entries[1].bookmark
+		val resolved = BookmarkedItem(
+			id = episodeId,
+			displayName = "Scrubs · S2E1 · My First Time in a While",
+			posterUrl = "poster",
+			isEpisode = true,
+			seriesId = "326d7084082700b220b683fc0dc0ae78",
+			seriesName = "Scrubs",
+			seasonNumber = 2,
+			episodeNumber = 1,
+			played = true,
+		)
+		BookmarkLogic.name(episode, resolved, SpoilerSnapshot.UNKNOWN) shouldBe BookmarkName(null, NeutralEpisode("Scrubs", 2, 1))
+	}
 })

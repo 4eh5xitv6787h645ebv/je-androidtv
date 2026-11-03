@@ -6,7 +6,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
+import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import java.time.Instant
+import java.util.UUID
 import kotlin.math.roundToLong
 
 /**
@@ -44,7 +46,7 @@ data class BookmarkEntry(val bookmarkId: String, val bookmark: Bookmark)
  * Guard and Hidden Content). [posterUrl] is a server image route. The episode fields are set for episodes only.
  */
 data class BookmarkedItem(
-	val id: java.util.UUID,
+	val id: UUID,
 	val displayName: String,
 	val posterUrl: String?,
 	val isEpisode: Boolean = false,
@@ -119,6 +121,13 @@ object BookmarkLogic {
 		}
 		return BookmarkName(bookmark.name?.takeIf { it.isNotBlank() })
 	}
+
+	/**
+	 * The bookmarked item ids in list order, without repeats, in lookups of [size]: the rows at the top of the list
+	 * resolve first.
+	 */
+	fun lookupBatches(entries: List<BookmarkEntry>, size: Int): List<List<UUID>> =
+		entries.mapNotNull { it.bookmark.itemId.toUUIDOrNull() }.distinct().chunked(size)
 
 	/** `Series · S2E1 · Name` for episodes, the plain name otherwise. */
 	fun displayName(name: String?, seriesName: String?, season: Int?, episode: Int?): String = listOfNotNull(

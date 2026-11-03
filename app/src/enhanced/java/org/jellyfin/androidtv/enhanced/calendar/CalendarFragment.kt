@@ -41,6 +41,7 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
@@ -74,6 +75,7 @@ class CalendarFragment : Fragment() {
 	private val calendarRepository by inject<CalendarRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val spoilerProtection by inject<SpoilerProtection>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 	private val hiddenContentRepository by inject<HiddenContentRepository>()
 	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
@@ -89,6 +91,8 @@ class CalendarFragment : Fragment() {
 		val config: CalendarConfig,
 		/** Request keys; null when they couldn't be loaded (the highlight is optional unless it's enforced). */
 		val requested: Set<String>?,
+		/** Not every request could be read, so some requested titles may be unmarked (or missing when enforced). */
+		val requestedTruncated: Boolean,
 		val seerrEnabled: Boolean,
 		/** The user's Spoiler Guard lists and policy; incomplete ones fail closed. */
 		val spoiler: SpoilerSnapshot,
@@ -104,20 +108,71 @@ class CalendarFragment : Fragment() {
 	private val filter = MutableStateFlow(CalendarFilter())
 	private var filterInitialised = false
 	private var loadJob: Job? = null
+	/** [SpoilerGuardRepository.generation] when the current data started loading. */
+	private var loadGeneration = -1L
+	/** Whether the page has been started before: later starts are returns (from details, or to the app). */
+	private var started = false
 	private var opening = false
 	/** Focus goes to the agenda once per view; after that, week navigation keeps focus on its buttons. */
 	private var initialFocusDone = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
+		savedInstanceState?.let(::restore)
 		reload()
 	}
 
-	/** [retry]: an explicit Retry, which re-reads an unknown configuration at once instead of waiting out its backoff. */
-	private fun reload(retry: Boolean = false) {
+	override fun onStart() {
+		super.onStart()
+		if (!started) {
+			started = true
+			return
+		}
+		// Back from details (or the app): the user may have guarded, hidden or requested a title there
+		if (spoilerGuardRepository.generation != loadGeneration) {
+			// Everything shown was resolved against the old Spoiler Guard lists: drop it now, not after the network
+			reload()
+		} else if (loadState.value is LoadState.Ready) {
+			reload(refresh = true)
+		}
+	}
+
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		outState.putString(STATE_START, start.value.toString())
+		val current = filter.value
+		outState.putStringArrayList(STATE_SOURCES, ArrayList(current.sources))
+		outState.putStringArrayList(STATE_KINDS, ArrayList(current.kinds.map { it.name }))
+		outState.putBoolean(STATE_HAS_FILE, current.hasFileOnly)
+		outState.putBoolean(STATE_REQUESTED, current.requestedOnly)
+		outState.putBoolean(STATE_FILTER_INITIALISED, filterInitialised)
+	}
+
+	private fun restore(state: Bundle) {
+		state.getString(STATE_START)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }?.let { start.value = it }
+		filter.value = CalendarFilter(
+			sources = state.getStringArrayList(STATE_SOURCES).orEmpty().toSet(),
+			kinds = state.getStringArrayList(STATE_KINDS).orEmpty()
+				.mapNotNull { name -> CalendarFilter.Kind.entries.firstOrNull { it.name == name } }
+				.toSet(),
+			hasFileOnly = state.getBoolean(STATE_HAS_FILE),
+			requestedOnly = state.getBoolean(STATE_REQUESTED),
+		)
+		filterInitialised = state.getBoolean(STATE_FILTER_INITIALISED)
+	}
+
+	/**
+	 * [retry]: an explicit Retry, which re-reads an unknown configuration at once instead of waiting out its backoff.
+	 * [refresh]: revalidate in the background, keeping the current agenda on screen until the new one is ready.
+	 * Both re-read the user's requests; moving between weeks reuses them.
+	 */
+	private fun reload(retry: Boolean = false, refresh: Boolean = false) {
 		loadJob?.cancel()
-		loadState.value = LoadState.Loading
+		if (!refresh) loadState.value = LoadState.Loading
 		val windowStart = start.value
+		val generation = spoilerGuardRepository.generation
+		loadGeneration = generation
+		val refreshRequests = retry || refresh
 		loadJob = lifecycleScope.launch {
 			val result = attempt {
 				val state = enhancedRepository.ensureLoaded(force = retry && enhancedRepository.current.configUnavailable)
@@ -127,7 +182,11 @@ class CalendarFragment : Fragment() {
 					val eventsCall = async { calendarRepository.events(windowStart, zone) }
 					val configCall = async { calendarRepository.config() }
 					val requestedCall = async {
-						if (state.config.jellyseerrEnabled) attempt { calendarRepository.requestedKeys() }.getOrNull() else emptySet()
+						if (state.config.jellyseerrEnabled) {
+							attempt { calendarRepository.requested(refresh = refreshRequests) }.getOrNull()
+						} else {
+							RequestedKeys(emptySet(), truncated = false)
+						}
 					}
 					val spoilerCall = async { spoilerProtection.snapshot() }
 					val upcomingCall = async {
@@ -161,7 +220,8 @@ class CalendarFragment : Fragment() {
 						response = response,
 						upcoming = upcoming,
 						config = config,
-						requested = requested,
+						requested = requested?.keys,
+						requestedTruncated = requested?.truncated == true,
 						seerrEnabled = state.config.jellyseerrEnabled,
 						spoiler = spoiler,
 						posters = posters,
@@ -169,6 +229,11 @@ class CalendarFragment : Fragment() {
 						use12Hour = CalendarLogic.uses12HourClock(state.config.calendarTimeFormat),
 					)
 				}
+			}
+			// A Spoiler Guard write in this client overlapped the load, so it may have used the old lists
+			if (result.isSuccess && spoilerGuardRepository.generation != generation) {
+				reload()
+				return@launch
 			}
 			result.onSuccess { loaded ->
 				if (!filterInitialised) {
@@ -258,6 +323,7 @@ class CalendarFragment : Fragment() {
 					PageNotice(stringResource(R.string.je_calendar_source_failed, error.instanceName ?: error.source.orEmpty(), error.reason.orEmpty()))
 				}
 				if (loaded.seerrEnabled && loaded.requested == null) PageNotice(stringResource(R.string.je_calendar_requests_failed))
+				if (loaded.requestedTruncated) PageNotice(stringResource(R.string.je_calendar_requests_truncated, CalendarRepository.MAX_REQUEST_PAGES * CalendarRepository.REQUEST_PAGE_SIZE))
 				if (!loaded.spoiler.complete) PageNotice(stringResource(R.string.je_calendar_spoiler_unavailable))
 				// A source that failed only for the upcoming range would make guarded releases vanish from both groups
 				val upcomingErrors = loaded.upcoming?.errors.orEmpty()
@@ -446,4 +512,13 @@ class CalendarFragment : Fragment() {
 	}
 
 	private fun <T> Set<T>.toggle(value: T): Set<T> = if (value in this) this - value else this + value
+
+	private companion object {
+		const val STATE_START = "je_calendar_start"
+		const val STATE_SOURCES = "je_calendar_sources"
+		const val STATE_KINDS = "je_calendar_kinds"
+		const val STATE_HAS_FILE = "je_calendar_has_file"
+		const val STATE_REQUESTED = "je_calendar_requested"
+		const val STATE_FILTER_INITIALISED = "je_calendar_filter_initialised"
+	}
 }

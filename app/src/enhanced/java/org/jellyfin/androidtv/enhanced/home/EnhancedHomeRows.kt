@@ -19,6 +19,7 @@ import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.bookmarks.BookmarkLogic
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
@@ -48,7 +49,8 @@ import java.util.UUID
  * Created by the home fragment in `onCreate`; loading starts at once, in parallel with upstream's rows, and each row
  * appears when its data is ready (never before upstream's rows are in place, see [addToRowsAdapter]). A row that
  * fails to load is left out (logged). Rows come and go live with the user's choices on the settings page and with the
- * server's gates, are reloaded when the home screen is resumed and start over when the signed-in user changes. Cards
+ * server's gates, are reloaded when the home screen is resumed (protection-sensitive ones cleared first when Spoiler
+ * Guard changed meanwhile, see [refreshAll]) and start over when the signed-in user changes. Cards
  * hidden from the card menu leave the rows at once. Nothing is added on a server without the plugin or when every
  * row is off.
  */
@@ -56,12 +58,15 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val repository by inject<HomeRowsRepository>()
 	private val userRepository by inject<UserRepository>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 
 	private class Slot(val kind: HomeRowKind) {
 		var job: Job? = null
 		/** The loaded cards; null until loaded or after a failure. */
 		var cards: List<Any>? = null
 		var row: ListRow? = null
+		/** [SpoilerGuardRepository.generation] when the row was last loaded. */
+		var spoilerGeneration = -1L
 	}
 
 	private val slots = HomeRowKind.entries.associateWith { Slot(it) }
@@ -97,7 +102,7 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 			var first = true
 			fragment.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
 				// Back from details, playback, Catch Up or settings: bring the rows up to date
-				if (first) first = false else shown.forEach { load(it, refresh = true) }
+				if (first) first = false else refreshAll()
 			}
 		}
 	}
@@ -137,6 +142,22 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 	}
 
 	/**
+	 * Reloads every shown row. When Spoiler Guard changed in this client since the rows were loaded (a title guarded on
+	 * its details page, say), the [HomeRowKind.protectionSensitive] rows are taken off the screen first: their names,
+	 * dates and artwork were resolved against the old lists and must not stay up while the new ones load.
+	 */
+	private fun refreshAll() {
+		val generation = spoilerGuardRepository.generation
+		for (slot in slots.values) {
+			if (!slot.kind.protectionSensitive || slot.spoilerGeneration == generation) continue
+			slot.job?.cancel()
+			slot.cards = null
+			render(slot.kind)
+		}
+		shown.forEach { load(it, refresh = true) }
+	}
+
+	/**
 	 * Loads a row. A failed first load leaves the row out; a failed refresh keeps the cards already shown, except on
 	 * [HomeRowKind.protectionSensitive] rows, which are cleared: protection may have changed meanwhile.
 	 */
@@ -145,6 +166,7 @@ class EnhancedHomeRows(private val fragment: Fragment) : HomeFragmentRow, KoinCo
 		val previous = slot.cards
 		slot.job?.cancel()
 		val generation = ++loadGeneration
+		slot.spoilerGeneration = spoilerGuardRepository.generation
 		slot.job = fragment.lifecycleScope.launch {
 			// The SDK's HTTP client blocks the calling dispatcher, as upstream's rows do, so load off the main thread
 			attempt { withContext(Dispatchers.IO) { cards(kind, if (refresh) previous else null) } }
