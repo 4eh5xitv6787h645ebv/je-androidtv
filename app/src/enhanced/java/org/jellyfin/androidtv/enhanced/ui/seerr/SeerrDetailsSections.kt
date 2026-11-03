@@ -33,6 +33,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.seerr.SeerrSeason
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.composable.AsyncImage
@@ -58,6 +59,16 @@ data class SeerrDetailsSeasonEntry(
 	val status: Int?,
 	val requestable: Boolean,
 )
+
+/** Season names for the season cards and the request picker, which must agree on what they withhold. */
+object SeerrSeasonLabels {
+	/**
+	 * Seerr's own name for [season] ("Season 2: The Reckoning" can give the story away), or null when the neutral
+	 * "Season N" / "Specials" label applies: always for a protected title, and when Seerr has no name.
+	 */
+	fun customName(season: SeerrSeason, guarded: Boolean): String? =
+		season.name?.takeIf { !guarded && season.seasonNumber != 0 && it.isNotBlank() }
+}
 
 @Composable
 fun SeerrDetailsSectionTitle(text: String) {

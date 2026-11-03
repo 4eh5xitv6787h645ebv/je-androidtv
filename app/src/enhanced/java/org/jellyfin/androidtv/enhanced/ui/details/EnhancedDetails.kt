@@ -11,12 +11,15 @@ import androidx.core.view.doOnAttach
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.leanback.widget.ArrayObjectAdapter
+import androidx.leanback.widget.DiffCallback
 import androidx.leanback.widget.HeaderItem
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
@@ -437,14 +440,23 @@ object EnhancedDetails {
 			if (!state.available || !fragment.isAlive) return@launch
 			val config = state.config
 
-			// Feature contributions first (info chips, reviews…), then the Seerr rows
+			// Feature contributions first (info chips, reviews…), then the Seerr rows. Rows placed at the top go directly
+			// under the overview, above upstream's own rows, in contribution order
 			val detailsContext = DetailsContext(fragment, item, state) { reload.run() }
+			var topRows = 0
 			for (contributor in contributors) {
 				val rows = runCatching { contributor.rows(detailsContext) }
 					.onFailure { Timber.w(it, "Details rows from %s failed", contributor::class.simpleName) }
 					.getOrDefault(emptyList())
 				if (!fragment.isAlive) return@launch
-				rows.forEach(rowsAdapter::add)
+				for (row in rows) {
+					if ((row as? EnhancedComposeRow)?.placement == DetailsRowPlacement.TOP) {
+						rowsAdapter.add(topRowIndex(rowsAdapter) + topRows, row)
+						topRows++
+					} else {
+						rowsAdapter.add(row)
+					}
+				}
 			}
 
 			if (state.seerrUsable) when (item.type) {
@@ -468,7 +480,7 @@ object EnhancedDetails {
 
 				BaseItemKind.BOX_SET -> if (config.jellyseerrShowCollectionDiscovery) {
 					val missing = runCatching { seerrRepository.collectionMissing(item.id.toString()) }.getOrDefault(emptyList())
-					if (missing.isNotEmpty() && fragment.isAlive) addRow(rowsAdapter, context.getString(R.string.je_row_collection_missing), missing, null)
+					if (missing.isNotEmpty() && fragment.isAlive) addRow(fragment, rowsAdapter, context.getString(R.string.je_row_collection_missing), missing, null, recommendations = false)
 				}
 
 				else -> Unit
@@ -486,14 +498,79 @@ object EnhancedDetails {
 		}.onFailure { Timber.w(it, "Failed to load Seerr row %s", title) }.getOrDefault(emptyList<SeerrResult>() to false)
 
 		if (results.isEmpty() || !fragment.isAlive) return
-		addRow(rowsAdapter, title, results.take(ROW_PREVIEW_SIZE), if (hasMore || results.size > ROW_PREVIEW_SIZE) source else null)
+		val recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar
+		addRow(fragment, rowsAdapter, title, results.take(ROW_PREVIEW_SIZE), if (hasMore || results.size > ROW_PREVIEW_SIZE) source else null, recommendations)
 	}
 
-	private fun addRow(rowsAdapter: MutableObjectAdapter<Row>, title: String, results: List<SeerrResult>, viewAll: SeerrSource?) {
-		val adapter = ArrayObjectAdapter(SeerrCardPresenter())
+	/** The index right under the item's overview row (upstream adds it first). */
+	private fun topRowIndex(rowsAdapter: MutableObjectAdapter<Row>): Int =
+		rowsAdapter.indexOfFirst { it is MyDetailsOverviewRow } + 1
+
+	private fun addRow(
+		fragment: Fragment,
+		rowsAdapter: MutableObjectAdapter<Row>,
+		title: String,
+		results: List<SeerrResult>,
+		viewAll: SeerrSource?,
+		recommendations: Boolean,
+	) {
+		lateinit var row: ListRow
+		fun titles(cards: ArrayObjectAdapter) = (0 until cards.size()).mapNotNull { cards.get(it) as? SeerrResult }
+		// A card hidden from its menu leaves the row at once; the row goes when no title is left in it
+		val adapter = ArrayObjectAdapter(SeerrCardPresenter { removed ->
+			val cards = row.adapter as ArrayObjectAdapter
+			cards.remove(removed)
+			if (titles(cards).isEmpty()) rowsAdapter.remove(row)
+		})
 		adapter.addAll(0, results)
 		if (viewAll != null) adapter.add(SeerrViewAllCard(viewAll))
-		rowsAdapter.add(ListRow(HeaderItem(title), adapter))
+		row = ListRow(HeaderItem(title), adapter)
+		rowsAdapter.add(row)
+
+		// Back from a Seerr details screen: the title may have been hidden or protected there. Filter the cards again
+		// (Hidden Content, current artwork), dropping what's gone, until the screen rebuilds its rows
+		fragment.lifecycle.addObserver(object : LifecycleEventObserver {
+			private var resumed = false
+
+			override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+				if (event != Lifecycle.Event.ON_RESUME) return
+				if (rowsAdapter.indexOf(row) < 0) {
+					fragment.lifecycle.removeObserver(this)
+					return
+				}
+				if (!resumed) {
+					resumed = true
+					return
+				}
+				fragment.lifecycleScope.launch {
+					val shown = titles(adapter)
+					val filtered = try {
+						seerrRepository.filterResults(shown, recommendations)
+					} catch (err: CancellationException) {
+						throw err
+					} catch (err: Exception) {
+						Timber.w(err, "Failed to re-filter Seerr row %s", title)
+						return@launch
+					}
+					if (rowsAdapter.indexOf(row) < 0) return@launch
+					if (filtered.isEmpty()) {
+						rowsAdapter.remove(row)
+						return@launch
+					}
+					adapter.setItems(filtered + listOfNotNull(viewAll?.let(::SeerrViewAllCard)), SeerrCardDiff)
+				}
+			}
+		})
+	}
+
+	/** Seerr cards and the trailing "View all" card, matched by identity so focus stays put. */
+	private object SeerrCardDiff : DiffCallback<Any>() {
+		override fun areItemsTheSame(oldItem: Any, newItem: Any) = when {
+			oldItem is SeerrResult && newItem is SeerrResult -> oldItem.dedupeKey == newItem.dedupeKey
+			else -> oldItem == newItem
+		}
+
+		override fun areContentsTheSame(oldItem: Any, newItem: Any) = oldItem == newItem
 	}
 
 	/** Handle clicks on Seerr cards in the details rows. Returns true when the click was handled. */

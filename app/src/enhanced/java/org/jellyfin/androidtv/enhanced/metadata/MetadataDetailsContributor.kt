@@ -26,6 +26,7 @@ import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsAction
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContext
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContributor
+import org.jellyfin.androidtv.enhanced.ui.details.DetailsRowPlacement
 import org.jellyfin.androidtv.enhanced.ui.details.EnhancedComposeRow
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.ui.navigation.Destinations
@@ -132,7 +133,8 @@ class MetadataDetailsContributor(
 			val fragment = context.fragment
 			val infoState = mutableStateOf(info)
 			val progressModeState = mutableStateOf(info.progressMode)
-			rows += EnhancedComposeRow(null) {
+			// Under the overview: it's about the item itself, like the overview's own info line
+			rows += EnhancedComposeRow(fragment.getString(R.string.je_metadata_info_row), placement = DetailsRowPlacement.TOP) {
 				MetadataInfoContent(
 					infoState = infoState,
 					progressModeState = progressModeState,

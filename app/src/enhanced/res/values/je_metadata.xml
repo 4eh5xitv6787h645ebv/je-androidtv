@@ -26,6 +26,7 @@
     <string name="je_metadata_born_age">Born %1$s (age %2$d)</string>
     <string name="je_metadata_died">Died %1$s</string>
     <string name="je_metadata_died_age">Died %1$s (aged %2$d)</string>
+    <string name="je_metadata_info_row">Enhanced info</string>
     <string name="je_metadata_cast_ages">Cast ages</string>
     <string name="je_metadata_age_at_release">%1$d at release</string>
     <string name="je_metadata_age_now">now %1$d</string>

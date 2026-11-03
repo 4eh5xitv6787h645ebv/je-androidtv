@@ -10,6 +10,7 @@ import androidx.compose.ui.Alignment
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsContext
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsContributor
@@ -33,13 +34,29 @@ class MetadataSeerrContributor(private val repository: MetadataRepository) : See
 		val awards = config.showAwards
 		if (!mdblist && !seerrRatings && !providers && !awards) return null
 
+		// The details screen rebuilds its sections on every reload (a Spoiler Guard opt-in, settings changed elsewhere)
+		// and they keep their slot in the composition: key the result by everything that decides what may be shown,
+		// and drop the old one before loading, so ratings loaded before the title was protected never linger
+		val key = SectionKey(target, state, mdblist, seerrRatings, providers, awards)
 		return {
-			val info by produceState<MetadataInfo?>(null, context.tmdbId, context.mediaType) {
+			val info by produceState<MetadataInfo?>(null, key) {
+				value = null
 				value = load(target, mdblist, seerrRatings, providers, awards, config.mdblistRatingsShowPercentSymbol)
 			}
 			info?.let { SeerrMetadataSection(it) }
 		}
 	}
+
+	/** What one section shows; a change reloads it from scratch. */
+	private data class SectionKey(
+		val target: TmdbTarget,
+		/** The plugin state the section was built for: gates and the user's settings. */
+		val state: EnhancedState,
+		val mdblist: Boolean,
+		val seerrRatings: Boolean,
+		val providers: Boolean,
+		val awards: Boolean,
+	)
 
 	private suspend fun <T> optional(block: suspend () -> T): T? = try {
 		block()

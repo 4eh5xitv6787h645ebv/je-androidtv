@@ -12,6 +12,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -35,6 +41,7 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkManager
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
@@ -74,10 +81,16 @@ class SeerrDiscoveryFragment : Fragment() {
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val navigationRepository by inject<NavigationRepository>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 
 	private lateinit var source: SeerrSource
-	private val adapter = ArrayObjectAdapter(SeerrCardPresenter())
+	// Hide (and other removals) from the card menu take the card out at once
+	private val adapter = ArrayObjectAdapter(SeerrCardPresenter { removeCard(it) })
 	private val allResults = mutableListOf<SeerrResult>()
+	/** Titles removed from the card menu, kept out of pages that were already loading when they were hidden. */
+	private val removed = HashSet<String>()
+	/** [SpoilerGuardRepository.generation] when the cards' artwork was last resolved. */
+	private var artworkGeneration = -1L
 	private var cursor: SeerrRepository.FeedCursor? = null
 	private var hasMore = true
 	private var emptyPages = 0
@@ -88,6 +101,8 @@ class SeerrDiscoveryFragment : Fragment() {
 	private val status = MutableStateFlow<String?>(null)
 	private val failed = MutableStateFlow(false)
 	private val paused = MutableStateFlow(false)
+	/** Loaded to the end with no card to show. */
+	private val empty = MutableStateFlow(false)
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -153,25 +168,31 @@ class SeerrDiscoveryFragment : Fragment() {
 		if (cursor == null) loadMore() else showAgain()
 	}
 
+	private val recommendations get() = source is SeerrSource.Recommended || source is SeerrSource.Similar
+
 	private fun loadMore(userTriggered: Boolean = true) {
 		if (!hasMore || loadJob?.isActive == true) return
 		if (userTriggered) emptyPages = 0
 		failed.value = false
 		paused.value = false
+		// Strings through the application context: results can land after the screen was left
+		val appContext = context?.applicationContext ?: return
 		loadJob = lifecycleScope.launch {
-			if (allResults.isEmpty()) status.value = getString(R.string.je_loading)
+			if (allResults.isEmpty()) status.value = appContext.getString(R.string.je_loading)
 			try {
 				val resolved = cursor ?: SeerrRepository.FeedCursor(seerrRepository.feedsFor(source, sort.value)).also { cursor = it }
 				if (!resolved.hasMore) {
 					hasMore = false
 				} else {
-					val batch = seerrRepository.loadNext(resolved, recommendations = source is SeerrSource.Recommended || source is SeerrSource.Similar)
+					val generation = spoilerGuardRepository.generation
+					val batch = seerrRepository.loadNext(resolved, recommendations = recommendations)
+					if (allResults.isEmpty()) artworkGeneration = generation
 					hasMore = resolved.hasMore
 					// Some feed failed: keep what loaded and offer Retry, which reloads that feed's page
 					if (batch.partialFailure) failed.value = true
 					val results = batch.results
 					val known = allResults.mapTo(HashSet()) { it.dedupeKey }
-					val fresh = results.filter { it.dedupeKey !in known }
+					val fresh = results.filter { it.dedupeKey !in known && it.dedupeKey !in removed }
 					allResults += fresh
 					val visible = fresh.filter(::matchesFilter)
 					adapter.addAll(adapter.size(), visible)
@@ -188,17 +209,17 @@ class SeerrDiscoveryFragment : Fragment() {
 				paused.value = hasMore && emptyPages >= MAX_EMPTY_PAGES
 				status.value = when {
 					adapter.size() > 0 -> null
-					hasMore -> getString(R.string.je_nothing_yet)
-					else -> getString(R.string.je_nothing_found)
+					hasMore -> appContext.getString(R.string.je_nothing_yet)
+					else -> appContext.getString(R.string.je_nothing_found)
 				}
+				empty.value = adapter.size() == 0 && !hasMore
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr discovery failed")
 				// Leave hasMore set so Retry (or scrolling) can try the same page again
-				val context = context ?: return@launch
 				if (SeerrErrors.isUnlinked(err)) seerrLinkManager.onUnlinkedError()
-				status.value = SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin) ?: getString(R.string.je_error_generic)
+				status.value = SeerrLinkTexts.error(appContext, err, enhancedRepository.current.isAdmin) ?: appContext.getString(R.string.je_error_generic)
 				failed.value = true
 			}
 		}
@@ -206,23 +227,39 @@ class SeerrDiscoveryFragment : Fragment() {
 
 	/**
 	 * Coming back to this screen: Spoiler Guard may have changed meanwhile, so library posters are withheld at once
-	 * and re-resolved with the server's current image tags before they show again.
+	 * (every poster, when a Spoiler Guard write happened since they were resolved: a pending opt-in protects titles
+	 * that aren't in the library) and re-resolved before they show again. Hidden Content is applied again too, so a
+	 * title hidden from its details screen is gone.
 	 */
 	private fun showAgain() {
-		allResults.replaceAll { if (it.mediaInfo?.jellyfinMediaId != null || it.mediaInfo?.jellyfinMediaId4k != null) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it }
+		val generation = spoilerGuardRepository.generation
+		val protectionChanged = generation != artworkGeneration
+		allResults.replaceAll {
+			val inLibrary = it.mediaInfo?.jellyfinMediaId != null || it.mediaInfo?.jellyfinMediaId4k != null
+			if (inLibrary || protectionChanged) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it
+		}
 		applyFilter()
 		lifecycleScope.launch {
 			val refreshed = try {
-				seerrRepository.refreshLibraryArtwork(allResults.toList()).associateBy { it.dedupeKey }
+				seerrRepository.filterResults(allResults.toList(), recommendations).associateBy { it.dedupeKey }
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
-				Timber.w(err, "Failed to refresh library artwork")
+				Timber.w(err, "Failed to re-filter Seerr results")
 				return@launch
 			}
+			artworkGeneration = generation
+			// Whatever the filter dropped (hidden meanwhile) leaves the grid
+			allResults.retainAll { it.dedupeKey in refreshed }
 			allResults.replaceAll { refreshed[it.dedupeKey] ?: it }
 			applyFilter()
 		}
+	}
+
+	private fun removeCard(result: SeerrResult) {
+		removed += result.dedupeKey
+		allResults.removeAll { it.dedupeKey == result.dedupeKey }
+		applyFilter()
 	}
 
 	/** Start over with the new order: the loaded pages were fetched in the old one. */
@@ -246,8 +283,12 @@ class SeerrDiscoveryFragment : Fragment() {
 	}
 
 	private fun applyFilter() {
-		adapter.clear()
-		adapter.addAll(0, allResults.filter(::matchesFilter))
+		adapter.setItems(allResults.filter(::matchesFilter), SeerrResultDiff)
+		// A filter or removal can empty a fully loaded grid; the load below won't run then, so say so here
+		val nothingLeft = adapter.size() == 0 && !hasMore
+		empty.value = nothingLeft
+		if (nothingLeft && loadJob?.isActive != true && !failed.value) status.value = context?.getString(R.string.je_nothing_found)
+		else if (adapter.size() > 0 && !failed.value) status.value = null
 		if (adapter.size() < LOAD_MORE_THRESHOLD) loadMore()
 	}
 
@@ -258,15 +299,18 @@ class SeerrDiscoveryFragment : Fragment() {
 		val currentStatus by status.collectAsState()
 		val currentFailed by failed.collectAsState()
 		val currentPaused by paused.collectAsState()
+		val currentEmpty by empty.collectAsState()
 
 		Column(
 			modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 27.dp),
 			verticalArrangement = Arrangement.spacedBy(12.dp),
 		) {
 			Text(text = source.title, fontSize = 28.sp, color = Tokens.Color.colorWhite)
+			// Scrolls sideways: with every filter, sort, status and Retry the row can be wider than the screen
 			Row(
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 				verticalAlignment = Alignment.CenterVertically,
+				modifier = Modifier.horizontalScroll(rememberScrollState()),
 			) {
 				if (!singleMediaType) listOf(
 					Filter.ALL to R.string.je_filter_all,
@@ -316,6 +360,13 @@ class SeerrDiscoveryFragment : Fragment() {
 					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_retry)) }
 				} else if (currentPaused) {
 					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_load_more)) }
+				} else if (currentEmpty) {
+					// Nothing to show and nothing more to load: the grid has no card to focus, so offer a way out
+					val backFocus = remember { FocusRequester() }
+					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(backFocus)) {
+						Text(stringResource(R.string.je_seerr_back))
+					}
+					LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
 				}
 			}
 		}

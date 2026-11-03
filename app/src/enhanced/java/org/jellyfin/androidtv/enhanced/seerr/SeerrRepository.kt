@@ -18,6 +18,9 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
+import org.koin.java.KoinJavaComponent
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 
@@ -30,6 +33,8 @@ class SeerrRepository(
 	private val enhancedApi: EnhancedApi,
 	private val enhancedRepository: EnhancedRepository,
 	private val hiddenContentRepository: HiddenContentRepository,
+	/** Lazy so the existing three-argument Koin binding keeps working; only read while Spoiler Guard may apply. */
+	private val spoilerProtection: Lazy<SpoilerProtection> = lazy { KoinJavaComponent.get(SpoilerProtection::class.java) },
 ) {
 	companion object {
 		const val MEDIA_MOVIE = "movie"
@@ -54,6 +59,13 @@ class SeerrRepository(
 		// TMDB TV genres: News, Reality, Talk
 		private val NON_FICTION_TV_GENRES = setOf(10763, 10764, 10767)
 		private val SELF_ROLE = Regex("^(self|himself|herself|themselves)\\b.*", RegexOption.IGNORE_CASE)
+
+		/**
+		 * Whether a title that isn't in the library must withhold its TMDB artwork and dates: a pending Spoiler Guard
+		 * opt-in for it, or lists that couldn't be read (fail closed).
+		 */
+		fun externalArtworkWithheld(snapshot: SpoilerSnapshot, result: SeerrResult): Boolean =
+			snapshot.forTitle(isMovie = result.mediaType != MEDIA_TV, libraryId = null, tmdbId = result.id).hideArtwork
 	}
 
 	/** One paged list of results. Page numbers start at 1. */
@@ -341,21 +353,23 @@ class SeerrRepository(
 
 	private fun SeerrResult.libraryId() = (mediaInfo?.jellyfinMediaId ?: mediaInfo?.jellyfinMediaId4k)?.replace("-", "")?.lowercase()
 
-	/**
-	 * While Spoiler Guard is on (or its configuration is unknown), library titles load their poster through the server so its artwork rules apply.
-	 * The URL carries the server's current image tag, which changes with the protection state, so a poster cached
-	 * before protection was turned on is never reused. If the tags can't be loaded the poster is withheld.
-	 */
-	/** Re-resolve library posters (current tags) for results that are about to be shown again. */
+	/** Re-resolve withheld artwork (current tags and protection) for results that are about to be shown again. */
 	suspend fun refreshLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> =
 		if (enhancedRepository.ensureLoaded().spoilerGuardMayApply) withLibraryArtwork(results)
 		else results.map { if (it.libraryArtwork) it.copy(libraryArtwork = false, libraryPosterUrl = null) else it }
 
+	/**
+	 * While Spoiler Guard is on (or its configuration is unknown), library titles load their poster through the server
+	 * so its artwork rules apply. The URL carries the server's current image tag, which changes with the protection
+	 * state, so a poster cached before protection was turned on is never reused. If the tags can't be loaded the poster
+	 * is withheld. Titles that aren't in the library withhold their TMDB poster (and year) when the user opted into
+	 * protection before they arrive, or when the user's lists couldn't be read.
+	 */
 	private suspend fun withLibraryArtwork(results: List<SeerrResult>): List<SeerrResult> {
 		val ids = results.mapNotNull { it.libraryId() }.distinct()
-		if (ids.isEmpty()) return results
+		val snapshot = if (results.any { it.libraryId() == null }) spoilerProtection.value.snapshot() else null
 
-		val tags: Map<String, String>? = try {
+		val tags: Map<String, String>? = if (ids.isEmpty()) emptyMap() else try {
 			enhancedApi.get("/Items", mapOf("ids" to ids.joinToString(","), "enableImageTypes" to "Primary")).jsonObject["Items"]
 				?.jsonArray.orEmpty()
 				.mapNotNull { it as? JsonObject }
@@ -373,7 +387,15 @@ class SeerrRepository(
 		}
 
 		return results.map { item ->
-			val id = item.libraryId() ?: return@map item
+			val id = item.libraryId()
+			if (id == null) {
+				val withheld = snapshot != null && externalArtworkWithheld(snapshot, item)
+				return@map when {
+					withheld -> item.copy(libraryArtwork = true, libraryPosterUrl = null)
+					item.libraryArtwork -> item.copy(libraryArtwork = false, libraryPosterUrl = null)
+					else -> item
+				}
+			}
 			val tag = tags?.get(id)
 			item.copy(
 				libraryArtwork = true,

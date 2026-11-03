@@ -37,7 +37,16 @@ class MetadataRepository(
 	private val mutex = Mutex()
 	private var configFor: EnhancedState? = null
 	private var config: MetadataPublicConfig? = null
-	private val seriesTmdbIds = HashMap<Pair<UUID, UUID>, Int?>()
+	/** Series TMDB ids by (server, user, series), least recently used first; see [SeriesKey]. */
+	private val seriesTmdbIds = object : LinkedHashMap<SeriesKey, Int?>(16, 0.75f, true) {
+		override fun removeEldestEntry(eldest: MutableMap.MutableEntry<SeriesKey, Int?>) = size > MAX_SERIES_CACHE
+	}
+
+	/**
+	 * Series ids are only unique per server, and what a user may read differs per user, so the cache key carries both.
+	 * The server is the client's base URL at the time of the read.
+	 */
+	data class SeriesKey(val server: String?, val userId: UUID, val seriesId: UUID)
 
 	/** The signed-in user's id in the plugin's dashless form. */
 	private fun userKey(): String =
@@ -67,15 +76,18 @@ class MetadataRepository(
 		if (item.type != BaseItemKind.SEASON && item.type != BaseItemKind.EPISODE) return TmdbTarget.of(item)
 		val seriesId = item.seriesId ?: return null
 		val userId = userRepository.currentUser.value?.id ?: return null
-		val key = userId to seriesId
+		// Pinned: the read and the cache entry belong to the same server and account even across a switch mid-call
+		val api = enhancedApi.pinned()
+		val key = SeriesKey(api.baseUrl, userId, seriesId)
 		mutex.withLock {
 			if (seriesTmdbIds.containsKey(key)) return TmdbTarget.of(item, seriesTmdbIds[key])
 		}
-		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to userId.toString())) as? JsonObject
+		val series = api.get("/Items/$seriesId", mapOf("userId" to userId.toString())) as? JsonObject
 		val ids = series?.get("ProviderIds") as? JsonObject
 		val tmdbId = ids?.entries?.firstOrNull { it.key.equals("Tmdb", ignoreCase = true) }?.value
 			?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() }
-		mutex.withLock { seriesTmdbIds[key] = tmdbId }
+		// Only when the user is still the one the read was made for
+		if (userRepository.currentUser.value?.id == userId) mutex.withLock { seriesTmdbIds[key] = tmdbId }
 		return TmdbTarget.of(item, tmdbId)
 	}
 
@@ -192,6 +204,9 @@ class MetadataRepository(
 
 	companion object {
 		const val MAX_PEOPLE = 100
+
+		/** Series TMDB ids kept for episode and season details; plenty for a session's browsing. */
+		const val MAX_SERIES_CACHE = 200
 
 		/** Distinct provider names, by the region's display priority, then name. */
 		fun sortServices(entries: List<TmdbProviderListEntry>, region: String): List<String> = entries
