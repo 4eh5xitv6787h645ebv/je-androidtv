@@ -227,9 +227,7 @@ class DiscoverFragment : Fragment() {
 
 	private suspend fun genreTiles(mediaType: String): List<Any> {
 		val genres = discoverRepository.genreSlider(mediaType)
-		// The slider's backdrops aren't tied to a title we could check, so a protected show's artwork could turn up
-		// on a tile: with Spoiler Guard on the tiles show the genre name alone
-		val backdrops = if (enhancedRepository.current.spoilerGuard) genres.map { null } else assignGenreBackdrops(genres)
+		val backdrops = if (discoverRepository.genreBackdropsAllowed()) assignGenreBackdrops(genres) else genres.map { null }
 		return genres.zip(backdrops) { genre, backdrop ->
 			DiscoverTile(
 				title = genre.name,
@@ -337,12 +335,11 @@ class DiscoverFragment : Fragment() {
 							.focusProperties {
 								onExit = {
 									val fragment = rowsFragment[0]
-									val isFirstRowSelected = fragment?.selectedPosition?.let { it <= 0 } ?: false
-									if (requestedFocusDirection != FocusDirection.Up || !isFirstRowSelected) {
+									if (fragment == null || requestedFocusDirection != FocusDirection.Up || fragment.selectedPosition > 0) {
 										cancelFocusChange()
 									} else {
-										fragment?.selectedPosition = 0
-										fragment?.verticalGridView?.clearFocus()
+										fragment.selectedPosition = 0
+										fragment.verticalGridView?.clearFocus()
 									}
 								}
 							}

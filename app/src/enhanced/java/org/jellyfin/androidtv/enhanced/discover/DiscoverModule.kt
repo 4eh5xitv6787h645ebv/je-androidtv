@@ -8,7 +8,7 @@ import org.koin.dsl.module
 
 /** Koin bindings of the Discover feature. */
 val discoverModule = module {
-	single { DiscoverRepository(get(), get(), get(), get(), get()) }
+	single { DiscoverRepository(get(), get(), get(), get(), get(), get()) }
 }
 
 object DiscoverDestinations {

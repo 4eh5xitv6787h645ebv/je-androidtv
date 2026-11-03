@@ -13,6 +13,9 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.seerr.SeerrDiscoverFeed
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSort
@@ -140,7 +143,7 @@ class DiscoverFeedsTest : FunSpec({
 			val pageNumber = query["page"] as Int
 			page(pageNumber, 5, (1..4).map { pageNumber * 100 + it })
 		}
-		val repository = DiscoverRepository(harness.api, harness.enhancedRepository, mockk(relaxed = true), harness.seerr, mockk(relaxed = true))
+		val repository = DiscoverRepository(harness.api, harness.enhancedRepository, mockk(relaxed = true), harness.seerr, mockk(relaxed = true), mockk(relaxed = true))
 		val preview = repository.rowPreview(SeerrSource.Discover(SeerrDiscoverFeed.POPULAR_MOVIES, ""))
 		harness.calls.map { it.second["page"] } shouldContainExactly listOf(1, 2, 3)
 		preview.results.size shouldBe 12
@@ -149,7 +152,7 @@ class DiscoverFeedsTest : FunSpec({
 
 	test("a row fails when its first page fails, but keeps what it has when a later one does") {
 		val failing = Harness { _, _ -> throw EnhancedApi.EnhancedApiException(503, "down", serverMessage = "Seerr is down") }
-		val repository = DiscoverRepository(failing.api, failing.enhancedRepository, mockk(relaxed = true), failing.seerr, mockk(relaxed = true))
+		val repository = DiscoverRepository(failing.api, failing.enhancedRepository, mockk(relaxed = true), failing.seerr, mockk(relaxed = true), mockk(relaxed = true))
 		shouldThrow<EnhancedApi.EnhancedApiException> {
 			repository.rowPreview(SeerrSource.Discover(SeerrDiscoverFeed.TRENDING, ""))
 		}.serverMessage shouldBe "Seerr is down"
@@ -157,7 +160,22 @@ class DiscoverFeedsTest : FunSpec({
 		val flaky = Harness { _, query ->
 			if (query["page"] == 1) page(1, 5, listOf(1, 2)) else throw EnhancedApi.EnhancedApiException(500, "boom")
 		}
-		val flakyRepository = DiscoverRepository(flaky.api, flaky.enhancedRepository, mockk(relaxed = true), flaky.seerr, mockk(relaxed = true))
+		val flakyRepository = DiscoverRepository(flaky.api, flaky.enhancedRepository, mockk(relaxed = true), flaky.seerr, mockk(relaxed = true), mockk(relaxed = true))
 		flakyRepository.rowPreview(SeerrSource.Discover(SeerrDiscoverFeed.TRENDING, "")).results.map { it.id } shouldContainExactly listOf(1, 2)
+	}
+
+	test("genre backdrops are withheld while the user protects anything, or when that can't be checked") {
+		fun repository(spoilerGuard: Boolean, state: (suspend () -> SpoilerGuardState)): DiscoverRepository {
+			val enhancedRepository = mockk<EnhancedRepository>()
+			every { enhancedRepository.current } returns EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = spoilerGuard))
+			val spoilerGuardRepository = mockk<SpoilerGuardRepository>()
+			coEvery { spoilerGuardRepository.getState() } coAnswers { state() }
+			return DiscoverRepository(mockk(), enhancedRepository, mockk(), mockk(), mockk(), spoilerGuardRepository)
+		}
+		repository(spoilerGuard = false) { error("not asked") }.genreBackdropsAllowed() shouldBe true
+		repository(spoilerGuard = true) { SpoilerGuardState() }.genreBackdropsAllowed() shouldBe true
+		repository(spoilerGuard = true) { SpoilerGuardState(series = mapOf("abc" to JsonPrimitive(true))) }.genreBackdropsAllowed() shouldBe false
+		repository(spoilerGuard = true) { SpoilerGuardState(pendingTmdb = mapOf("tv-1" to JsonPrimitive(true))) }.genreBackdropsAllowed() shouldBe false
+		repository(spoilerGuard = true) { throw EnhancedApi.EnhancedApiException(500, "boom") }.genreBackdropsAllowed() shouldBe false
 	}
 })

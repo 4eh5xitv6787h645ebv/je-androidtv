@@ -7,6 +7,7 @@ import kotlinx.serialization.json.decodeFromJsonElement
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
@@ -31,6 +32,7 @@ class DiscoverRepository(
 	private val settingsRepository: EnhancedSettingsRepository,
 	private val seerrRepository: SeerrRepository,
 	private val api: ApiClient,
+	private val spoilerGuardRepository: SpoilerGuardRepository,
 ) {
 	companion object {
 		const val ROW_PREVIEW_SIZE = 20
@@ -73,6 +75,24 @@ class DiscoverRepository(
 	/** The genre tiles of [mediaType] (`movie` or `tv`). */
 	suspend fun genreSlider(mediaType: String): List<DiscoverGenreSlide> =
 		EnhancedApi.json.decodeFromJsonElement(enhancedApi.get("jellyseerr/discover/genreslider/$mediaType"))
+
+	/**
+	 * Whether genre tiles may show their backdrops. The slider's backdrops aren't tied to a title we could check, so
+	 * a protected title's artwork could turn up on a tile: while the user has anything under Spoiler Guard (or it
+	 * can't be checked) the tiles show the genre name alone.
+	 */
+	suspend fun genreBackdropsAllowed(): Boolean {
+		if (!enhancedRepository.current.spoilerGuard) return true
+		val state = try {
+			spoilerGuardRepository.getState()
+		} catch (err: CancellationException) {
+			throw err
+		} catch (err: Exception) {
+			Timber.w(err, "Failed to load Spoiler Guard state")
+			return false
+		}
+		return state.series.isEmpty() && state.movies.isEmpty() && state.collections.isEmpty() && state.pendingTmdb.isEmpty()
+	}
 
 	// Random pick
 
