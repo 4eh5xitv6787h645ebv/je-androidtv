@@ -75,17 +75,21 @@ class ReviewsDetailsContributor(
 		val label = own?.rating?.takeIf { it > 0 }?.let { fragment.getString(R.string.je_reviews_rated, formatRating(it)) }
 			?: fragment.getString(R.string.je_reviews_rate)
 
-		return listOf(DetailsAction(R.drawable.je_ic_reviews_star, label, ACTION_PRIORITY) { openRateDialog(fragment, target) })
+		// The button label ("Rated 3.5") is built once with the screen, so a save reloads the screen
+		return listOf(DetailsAction(R.drawable.je_ic_reviews_star, label, ACTION_PRIORITY) { openRateDialog(fragment, target, context.reload) })
 	}
 
-	private fun openRateDialog(fragment: Fragment, target: ReviewTarget) {
+	private fun openRateDialog(fragment: Fragment, target: ReviewTarget, afterChange: (() -> Unit)? = null) {
 		val revision = revision(fragment)
 		showComposeDialog(fragment) { dismiss ->
 			RateDialog(
 				title = target.title,
 				target = target,
 				repository = repository,
-				onChanged = { revision.value++ },
+				onChanged = {
+					revision.value++
+					afterChange?.invoke()
+				},
 				dismiss = dismiss,
 			)
 		}
