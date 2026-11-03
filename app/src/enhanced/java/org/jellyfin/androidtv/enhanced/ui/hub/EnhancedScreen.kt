@@ -9,12 +9,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -22,9 +28,11 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
+import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbar
 import org.jellyfin.androidtv.ui.shared.toolbar.MainToolbarActiveButton
 import org.jellyfin.design.Tokens
+import org.koin.compose.koinInject
 
 /**
  * Loading state shared by the Jellyfin Enhanced screens. [Error.retry] re-runs the load; [Error.message] is the
@@ -49,13 +57,33 @@ fun EnhancedScreen(
 	headerActions: (@Composable () -> Unit)? = null,
 	content: @Composable () -> Unit,
 ) {
+	val pageFocused = remember { mutableStateOf(false) }
 	JellyfinTheme {
 		Column(modifier = modifier.fillMaxSize()) {
 			MainToolbar(MainToolbarActiveButton.Enhanced)
-			EnhancedScreenHeader(title = title, subtitle = subtitle, actions = headerActions)
-			Box(modifier = Modifier.fillMaxSize()) { content() }
+			// Everything under the toolbar: whether the page itself (header actions included) holds the focus
+			Column(modifier = Modifier.fillMaxSize().onFocusChanged { pageFocused.value = it.hasFocus }) {
+				EnhancedScreenHeader(title = title, subtitle = subtitle, actions = headerActions)
+				CompositionLocalProvider(LocalPageFocused provides pageFocused) {
+					Box(modifier = Modifier.fillMaxSize()) { content() }
+				}
+			}
 		}
 	}
+}
+
+/** Whether something on the current [EnhancedScreen] below the toolbar has the focus; null outside one. */
+private val LocalPageFocused = staticCompositionLocalOf<State<Boolean>?> { null }
+
+/** A focusable action under an empty state, so D-pad users don't land on nothing. */
+class EmptyAction(val label: String, val onClick: () -> Unit)
+
+/** "Back", the default [EmptyAction]: leaves the page. */
+@Composable
+fun rememberBackAction(): EmptyAction {
+	val navigationRepository = koinInject<NavigationRepository>()
+	val label = stringResource(R.string.je_hub_back)
+	return remember(navigationRepository, label) { EmptyAction(label) { navigationRepository.goBack() } }
 }
 
 @Composable
@@ -84,13 +112,18 @@ fun EnhancedScreenHeader(
 	}
 }
 
-/** Centered loading / error (with a focused Retry button) / content switch. */
+/**
+ * Centered loading / error (with a focused Retry button) / content switch. The empty state shows [emptyMessage] and
+ * [emptyAction] (Back unless the page passes its own or null), which takes the focus unless something else on the
+ * page already has it (filters, tabs), so a D-pad user always lands on something.
+ */
 @Composable
 fun <T> LoadStateContent(
 	state: LoadState<T>,
 	modifier: Modifier = Modifier,
 	empty: ((T) -> Boolean)? = null,
 	emptyMessage: String = stringResource(R.string.je_nothing_found),
+	emptyAction: EmptyAction? = rememberBackAction(),
 	content: @Composable (T) -> Unit,
 ) {
 	Box(modifier = modifier.fillMaxSize()) {
@@ -114,8 +147,29 @@ fun <T> LoadStateContent(
 			}
 
 			is LoadState.Ready -> if (empty != null && empty(state.value)) {
-				Text(text = emptyMessage, color = secondaryTextColor(), fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
+				EmptyState(emptyMessage, emptyAction, Modifier.align(Alignment.Center))
 			} else content(state.value)
+		}
+	}
+}
+
+@Composable
+private fun EmptyState(message: String, action: EmptyAction?, modifier: Modifier) {
+	Column(
+		modifier = modifier,
+		horizontalAlignment = Alignment.CenterHorizontally,
+		verticalArrangement = Arrangement.spacedBy(16.dp),
+	) {
+		Text(text = message, color = secondaryTextColor(), fontSize = 18.sp)
+		if (action == null) return@Column
+
+		val actionFocus = remember { FocusRequester() }
+		val pageFocused = LocalPageFocused.current
+		Button(onClick = action.onClick, modifier = Modifier.focusRequester(actionFocus)) { Text(action.label) }
+		LaunchedEffect(Unit) {
+			// Let the focus settle first: a removed row's focus may still be moving to the page's own controls
+			withFrameNanos { }
+			if (pageFocused?.value != true) runCatching { actionFocus.requestFocus() }
 		}
 	}
 }

@@ -3,30 +3,38 @@ package org.jellyfin.androidtv.enhanced.bookmarks
 import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
+import android.text.InputFilter
+import android.text.InputType
 import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.ViewGroup
+import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
 import androidx.compose.ui.input.key.onPreviewKeyEvent
-import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -36,6 +44,7 @@ import androidx.fragment.compose.content
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.calendar.PageImage
@@ -46,9 +55,12 @@ import org.jellyfin.androidtv.enhanced.calendar.serverMessage
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
+import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
+import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.PlaybackHelper
@@ -63,9 +75,13 @@ import java.time.format.FormatStyle
 import java.util.UUID
 
 /**
- * The user's JE timestamp bookmarks, newest first. OK plays the item from the saved moment; long-press OK (or Menu)
- * offers Open details and Delete. Bookmarks whose item is gone are marked and offer deletion. Episode names follow
- * Spoiler Guard ([BookmarkLogic.name]): the name saved with a bookmark is never shown for a possibly guarded episode.
+ * The user's JE timestamp bookmarks, newest first. OK plays the item from the saved moment; long-press OK, Menu or
+ * the row's "⋯" button (for remotes without long-press) offers Play from here, Open details, Rename and Delete.
+ * Bookmarks whose item is gone are marked and offer deletion. Episode names follow Spoiler Guard
+ * ([BookmarkLogic.name]): the name saved with a bookmark is never shown for a possibly guarded episode.
+ *
+ * Renames and deletes change the loaded list in place, so the focus stays where it was; after a delete it moves to
+ * the next row (or the previous one, or the empty state's Back), never to the toolbar.
  */
 class BookmarksFragment : Fragment() {
 	private val bookmarksRepository by inject<BookmarksRepository>()
@@ -82,12 +98,20 @@ class BookmarksFragment : Fragment() {
 		/** True only when the server answered and the item wasn't there. */
 		val stale: Boolean,
 		val name: BookmarkName,
-	)
+	) {
+		val key get() = entry.bookmarkId
 
-	private class Loaded(val rows: List<BookmarkRow>, val resolveFailed: Boolean)
+		fun withBookmark(bookmark: Bookmark) = BookmarkRow(BookmarkEntry(entry.bookmarkId, bookmark), itemId, item, stale, name)
+	}
+
+	/** [generation] counts full loads, so local edits (which keep it) don't re-run the initial focus. */
+	private class Loaded(val rows: List<BookmarkRow>, val resolveFailed: Boolean, val generation: Int)
 
 	private val loadState = MutableStateFlow<LoadState<Loaded>>(LoadState.Loading)
+	private val busy = MutableStateFlow<Set<String>>(emptySet())
+	private val listFocus = ListFocus()
 	private var loadJob: Job? = null
+	private var generation = 0
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
@@ -116,6 +140,7 @@ class BookmarksFragment : Fragment() {
 						BookmarkRow(entry, itemId, item, stale = resolved != null && item == null, name = BookmarkLogic.name(entry.bookmark, item, spoiler))
 					},
 					resolveFailed = resolved == null,
+					generation = ++generation,
 				)
 			}.onSuccess {
 				loadState.value = LoadState.Ready(it)
@@ -128,6 +153,7 @@ class BookmarksFragment : Fragment() {
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val state by loadState.collectAsState()
+		val busyKeys by busy.collectAsState()
 		val count = (state as? LoadState.Ready)?.value?.rows?.size
 
 		EnhancedScreen(
@@ -139,25 +165,27 @@ class BookmarksFragment : Fragment() {
 				empty = { it.rows.isEmpty() },
 				emptyMessage = stringResource(R.string.je_bookmarks_empty),
 			) { loaded ->
-				val firstFocus = remember { FocusRequester() }
 				Column(modifier = Modifier.fillMaxSize()) {
 					if (loaded.resolveFailed) PageNotice(stringResource(R.string.je_bookmarks_unresolved), Modifier.padding(horizontal = 48.dp))
 					LazyColumn(
 						contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
 						verticalArrangement = Arrangement.spacedBy(8.dp),
 					) {
-						items(loaded.rows, key = { it.entry.bookmarkId }) { row ->
-							BookmarkItem(row, if (row === loaded.rows.first()) Modifier.focusRequester(firstFocus) else Modifier)
+						items(loaded.rows, key = { it.key }) { row ->
+							BookmarkItem(row, busy = row.key in busyKeys)
 						}
 					}
 				}
-				LaunchedEffect(loaded) { runCatching { firstFocus.requestFocus() } }
+				listFocus.Effect()
+				LaunchedEffect(loaded.generation) {
+					loaded.rows.firstOrNull()?.let { listFocus.moveTo(it.key) }
+				}
 			}
 		}
 	}
 
-	@androidx.compose.runtime.Composable
-	private fun BookmarkItem(row: BookmarkRow, modifier: Modifier) {
+	@Composable
+	private fun BookmarkItem(row: BookmarkRow, busy: Boolean) {
 		val bookmark = row.entry.bookmark
 		val name = displayName(row)
 		val label = bookmark.label?.takeIf { it.isNotBlank() }
@@ -166,23 +194,37 @@ class BookmarksFragment : Fragment() {
 			stringResource(R.string.je_bookmarks_at, BookmarkLogic.formatTimestamp(bookmark.timestampSeconds)),
 			savedOn?.let { stringResource(R.string.je_bookmarks_saved_on, it) },
 		).joinToString("  ·  ")
+		// The remote's Menu key opens the same menu as a long press, on the row and on its "⋯" button
+		val menuKey = Modifier.onPreviewKeyEvent { event ->
+			if (event.key.nativeKeyCode != KeyEvent.KEYCODE_MENU) return@onPreviewKeyEvent false
+			if (event.type == KeyEventType.KeyUp) showMenu(row)
+			true
+		}
 
-		PageListRow(
-			onClick = { select(row) },
-			onLongClick = { showMenu(row) },
-			modifier = modifier.onPreviewKeyEvent { event ->
-				// The remote's Menu key opens the same menu as a long press
-				if (event.key.nativeKeyCode != KeyEvent.KEYCODE_MENU) return@onPreviewKeyEvent false
-				if (event.type == KeyEventType.KeyUp) showMenu(row)
-				true
-			},
+		Row(
+			horizontalArrangement = Arrangement.spacedBy(12.dp),
+			verticalAlignment = Alignment.CenterVertically,
+			modifier = Modifier.fillMaxWidth(),
 		) {
-			PageImage(url = row.item?.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
-			Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(text = label ?: name, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				if (label != null) Text(text = name, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-				Text(text = details, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
-				if (row.stale) Text(stringResource(R.string.je_bookmarks_stale), fontSize = 13.sp, color = Tokens.Color.colorRed300)
+			PageListRow(
+				onClick = { if (!busy) select(row) },
+				onLongClick = { if (!busy) showMenu(row) },
+				modifier = Modifier
+					.weight(1f)
+					.focusRequester(listFocus.requester(row.key))
+					.then(menuKey),
+			) {
+				PageImage(url = row.item?.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
+				Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+					Text(text = label ?: name, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+					if (label != null) Text(text = name, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+					Text(text = if (busy) stringResource(R.string.je_bookmarks_saving) else details, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
+					if (row.stale) Text(stringResource(R.string.je_bookmarks_stale), fontSize = 13.sp, color = Tokens.Color.colorRed300)
+				}
+			}
+			// Not disabled while busy: disabling the focused button would throw the focus elsewhere
+			Button(onClick = { if (!busy) showMenu(row) }, modifier = menuKey) {
+				Icon(painter = painterResource(R.drawable.ic_more), contentDescription = stringResource(R.string.je_bookmarks_more), modifier = Modifier.size(24.dp))
 			}
 		}
 	}
@@ -198,6 +240,8 @@ class BookmarksFragment : Fragment() {
 		}
 		return listOfNotNull(neutral.seriesName, numbers).joinToString(" · ")
 	}
+
+	private fun title(row: BookmarkRow) = row.entry.bookmark.label?.takeIf { it.isNotBlank() } ?: displayName(row)
 
 	private fun savedDate(bookmark: Bookmark): String? = (bookmark.updatedAt ?: bookmark.createdAt)
 		?.let { runCatching { Instant.parse(it) }.getOrNull() }
@@ -217,16 +261,79 @@ class BookmarksFragment : Fragment() {
 
 	private fun showMenu(row: BookmarkRow) {
 		val context = context ?: return
+		if (row.key in busy.value) return
 		val actions = buildList<Pair<String, () -> Unit>> {
 			if (!row.stale && row.itemId != null) {
 				add(getString(R.string.je_bookmarks_play_from, BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds)) to { play(row) })
 				add(getString(R.string.je_bookmarks_open_details) to { navigationRepository.navigate(Destinations.itemDetails(row.itemId)) })
 			}
-			add(getString(R.string.je_bookmarks_delete) to { delete(row) })
+			add(getString(R.string.je_bookmarks_rename) to { askRename(row) })
+			add(getString(R.string.je_bookmarks_delete) to { confirmDelete(row) })
 		}
 		AlertDialog.Builder(context)
-			.setTitle(row.entry.bookmark.label?.takeIf { it.isNotBlank() } ?: displayName(row))
+			.setTitle(title(row))
 			.setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
+			.setNegativeButton(android.R.string.cancel, null)
+			.show()
+	}
+
+	private fun askRename(row: BookmarkRow) {
+		val context = context ?: return
+		val seconds = row.entry.bookmark.timestampSeconds
+		val time = BookmarkLogic.formatTimestamp(seconds)
+		val input = EditText(context).apply {
+			setText(row.entry.bookmark.label.orEmpty())
+			setSelection(text.length)
+			// Left empty, the bookmark is labelled with its time
+			hint = time
+			inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+			isSingleLine = true
+			filters = arrayOf(InputFilter.LengthFilter(BookmarkLogic.MAX_LABEL_LENGTH))
+		}
+		val padding = (24 * context.resources.displayMetrics.density).toInt()
+		val frame = FrameLayout(context).apply {
+			setPadding(padding, padding / 2, padding, 0)
+			addView(input)
+		}
+		AlertDialog.Builder(context)
+			.setTitle(getString(R.string.je_bookmarks_rename_title, time))
+			.setMessage(R.string.je_bookmarks_rename_message)
+			.setView(frame)
+			.setPositiveButton(R.string.je_bookmarks_save) { _, _ -> rename(row, BookmarkLogic.labelForSave(input.text?.toString(), seconds)) }
+			.setNegativeButton(android.R.string.cancel, null)
+			.show()
+	}
+
+	private fun rename(row: BookmarkRow, label: String) {
+		if (row.entry.bookmark.label == label) return
+		busy.update { it + row.key }
+		lifecycleScope.launch {
+			val result = attempt { bookmarksRepository.rename(row.key, label) }
+			busy.update { it - row.key }
+			val context = context ?: return@launch
+			result.onSuccess {
+				val bookmark = row.entry.bookmark.copy(label = label, updatedAt = Instant.now().toString())
+				updateRows { rows -> rows.map { if (it.key == row.key) it.withBookmark(bookmark) else it } }
+				Toast.makeText(context, R.string.je_bookmarks_renamed, Toast.LENGTH_SHORT).show()
+			}.onFailure { err ->
+				Timber.w(err, "Failed to rename bookmark")
+				if (err is BookmarksRepository.BookmarkGoneException) {
+					Toast.makeText(context, R.string.je_bookmarks_gone, Toast.LENGTH_LONG).show()
+					removeRow(row.key)
+				} else {
+					val reason = err.serverMessage ?: getString(R.string.je_error_generic)
+					Toast.makeText(context, getString(R.string.je_bookmarks_rename_failed, reason), Toast.LENGTH_LONG).show()
+				}
+			}
+		}
+	}
+
+	private fun confirmDelete(row: BookmarkRow) {
+		val context = context ?: return
+		AlertDialog.Builder(context)
+			.setTitle(R.string.je_bookmarks_delete_title)
+			.setMessage(getString(R.string.je_bookmarks_delete_message, title(row), BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds)))
+			.setPositiveButton(R.string.je_bookmarks_delete) { _, _ -> delete(row) }
 			.setNegativeButton(android.R.string.cancel, null)
 			.show()
 	}
@@ -242,18 +349,33 @@ class BookmarksFragment : Fragment() {
 	}
 
 	private fun delete(row: BookmarkRow) {
+		if (row.key in busy.value) return
+		busy.update { it + row.key }
 		lifecycleScope.launch {
-			val result = attempt { bookmarksRepository.delete(row.entry.bookmarkId) }
+			// A bookmark that was already gone (404) is removed from the list like a deleted one
+			val result = attempt { bookmarksRepository.delete(row.key) }
+			busy.update { it - row.key }
 			val context = context ?: return@launch
 			result.onSuccess {
+				removeRow(row.key)
 				Toast.makeText(context, R.string.je_bookmarks_deleted, Toast.LENGTH_SHORT).show()
 			}.onFailure { err ->
 				Timber.w(err, "Failed to delete bookmark")
 				val reason = err.serverMessage ?: getString(R.string.je_error_generic)
 				Toast.makeText(context, getString(R.string.je_bookmarks_delete_failed, reason), Toast.LENGTH_LONG).show()
 			}
-			// Reload either way: a 404 means it was already removed elsewhere
-			reload()
 		}
+	}
+
+	/** Moves the focus off the row first (see [ListFocus]), then drops it from the list. */
+	private fun removeRow(key: String) {
+		val order = (loadState.value as? LoadState.Ready)?.value?.rows?.map { it.key } ?: return
+		listFocus.moveTo(ListFocus.neighbour(order, listOf(key)))
+		updateRows { rows -> rows.filterNot { it.key == key } }
+	}
+
+	private fun updateRows(change: (List<BookmarkRow>) -> List<BookmarkRow>) = loadState.update { current ->
+		if (current !is LoadState.Ready) current
+		else LoadState.Ready(Loaded(change(current.value.rows), current.value.resolveFailed, current.value.generation))
 	}
 }

@@ -11,6 +11,7 @@ import org.jellyfin.androidtv.ui.base.form.Checkbox
 import org.jellyfin.androidtv.ui.base.list.ListButton
 import org.jellyfin.androidtv.ui.base.list.ListMessage
 import org.jellyfin.androidtv.ui.base.list.ListSection
+import org.jellyfin.androidtv.ui.navigation.LocalRouter
 import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 
 /** The heading of a Jellyfin Enhanced settings page, styled like upstream's settings screens. */
@@ -59,7 +60,26 @@ fun <T> LazyListScope.enhancedSettingsLoad(state: LoadState<T>): T? = when (stat
 	is LoadState.Ready -> state.value
 }
 
-/** A checkbox row. [saving] shows the row as busy and ignores clicks until the save finishes. */
+/**
+ * A message row for a page that can't show its settings (the feature is turned off on the server), with a focused
+ * Back row so a D-pad user doesn't land on nothing.
+ */
+fun LazyListScope.enhancedSettingsUnavailable(message: @Composable () -> String) {
+	item { ListMessage { Text(message()) } }
+	item {
+		val router = LocalRouter.current
+		ListButton(
+			headingContent = { Text(stringResource(R.string.je_hub_back)) },
+			onClick = { router.back() },
+			modifier = Modifier.focusKey("je_back", initialFocus = true),
+		)
+	}
+}
+
+/**
+ * A checkbox row. [saving] shows the row as busy and ignores clicks until the save finishes. Give the page's first
+ * row [initialFocus] so the focus starts there, not on the page's heading.
+ */
 @Composable
 fun EnhancedToggleRow(
 	key: String,
@@ -67,6 +87,7 @@ fun EnhancedToggleRow(
 	caption: String?,
 	checked: Boolean,
 	saving: Boolean,
+	initialFocus: Boolean = false,
 	onToggle: () -> Unit,
 ) {
 	ListButton(
@@ -84,7 +105,7 @@ fun EnhancedToggleRow(
 		},
 		trailingContent = { Checkbox(checked = checked) },
 		onClick = { if (!saving) onToggle() },
-		modifier = Modifier.focusKey("je_$key"),
+		modifier = Modifier.focusKey("je_$key", initialFocus = initialFocus),
 	)
 }
 
@@ -95,12 +116,13 @@ fun EnhancedChoiceRow(
 	title: String,
 	value: String,
 	saving: Boolean,
+	initialFocus: Boolean = false,
 	onNext: () -> Unit,
 ) {
 	ListButton(
 		headingContent = { Text(title) },
 		captionContent = { Text(if (saving) stringResource(R.string.je_management_saving) else value) },
 		onClick = { if (!saving) onNext() },
-		modifier = Modifier.focusKey("je_$key"),
+		modifier = Modifier.focusKey("je_$key", initialFocus = initialFocus),
 	)
 }

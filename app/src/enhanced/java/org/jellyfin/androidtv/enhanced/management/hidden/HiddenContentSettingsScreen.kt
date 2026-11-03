@@ -27,9 +27,8 @@ import org.jellyfin.androidtv.enhanced.management.settings.EnhancedToggleRow
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsHeader
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsLoad
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsSection
+import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsUnavailable
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.list.ListMessage
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 import timber.log.Timber
@@ -128,7 +127,7 @@ fun HiddenContentSettingsScreen() {
 		)
 
 		if (!enhanced.hiddenContent) {
-			item { ListMessage { Text(stringResource(R.string.je_management_hc_unavailable)) } }
+			enhancedSettingsUnavailable { stringResource(R.string.je_management_hc_unavailable) }
 			return@SettingsColumn
 		}
 
@@ -141,6 +140,8 @@ fun HiddenContentSettingsScreen() {
 				caption = toggle.caption?.let { stringResource(it) },
 				checked = toggle.value(current),
 				saving = saving == toggle.key,
+				// The master switch comes first: the focus starts there, not on the page heading
+				initialFocus = toggle == HiddenContentToggles.master,
 				onToggle = { save(toggle, !toggle.value(current)) },
 			)
 		}

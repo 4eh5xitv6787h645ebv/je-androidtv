@@ -16,9 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -38,11 +36,13 @@ import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.management.ManagementNavigation
 import org.jellyfin.androidtv.enhanced.management.ManagementRow
+import org.jellyfin.androidtv.enhanced.management.actionFocusKey
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.management.formatDate
 import org.jellyfin.androidtv.enhanced.management.libraryPosterUrls
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.jellyfin.androidtv.ui.base.Text
@@ -82,7 +82,7 @@ class HiddenContentFragment : Fragment() {
 	private val state = MutableStateFlow<LoadState<Page>>(LoadState.Loading)
 	private val filters = MutableStateFlow(Filters())
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
-	private val focusTarget = MutableStateFlow<String?>(null)
+	private val listFocus = ListFocus()
 	private var started = false
 
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -157,8 +157,6 @@ class HiddenContentFragment : Fragment() {
 		val load by state.collectAsState()
 		val currentFilters by filters.collectAsState()
 		val busyKeys by busy.collectAsState()
-		val target by focusTarget.collectAsState()
-		val requesters = remember { mutableMapOf<String, FocusRequester>() }
 		val page = (load as? LoadState.Ready)?.value
 		val visible = page?.let { HiddenEntries.filter(it.entries, currentFilters.scope, currentFilters.type) }.orEmpty()
 
@@ -167,7 +165,11 @@ class HiddenContentFragment : Fragment() {
 			subtitle = page?.let { pluralStringResource(R.plurals.je_management_hc_count, it.entries.size, it.entries.size) },
 			headerActions = if (page != null && page.entries.isNotEmpty()) {
 				{
-					Button(onClick = { filters.update { it.copy(scope = it.scope.next()) } }) {
+					// Where the focus goes when the filtered list empties but other entries remain
+					Button(
+						onClick = { filters.update { it.copy(scope = it.scope.next()) } },
+						modifier = Modifier.focusRequester(listFocus.requester(HEADER_FOCUS)),
+					) {
 						Text(stringResource(R.string.je_management_hc_filter_scope, stringResource(currentFilters.scope.label())))
 					}
 					Button(onClick = { filters.update { it.copy(type = it.type.next()) } }) {
@@ -184,7 +186,7 @@ class HiddenContentFragment : Fragment() {
 				empty = { it.entries.isEmpty() },
 				emptyMessage = stringResource(R.string.je_management_hc_empty),
 			) { ready ->
-				fun requester(key: String) = requesters.getOrPut(key) { FocusRequester() }
+				listFocus.Effect()
 
 				if (visible.isEmpty()) {
 					Text(
@@ -201,26 +203,36 @@ class HiddenContentFragment : Fragment() {
 				) {
 					items(visible, key = { it.key }) { entry ->
 						val title = HiddenEntries.displayTitle(entry, ready.guardedSeries).ifBlank { stringResource(R.string.je_management_untitled) }
-						HiddenRow(ready, entry, title, entry.key in busyKeys, Modifier.focusRequester(requester(entry.key))) {
+						HiddenRow(
+							page = ready,
+							entry = entry,
+							title = title,
+							busy = entry.key in busyKeys,
+							mainModifier = Modifier.focusRequester(listFocus.requester(entry.key)),
+							actionModifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(entry.key))),
+						) {
 							unhide(entry, title, visible.map { it.key })
 						}
 					}
 				}
 
 				LaunchedEffect(Unit) {
-					visible.firstOrNull()?.let { runCatching { requester(it.key).requestFocus() } }
-				}
-				LaunchedEffect(target) {
-					val key = target ?: return@LaunchedEffect
-					runCatching { requester(key).requestFocus() }
-					focusTarget.value = null
+					visible.firstOrNull()?.let { listFocus.moveTo(it.key) }
 				}
 			}
 		}
 	}
 
 	@Composable
-	private fun HiddenRow(page: Page, entry: HiddenEntry, title: String, busy: Boolean, mainModifier: Modifier, onAction: () -> Unit) {
+	private fun HiddenRow(
+		page: Page,
+		entry: HiddenEntry,
+		title: String,
+		busy: Boolean,
+		mainModifier: Modifier,
+		actionModifier: Modifier,
+		onAction: () -> Unit,
+	) {
 		val itemId = entry.itemId
 		val tmdbId = entry.tmdbId
 		val subtitle = listOfNotNull(
@@ -248,6 +260,7 @@ class HiddenContentFragment : Fragment() {
 				else -> null
 			},
 			mainModifier = mainModifier,
+			actionModifier = actionModifier,
 			chips = listOf(stringResource(entry.scopeLabel())),
 		)
 	}
@@ -279,8 +292,8 @@ class HiddenContentFragment : Fragment() {
 
 					is UnhidePlan.RemoveKey -> hiddenContentRepository.removeEntries(listOf(plan.key))
 				}
-				val index = order.indexOf(entry.key)
-				focusTarget.value = order.getOrNull(index + 1) ?: order.getOrNull(index - 1)
+				// Unhide was pressed on the row's action button: land on the next row's, so repeated presses walk the list
+				moveFocusBeforeRemoving(order, setOf(entry.key))?.let { listFocus.moveTo(actionFocusKey(it)) }
 				removeLocally(setOf(entry.key))
 				val ctx = context ?: return@launch
 				Toast.makeText(ctx, ctx.getString(R.string.je_unhidden_toast, title), Toast.LENGTH_SHORT).show()
@@ -308,6 +321,8 @@ class HiddenContentFragment : Fragment() {
 					try {
 						// One whole-document write for the lot; entries added meanwhile are kept
 						hiddenContentRepository.removeEntries(keys)
+						// "Restore all" goes away with the filtered list
+						listFocus.moveTo(if (hasEntriesBesides(keys)) HEADER_FOCUS else null)
 						removeLocally(keys)
 						load(showLoading = false)
 					} catch (err: CancellationException) {
@@ -325,12 +340,28 @@ class HiddenContentFragment : Fragment() {
 			.show()
 	}
 
+	/**
+	 * Picks where the focus goes when [removed] leave the visible [order]: the neighbouring row (returned, so the caller
+	 * can pick which of its buttons), else the header's filter button while other entries remain. Null when the
+	 * focus already moved or nothing is left (the empty state's Back takes it).
+	 */
+	private fun moveFocusBeforeRemoving(order: List<String>, removed: Set<String>): String? {
+		ListFocus.neighbour(order, removed)?.let { return it }
+		if (hasEntriesBesides(removed)) listFocus.moveTo(HEADER_FOCUS)
+		return null
+	}
+
+	private fun hasEntriesBesides(keys: Set<String>): Boolean =
+		(state.value as? LoadState.Ready)?.value?.entries?.any { it.key !in keys } == true
+
 	private fun removeLocally(keys: Set<String>) = state.update { current ->
 		if (current !is LoadState.Ready) current
 		else LoadState.Ready(current.value.copy(entries = current.value.entries.filterNot { it.key in keys }))
 	}
 
 	private companion object {
+		const val HEADER_FOCUS = "header-scope-filter"
+
 		fun HiddenScopeFilter.next() = HiddenScopeFilter.entries[(ordinal + 1) % HiddenScopeFilter.entries.size]
 		fun HiddenTypeFilter.next() = HiddenTypeFilter.entries[(ordinal + 1) % HiddenTypeFilter.entries.size]
 

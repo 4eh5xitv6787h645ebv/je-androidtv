@@ -17,11 +17,15 @@ import kotlinx.serialization.json.put
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
+import java.time.Instant
 import java.util.UUID
 
 /**
  * The user's timestamp bookmarks. Adds and deletes use the plugin's per-bookmark routes, which merge atomically on
- * the server, so a bookmark saved on another device at the same time isn't lost.
+ * the server, so a bookmark saved on another device at the same time isn't lost. The plugin has no per-bookmark
+ * update route, so a rename is a whole-document edit through [EnhancedSettingsRepository.edit]. Every write runs
+ * under that repository's document lock, so an add or delete can't land between a rename's read and its save (which
+ * would bring a deleted bookmark back or drop a new one).
  */
 class BookmarksRepository(
 	private val enhancedApi: EnhancedApi,
@@ -48,7 +52,7 @@ class BookmarksRepository(
 	private val _revision = MutableStateFlow(0L)
 
 	/**
-	 * Goes up after every add or delete made through this repository (even a failed one, which may still have
+	 * Goes up after every add, delete or rename made through this repository (even a failed one, which may still have
 	 * reached the server), so copies of `bookmark.json` kept elsewhere, like the player's, know to read it again.
 	 */
 	val revision: StateFlow<Long> = _revision.asStateFlow()
@@ -58,10 +62,32 @@ class BookmarksRepository(
 		return BookmarkLogic.sorted(EnhancedApi.json.decodeFromJsonElement<BookmarkDocument>(document.json))
 	}
 
-	suspend fun delete(bookmarkId: String) {
+	/** Thrown by [rename] when the bookmark isn't in the document any more (deleted elsewhere). */
+	class BookmarkGoneException : IllegalStateException("Bookmark not found")
+
+	/** Deletes a bookmark. Returns false when it was already gone (the plugin answers 404). */
+	suspend fun delete(bookmarkId: String): Boolean = changing {
+		val api = enhancedApi.pinned()
+		settingsRepository.withDocumentLock {
+			try {
+				api.delete("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/$bookmarkId")
+				true
+			} catch (err: EnhancedApi.EnhancedApiException) {
+				if (err.status == 404) false else throw err
+			}
+		}
+	}
+
+	/**
+	 * Sets a bookmark's label (see [BookmarkLogic.labelForSave]) by editing the whole document under the lock; the
+	 * document is re-read there, so changes made elsewhere since the list was loaded are kept.
+	 */
+	suspend fun rename(bookmarkId: String, label: String) {
 		changing {
-			val api = enhancedApi.pinned()
-			api.delete("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/$bookmarkId")
+			settingsRepository.edit(EnhancedSettingsRepository.BOOKMARKS) { fields ->
+				// Throwing here aborts the edit before anything is saved
+				if (!BookmarkLogic.rename(fields, bookmarkId, label, Instant.now())) throw BookmarkGoneException()
+			}
 		}
 	}
 
@@ -79,7 +105,8 @@ class BookmarksRepository(
 			bookmark.seasonNumber?.let { put("SeasonNumber", it) }
 			bookmark.episodeNumber?.let { put("EpisodeNumber", it) }
 		}
-		val response = api.post("user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/add", body)
+		val path = "user-settings/${userKey(api)}/${EnhancedSettingsRepository.BOOKMARKS}/add"
+		val response = settingsRepository.withDocumentLock { api.post(path, body) }
 		((response as? JsonObject)?.get("id") as? JsonPrimitive)?.contentOrNull
 	}
 
