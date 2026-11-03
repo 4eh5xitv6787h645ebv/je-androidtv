@@ -1,43 +1,35 @@
 package org.jellyfin.androidtv.enhanced.requests
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
-import android.app.AlertDialog
 import android.content.Context
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageView
 import android.widget.Toast
-import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.Lifecycle
@@ -61,20 +53,39 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrLinkRecovery
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.ChipRow
+import org.jellyfin.androidtv.enhanced.ui.design.ChipSeparator
+import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.FilterChip
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatus
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.JeTabRow
+import org.jellyfin.androidtv.enhanced.ui.design.JeType
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.LoadingSkeleton
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowAction
+import org.jellyfin.androidtv.enhanced.ui.design.RowDensity
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
+import org.jellyfin.androidtv.enhanced.ui.design.StatusBadgeSpec
+import org.jellyfin.androidtv.enhanced.ui.design.TabSpec
+import org.jellyfin.androidtv.enhanced.ui.design.WarningLine
+import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardMenu
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkNotice
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
-import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrStatusBadge
-import org.jellyfin.androidtv.ui.base.Icon
 import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.androidtv.ui.base.button.IconButton
-import org.jellyfin.androidtv.ui.composable.AsyncImage
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 import java.time.Duration
@@ -93,6 +104,8 @@ class RequestsFragment : Fragment() {
 		private const val PAGE_SIZE = 20
 		private const val ISSUE_PAGE_SIZE = 20
 		private const val HISTORY_PAGE_SIZE = 30
+
+		private const val FOCUS_RETRY_FRAMES = 10
 
 		private const val STATE_TAB = "tab"
 		private const val STATE_REQUEST_FILTER = "requestFilter"
@@ -116,16 +129,23 @@ class RequestsFragment : Fragment() {
 	private val mineOnly = MutableStateFlow<Boolean?>(null)
 	private val canApprove = MutableStateFlow(false)
 	private val busyRequests = MutableStateFlow<Set<Int>>(emptySet())
+	// The server's count per filter for the current "Only mine" setting, as far as the filters were opened
+	private val requestCounts = MutableStateFlow<Map<RequestFilter, Int>>(emptyMap())
 	private val requests = PagedLoader(lifecycleScope, ::describe, key = { card: RequestsRepository.RequestCard -> card.request.requestId ?: card.request.hashCode() }) { page ->
-		val result = requestsRepository.requests(requestFilter.value, mineOnly.value == true, page, PAGE_SIZE)
+		val filter = requestFilter.value
+		val mine = mineOnly.value == true
+		val result = requestsRepository.requests(filter, mine, page, PAGE_SIZE)
 		canApprove.value = result.canApproveRequests
+		if (mine == (mineOnly.value == true)) requestCounts.value += filter to result.totalResults
 		PagedLoader.Page(result.cards, result.totalPages)
 	}
 
 	// Watchlist
 	private val syncing = MutableStateFlow(false)
+	private val watchlistCount = MutableStateFlow<Int?>(null)
 	private val watchlist = PagedLoader(lifecycleScope, ::describe, key = { result: SeerrResult -> result.dedupeKey }) { page ->
 		val result = requestsRepository.watchlist(page)
+		watchlistCount.value = result.totalResults
 		PagedLoader.Page(result.results, result.totalPages)
 	}
 
@@ -146,10 +166,16 @@ class RequestsFragment : Fragment() {
 	// Issues
 	private val issueFilter = MutableStateFlow(IssueFilter.ALL)
 	private val issueTitles = HashMap<String, SeerrResult?>()
+	private val issueCounts = MutableStateFlow<Map<IssueFilter, Int>>(emptyMap())
 	private val issues = PagedLoader(lifecycleScope, ::describe, key = { card: RequestsRepository.IssueCard -> card.issue.issueId }) { page ->
-		val result = requestsRepository.issues(issueFilter.value, page, ISSUE_PAGE_SIZE, issueTitles)
+		val filter = issueFilter.value
+		val result = requestsRepository.issues(filter, page, ISSUE_PAGE_SIZE, issueTitles)
+		issueCounts.value += filter to result.totalResults
 		PagedLoader.Page(result.cards, result.totalPages)
 	}
+
+	// The card menu or the decline confirmation on screen, if any
+	private val dialog = MutableStateFlow<RequestDialog?>(null)
 
 	private var shownBefore = false
 	// Set when the page comes back from another screen: the focused card is focused again instead of the first tab
@@ -207,41 +233,72 @@ class RequestsFragment : Fragment() {
 			// A restored tab the server no longer offers falls back to the first one
 			if (tab.value !in RequestsTab.available(loaded)) tab.value = RequestsTab.REQUESTS
 			open(tab.value)
-			if (!restoring) runCatching { firstFocus.requestFocus() }
+			// The tabs are composed once the state says the page is on, which may be a frame or two after loading
+			if (!restoring) {
+				for (frame in 1..FOCUS_RETRY_FRAMES) {
+					if (runCatching { firstFocus.requestFocus() }.getOrDefault(false)) break
+					withFrameNanos { }
+				}
+			}
 		}
 
-		EnhancedScreen(
+		val counts by requestCounts.collectAsState()
+		val watchlistTotal by watchlistCount.collectAsState()
+		val queueState by queue.collectAsState()
+		val issueTotals by issueCounts.collectAsState()
+		val approver by canApprove.collectAsState()
+		val subtitle = counts[RequestFilter.ALL]?.let { total ->
+			val all = pluralStringResource(R.plurals.je_requests_count, total, total)
+			val pending = counts[RequestFilter.PENDING]?.takeIf { approver && it > 0 }
+			if (pending == null) all
+			else stringResource(R.string.je_requests_subtitle_joined, all, pluralStringResource(R.plurals.je_requests_waiting, pending, pending))
+		}
+
+		PageScaffold(
 			title = stringResource(R.string.je_requests_title),
-			headerActions = {
-				Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.focusGroup()) {
-					tabs.forEachIndexed { index, value ->
-						ChoiceButton(
-							text = stringResource(value.label()),
-							selected = value == currentTab,
-							onClick = { open(value) },
-							modifier = if (index == 0) Modifier.focusRequester(firstFocus) else Modifier,
-						)
-					}
-				}
-			},
+			subtitle = subtitle.takeIf { state.requests },
 		) {
 			if (!state.requests) {
-				if (SeerrLink.blocksPage(state, state.config.downloadsPageEnabled)) {
-					Box(modifier = Modifier.fillMaxSize()) {
+				when {
+					SeerrLink.blocksPage(state, state.config.downloadsPageEnabled) -> Box(modifier = Modifier.fillMaxSize()) {
 						SeerrLinkNotice(modifier = Modifier.align(Alignment.Center))
 					}
-				} else {
-					PageMessage(stringResource(if (state.available) R.string.je_seerr_unavailable else R.string.je_loading))
+
+					state.available -> EmptyState(title = stringResource(R.string.je_seerr_unavailable))
+					else -> LoadingSkeleton(SkeletonShape.Grid())
 				}
-				return@EnhancedScreen
+				return@PageScaffold
 			}
-			when (currentTab) {
-				RequestsTab.REQUESTS -> RequestsTabContent()
-				RequestsTab.WATCHLIST -> WatchlistTabContent(RequestsTab.canSyncWatchlist(state))
-				RequestsTab.QUEUE -> QueueTabContent(RequestsTab.pollIntervalSeconds(state))
-				RequestsTab.HISTORY -> HistoryTabContent()
-				RequestsTab.ISSUES -> IssuesTabContent()
+			Column(modifier = Modifier.fillMaxSize()) {
+				JeTabRow(
+					tabs = tabs.map { value ->
+						TabSpec(
+							label = stringResource(value.label()),
+							count = when (value) {
+								RequestsTab.REQUESTS -> counts[RequestFilter.ALL]
+								RequestsTab.WATCHLIST -> watchlistTotal
+								RequestsTab.QUEUE -> (queueState as? LoadState.Ready)?.value?.entries?.size
+								RequestsTab.HISTORY -> null
+								RequestsTab.ISSUES -> issueTotals[IssueFilter.ALL]
+							},
+						)
+					},
+					selected = tabs.indexOf(currentTab).coerceAtLeast(0),
+					onSelect = { index -> tabs.getOrNull(index)?.let { open(it) } },
+					modifier = Modifier
+						.padding(horizontal = JeSpace.pageHorizontal)
+						.focusRequester(firstFocus),
+				)
+				Box(modifier = Modifier.height(JeSpace.headerBottom))
+				when (currentTab) {
+					RequestsTab.REQUESTS -> RequestsTabContent()
+					RequestsTab.WATCHLIST -> WatchlistTabContent(RequestsTab.canSyncWatchlist(state))
+					RequestsTab.QUEUE -> QueueTabContent(RequestsTab.pollIntervalSeconds(state))
+					RequestsTab.HISTORY -> HistoryTabContent()
+					RequestsTab.ISSUES -> IssuesTabContent()
+				}
 			}
+			RequestDialogs()
 		}
 	}
 
@@ -340,6 +397,7 @@ class RequestsFragment : Fragment() {
 		val mine by mineOnly.collectAsState()
 		val approve by canApprove.collectAsState()
 		val busy by busyRequests.collectAsState()
+		val counts by requestCounts.collectAsState()
 		val today = remember { RequestsRepository.today() }
 
 		PagedGrid(
@@ -348,17 +406,12 @@ class RequestsFragment : Fragment() {
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_nothing_found),
 			header = {
-				Row(
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					verticalAlignment = Alignment.CenterVertically,
-					modifier = Modifier
-						.focusGroup()
-						.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
-				) {
+				ChipRow(modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom)) {
 					RequestFilter.entries.forEach { value ->
-						ChoiceButton(
-							text = stringResource(value.label()),
+						FilterChip(
+							label = stringResource(value.label()),
 							selected = value == filter,
+							count = counts[value],
 							onClick = {
 								if (requestFilter.value != value) {
 									requestFilter.value = value
@@ -367,11 +420,15 @@ class RequestsFragment : Fragment() {
 							},
 						)
 					}
-					ChoiceButton(
-						text = stringResource(if (mine == true) R.string.je_requests_mine_only_on else R.string.je_requests_mine_only),
+					ChipSeparator()
+					FilterChip(
+						label = stringResource(R.string.je_requests_mine_only),
 						selected = mine == true,
+						leadingIcon = R.drawable.ic_user,
 						onClick = {
 							mineOnly.value = mineOnly.value != true
+							// The counts were for the other setting
+							requestCounts.value = emptyMap()
 							requests.reload()
 						},
 					)
@@ -395,49 +452,33 @@ class RequestsFragment : Fragment() {
 	private fun RequestRow(card: RequestsRepository.RequestCard, today: LocalDate, canApprove: Boolean, busy: Boolean) {
 		val request = card.request
 		val actionable = canApprove && request.isPendingApproval
-		Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-			PosterCard(
-				posterUrl = card.posterUrl,
-				placeholder = if (request.isTv) R.drawable.ic_tv else R.drawable.ic_clapperboard,
-				onClick = { openDetails(request.type, request.tmdbId) },
-				onMenu = { showRequestMenu(card, actionable) },
-				modifier = Modifier.weight(1f),
-			) {
-				CardTitle(
-					text = request.title ?: stringResource(R.string.je_requests_issue_unknown_title),
-					trailing = request.year?.takeIf { !card.protectedTitle }?.toString(),
-				)
-				val chip = RequestChip.of(request, today)
-				Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-					StatusChip(stringResource(chip.label()), chip.color())
-					// Release and air dates come from TMDB, outside Spoiler Guard: withheld for protected library titles
-					if (!card.protectedTitle) releaseLabel(request, today)?.let { CardLine(releaseText(it)) }
-				}
-				if (chip == RequestChip.ORPHANED) CardLine(stringResource(R.string.je_requests_orphaned_hint), ColorAmber)
-				if (busy) CardLine(stringResource(R.string.je_requests_working))
-				Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-					requestsRepository.avatarUrl(request.requestedByAvatar)?.let { url ->
-						Box(modifier = Modifier.size(18.dp).clip(CircleShape)) {
-							AsyncImage(url = url, aspectRatio = 1f, scaleType = ImageView.ScaleType.CENTER_CROP, modifier = Modifier.fillMaxSize())
-						}
-					}
-					val by = request.requestedBy ?: stringResource(R.string.je_requests_chip_unknown)
-					val age = relativeAge(request.createdAt)
-					CardLine(if (age != null) stringResource(R.string.je_requests_requested_by, by, age) else by)
-				}
-			}
-			if (actionable) {
-				Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-					// Stay enabled while busy so the focus stays put; act() ignores repeated presses
-					IconButton(onClick = { approve(card) }) {
-						Icon(painterResource(R.drawable.je_ic_requests_check), contentDescription = stringResource(R.string.je_requests_approve))
-					}
-					IconButton(onClick = { confirmDecline(card) }) {
-						Icon(painterResource(R.drawable.je_ic_requests_close), contentDescription = stringResource(R.string.je_requests_decline))
-					}
-				}
-			}
-		}
+		val chip = RequestChip.of(request, today)
+		val by = request.requestedBy ?: stringResource(R.string.je_requests_chip_unknown)
+		val requestedBy = relativeAge(request.createdAt)?.let { age -> stringResource(R.string.je_requests_requested_by, by, age) } ?: by
+		// Release and air dates come from TMDB, outside Spoiler Guard: withheld for protected library titles
+		val release = if (card.protectedTitle) null else releaseLabel(request, today)?.let { releaseText(it) }
+		val working = stringResource(R.string.je_requests_working)
+		val warning = if (chip == RequestChip.ORPHANED) stringResource(R.string.je_requests_orphaned_hint) else null
+		// The card has a fixed height: with the warning line there is room for one caption
+		val supporting = if (warning != null) listOf(if (busy) working else requestedBy)
+		else listOfNotNull(if (busy) working else release, requestedBy)
+
+		ListRow(
+			title = request.title ?: stringResource(R.string.je_requests_issue_unknown_title),
+			titleTrailing = request.year?.takeIf { !card.protectedTitle }?.toString(),
+			leading = RowLeading.Poster(card.posterUrl, if (request.isTv) R.drawable.ic_tv else R.drawable.ic_clapperboard),
+			badges = listOf(StatusBadgeSpec(JeStatuses.label(chip.name).status, stringResource(chip.label()))),
+			warning = warning,
+			supporting = supporting,
+			// Stay focusable while busy (a spinner, presses ignored) so the focus stays put; act() ignores repeats too
+			actions = if (actionable) listOf(
+				RowAction(R.drawable.je_ic_requests_check, stringResource(R.string.je_requests_approve), { approve(card) }, busy = busy),
+				RowAction(R.drawable.je_ic_requests_close, stringResource(R.string.je_requests_decline), { confirmDecline(card) }, busy = busy),
+			) else emptyList(),
+			onClick = { openDetails(request.type, request.tmdbId) },
+			onMenu = { showRequestMenu(card, actionable) },
+			density = RowDensity.Large,
+		)
 	}
 
 	private fun RequestChip.label() = when (this) {
@@ -454,15 +495,6 @@ class RequestsFragment : Fragment() {
 		RequestChip.FAILED -> R.string.je_requests_chip_failed
 		RequestChip.COMPLETED -> R.string.je_requests_chip_completed
 		RequestChip.UNKNOWN -> R.string.je_requests_chip_unknown
-	}
-
-	private fun RequestChip.color() = when (this) {
-		RequestChip.AVAILABLE, RequestChip.COMPLETED, RequestChip.REQUESTED -> ColorGreen
-		RequestChip.PARTIALLY_AVAILABLE -> ColorBlue
-		RequestChip.PROCESSING, RequestChip.COMING_SOON -> ColorIndigo
-		RequestChip.PENDING, RequestChip.ORPHANED -> ColorAmber
-		RequestChip.DECLINED, RequestChip.FAILED, RequestChip.BLOCKLISTED -> ColorRed
-		RequestChip.DELETED, RequestChip.UNKNOWN -> ColorGrey
 	}
 
 	private fun releaseText(label: ReleaseLabel): String {
@@ -497,33 +529,62 @@ class RequestsFragment : Fragment() {
 	}
 
 	private fun showRequestMenu(card: RequestsRepository.RequestCard, actionable: Boolean) {
-		val context = context ?: return
-		val request = card.request
-		val actions = buildList<Pair<String, () -> Unit>> {
-			if (request.tmdbId != null) add(getString(R.string.je_requests_open_details) to { openDetails(request.type, request.tmdbId) })
-			if (actionable) {
-				add(getString(R.string.je_requests_approve) to { approve(card) })
-				add(getString(R.string.je_requests_decline) to { confirmDecline(card) })
-			}
-		}
-		if (actions.isEmpty()) return
-		AlertDialog.Builder(context)
-			.setTitle(request.title)
-			.setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		if (card.request.tmdbId == null && !actionable) return
+		dialog.value = RequestDialog.Menu(card, actionable)
 	}
 
 	private fun confirmDecline(card: RequestsRepository.RequestCard) {
-		val context = context ?: return
 		if (card.request.requestId in busyRequests.value) return
-		val title = card.request.title ?: getString(R.string.je_requests_issue_unknown_title)
-		AlertDialog.Builder(context)
-			.setTitle(getString(R.string.je_requests_decline_title, title))
-			.setMessage(getString(R.string.je_requests_decline_message, card.request.requestedBy ?: getString(R.string.je_requests_chip_unknown)))
-			.setPositiveButton(R.string.je_requests_decline) { _, _ -> act(card, approve = false) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		dialog.value = RequestDialog.Decline(card)
+	}
+
+	/** The card menu (Show details, Approve, Decline) and the decline confirmation. */
+	@Composable
+	private fun RequestDialogs() {
+		val current by dialog.collectAsState()
+		val dismiss = { dialog.value = null }
+		val menuOpen = current is RequestDialog.Menu
+		val menu = rememberLastNonNull(current as? RequestDialog.Menu)
+		JeDialog(
+			visible = menuOpen,
+			onDismissRequest = dismiss,
+			title = menu?.card?.request?.title ?: stringResource(R.string.je_requests_issue_unknown_title),
+			actions = { JeButton(text = stringResource(R.string.je_design_cancel), onClick = dismiss) },
+		) {
+			val card = menu?.card ?: return@JeDialog
+			Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+				if (card.request.tmdbId != null) {
+					JeButton(text = stringResource(R.string.je_requests_open_details), onClick = {
+						dismiss()
+						openDetails(card.request.type, card.request.tmdbId)
+					})
+				}
+				if (menu.actionable) {
+					JeButton(text = stringResource(R.string.je_requests_approve), icon = R.drawable.je_ic_requests_check, onClick = {
+						dismiss()
+						approve(card)
+					})
+					JeButton(text = stringResource(R.string.je_requests_decline), icon = R.drawable.je_ic_requests_close, onClick = {
+						// Straight on to the confirmation
+						dialog.value = RequestDialog.Decline(card)
+					})
+				}
+			}
+		}
+
+		val declineOpen = current is RequestDialog.Decline
+		val decline = rememberLastNonNull((current as? RequestDialog.Decline)?.card)
+		val declineTitle = decline?.request?.title ?: stringResource(R.string.je_requests_issue_unknown_title)
+		JeConfirmDialog(
+			visible = declineOpen,
+			title = stringResource(R.string.je_requests_decline_title, declineTitle),
+			body = stringResource(R.string.je_requests_decline_message, decline?.request?.requestedBy ?: stringResource(R.string.je_requests_chip_unknown)),
+			confirmLabel = stringResource(R.string.je_requests_decline),
+			confirmIcon = R.drawable.je_ic_requests_close,
+			destructive = true,
+			onConfirm = { decline?.let { act(it, approve = false) } },
+			onDismissRequest = dismiss,
+		)
 	}
 
 	private fun approve(card: RequestsRepository.RequestCard) = act(card, approve = true)
@@ -573,23 +634,30 @@ class RequestsFragment : Fragment() {
 			header = if (canSync) {
 				{
 					Row(
-						horizontalArrangement = Arrangement.spacedBy(12.dp),
+						horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap),
 						verticalAlignment = Alignment.CenterVertically,
-						modifier = Modifier.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
+						modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom),
 					) {
-						// Stays enabled while syncing so the focus stays put; syncWatchlist() ignores repeated presses
-						Button(onClick = { syncWatchlist() }) {
-							Icon(painterResource(R.drawable.je_ic_requests_sync), contentDescription = null, modifier = Modifier.size(18.dp))
-							Text(stringResource(if (isSyncing) R.string.je_requests_syncing else R.string.je_requests_sync_now), modifier = Modifier.padding(start = 6.dp))
-						}
-						Text(stringResource(R.string.je_requests_watchlist_hint), color = secondaryTextColor(), fontSize = 13.sp)
+						// Busy rather than disabled while syncing so the focus stays put; syncWatchlist() ignores repeats
+						JeButton(
+							text = stringResource(if (isSyncing) R.string.je_requests_syncing else R.string.je_requests_sync_now),
+							icon = R.drawable.je_ic_requests_sync,
+							busy = isSyncing,
+							onClick = { syncWatchlist() },
+						)
+						Text(stringResource(R.string.je_requests_watchlist_hint), style = JeType.caption)
 					}
 				}
 			} else null,
 		) { result ->
-			PosterCard(
-				posterUrl = if (result.libraryArtwork) result.libraryPosterUrl else SeerrImages.poster(result.posterPath),
-				placeholder = if (result.isTv) R.drawable.ic_tv else R.drawable.ic_clapperboard,
+			ListRow(
+				title = result.displayTitle,
+				titleTrailing = result.year.takeIf { !result.libraryArtwork },
+				leading = RowLeading.Poster(
+					if (result.libraryArtwork) result.libraryPosterUrl else SeerrImages.poster(result.posterPath),
+					if (result.isTv) R.drawable.ic_tv else R.drawable.ic_clapperboard,
+				),
+				badges = listOfNotNull(JeStatuses.seerrMedia(result.status)),
 				onClick = { openDetails(result.mediaType, result.id) },
 				onMenu = {
 					context?.let { context ->
@@ -598,10 +666,8 @@ class RequestsFragment : Fragment() {
 						}
 					}
 				},
-			) {
-				CardTitle(result.displayTitle, result.year.takeIf { !result.libraryArtwork })
-				SeerrStatusBadge(result.status)
-			}
+				density = RowDensity.Large,
+			)
 		}
 	}
 
@@ -653,38 +719,39 @@ class RequestsFragment : Fragment() {
 	private fun QueueTabContent(pollSeconds: Int?) {
 		val state by queue.collectAsState()
 		val refreshError by queueRefreshError.collectAsState()
+		val refreshLabel = stringResource(R.string.je_requests_refresh)
 
 		Column(modifier = Modifier.fillMaxSize()) {
 			Row(
-				horizontalArrangement = Arrangement.spacedBy(12.dp),
+				horizontalArrangement = Arrangement.spacedBy(JeSpace.actionGap),
 				verticalAlignment = Alignment.CenterVertically,
-				modifier = Modifier.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
+				modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom),
 			) {
-				Button(onClick = { refreshQueue(silent = true) }) { Text(stringResource(R.string.je_requests_refresh)) }
-				if (pollSeconds != null) Text(stringResource(R.string.je_requests_auto_refresh, pollSeconds), color = secondaryTextColor(), fontSize = 13.sp)
-				refreshError?.let { Text(it, color = ColorAmber, fontSize = 13.sp) }
+				JeButton(text = refreshLabel, onClick = { refreshQueue(silent = true) })
+				if (pollSeconds != null) Text(stringResource(R.string.je_requests_auto_refresh, pollSeconds), style = JeType.caption)
+				refreshError?.let { WarningLine(it) }
 			}
-			LoadStateContent(state) { result ->
-				LazyColumn(
-					contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 32.dp),
-					verticalArrangement = Arrangement.spacedBy(10.dp),
-				) {
-					// One instance failing doesn't hide what the others returned
-					items(result.errors) { error ->
-						Text(
-							text = stringResource(
-								R.string.je_requests_queue_error,
-								error.source ?: "Arr",
-								error.instanceName ?: "?",
-								error.reason ?: "",
-							),
-							color = ColorAmber,
-							fontSize = 14.sp,
+			LoadStateContent(state, loading = SkeletonShape.Rows(density = RowDensity.Compact)) { result ->
+				// One instance failing doesn't hide what the others returned
+				val errors = result.errors.map { error ->
+					stringResource(R.string.je_requests_queue_error, error.source ?: "Arr", error.instanceName ?: "?", error.reason ?: "")
+				}
+				if (result.entries.isEmpty()) {
+					Column(modifier = Modifier.fillMaxSize()) {
+						errors.forEach { Notice(NoticeKind.Warning, it, inline = true, modifier = Modifier.padding(horizontal = JeSpace.pageHorizontal, vertical = 2.dp)) }
+						EmptyState(
+							title = stringResource(R.string.je_requests_queue_empty),
+							action = remember(refreshLabel) { EmptyAction(refreshLabel) { refreshQueue(silent = true) } },
+							modifier = Modifier.weight(1f),
 						)
 					}
-					if (result.entries.isEmpty()) {
-						item { Text(stringResource(R.string.je_requests_queue_empty), color = secondaryTextColor(), fontSize = 18.sp, modifier = Modifier.padding(top = 24.dp)) }
-					}
+					return@LoadStateContent
+				}
+				LazyColumn(
+					contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, top = 4.dp, bottom = JeSpace.pageBottom),
+					verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
+				) {
+					items(errors) { error -> Notice(NoticeKind.Warning, error, inline = true) }
 					// No item keys: *arr ids aren't guaranteed unique across instances, and the list is replaced wholesale
 					items(result.entries) { entry -> QueueRow(entry) }
 				}
@@ -695,51 +762,32 @@ class RequestsFragment : Fragment() {
 	@Composable
 	private fun QueueRow(entry: QueueEntry) {
 		val item = entry.item
-		PosterCard(
-			posterUrl = item.posterUrl,
-			placeholder = if (item.isSonarr) R.drawable.ic_tv else R.drawable.ic_clapperboard,
-			onClick = { openDetails(if (item.isSonarr) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE, item.tmdbId) },
-			modifier = Modifier.fillMaxWidth(),
-		) {
-			CardTitle(item.title ?: stringResource(R.string.je_requests_issue_unknown_title))
-			val subtitle = when (entry) {
-				is QueueEntry.SeasonPack -> listOfNotNull(
-					stringResource(R.string.je_requests_season_pack, item.seasonNumber ?: 0, entry.episodes.size),
-					entry.firstEpisode?.let { first ->
-						entry.lastEpisode?.let { last -> stringResource(R.string.je_requests_episode_range, first, last) }
-					},
-				).joinToString(" · ")
-				is QueueEntry.Single -> item.subtitle
-			}
-			subtitle?.takeIf { it.isNotBlank() }?.let { CardLine(it) }
-			val (statusText, statusColor) = queueStatus(item.status)
-			Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-				StatusChip(statusText, statusColor)
-				CardLine(listOfNotNull(item.instanceName ?: item.source).joinToString())
-			}
-			ProgressBar(fraction = (item.progress / 100.0).toFloat(), color = statusColor)
-			CardLine(
-				listOfNotNull(
-					stringResource(R.string.je_requests_progress, item.progress.toInt()),
-					formatTimeRemaining(item.timeRemaining)?.let { stringResource(R.string.je_requests_eta, it) },
-					formatDownloadStats(entry.totalSize, entry.sizeRemaining),
-				).joinToString("  ·  ")
-			)
+		val subtitle = when (entry) {
+			is QueueEntry.SeasonPack -> listOfNotNull(
+				stringResource(R.string.je_requests_season_pack, item.seasonNumber ?: 0, entry.episodes.size),
+				entry.firstEpisode?.let { first ->
+					entry.lastEpisode?.let { last -> stringResource(R.string.je_requests_episode_range, first, last) }
+				},
+			).joinToString(" · ")
+			is QueueEntry.Single -> item.subtitle
 		}
-	}
-
-	@Composable
-	private fun queueStatus(status: String?): Pair<String, Color> = when (status?.lowercase()) {
-		"downloading" -> stringResource(R.string.je_requests_status_downloading) to ColorBlue
-		"queued" -> stringResource(R.string.je_requests_status_queued) to ColorGrey
-		"paused" -> stringResource(R.string.je_requests_status_paused) to ColorAmber
-		"importing" -> stringResource(R.string.je_requests_status_importing) to ColorGreen
-		"completed" -> stringResource(R.string.je_requests_status_completed) to ColorGreen
-		"warning" -> stringResource(R.string.je_requests_status_warning) to ColorAmber
-		"failed", "downloadclientunavailable" -> stringResource(R.string.je_requests_status_failed) to ColorRed
-		"delay", "delayed" -> stringResource(R.string.je_requests_status_delay) to ColorAmber
-		null, "", "unknown" -> stringResource(R.string.je_requests_status_unknown) to ColorGrey
-		else -> status to ColorGrey
+		val stats = listOfNotNull(
+			item.instanceName ?: item.source,
+			stringResource(R.string.je_requests_progress, item.progress.toInt()),
+			formatTimeRemaining(item.timeRemaining)?.let { stringResource(R.string.je_requests_eta, it) },
+			formatDownloadStats(entry.totalSize, entry.sizeRemaining),
+		).joinToString(" · ")
+		val status = JeStatuses.queue(item.status)
+		ListRow(
+			title = item.title ?: stringResource(R.string.je_requests_issue_unknown_title),
+			leading = RowLeading.Poster(item.posterUrl, if (item.isSonarr) R.drawable.ic_tv else R.drawable.ic_clapperboard),
+			badges = listOf(status),
+			supporting = listOfNotNull(subtitle?.takeIf { it.isNotBlank() }, stats),
+			progress = (item.progress / 100.0).toFloat(),
+			onClick = { openDetails(if (item.isSonarr) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE, item.tmdbId) },
+			// Grows with its lines: a full-width row has room for the subtitle, the stats and the progress line
+			density = RowDensity.Compact,
+		)
 	}
 
 	// History
@@ -751,7 +799,7 @@ class RequestsFragment : Fragment() {
 
 		// visible:false is the server hiding history from this user, not a failure or an empty history
 		if (!visible) {
-			PageMessage(stringResource(R.string.je_requests_history_hidden))
+			EmptyState(title = stringResource(R.string.je_requests_history_hidden))
 			return
 		}
 
@@ -761,24 +809,23 @@ class RequestsFragment : Fragment() {
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_requests_history_empty),
 		) { item ->
-			PosterCard(
-				posterUrl = item.posterUrl,
-				placeholder = if (item.isSonarr) R.drawable.ic_tv else R.drawable.ic_clapperboard,
-				onClick = { openDetails(if (item.isSonarr) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE, item.tmdbId) },
-			) {
-				CardTitle(item.title ?: stringResource(R.string.je_requests_issue_unknown_title))
-				item.subtitle?.takeIf { it.isNotBlank() }?.let { CardLine(it) }
-				val (text, color) = when (item.outcome) {
-					HistoryOutcome.IMPORTED -> R.string.je_requests_history_imported to ColorGreen
-					HistoryOutcome.PARTIAL -> R.string.je_requests_history_partial to ColorBlue
-					HistoryOutcome.FAILED -> R.string.je_requests_history_failed to ColorRed
-				}
-				StatusChip(stringResource(text), color)
-				if (item.episodeCount != null && item.episodeCount > 0) {
-					CardLine(stringResource(R.string.je_requests_history_episodes, item.importedCount ?: 0, item.episodeCount))
-				}
-				CardLine(listOfNotNull(item.instanceName ?: item.source, relativeAge(item.date)).joinToString(" · "))
+			val (outcome, text) = when (item.outcome) {
+				HistoryOutcome.IMPORTED -> JeStatus.Available to R.string.je_requests_history_imported
+				HistoryOutcome.PARTIAL -> JeStatus.PartlyAvailable to R.string.je_requests_history_partial
+				HistoryOutcome.FAILED -> JeStatus.Declined to R.string.je_requests_history_failed
 			}
+			val episodes = item.episodeCount?.takeIf { it > 0 }?.let { stringResource(R.string.je_requests_history_episodes, item.importedCount ?: 0, it) }
+			ListRow(
+				title = item.title ?: stringResource(R.string.je_requests_issue_unknown_title),
+				leading = RowLeading.Poster(item.posterUrl, if (item.isSonarr) R.drawable.ic_tv else R.drawable.ic_clapperboard),
+				badges = listOf(StatusBadgeSpec(outcome, stringResource(text))),
+				supporting = listOfNotNull(
+					listOfNotNull(item.subtitle?.takeIf { it.isNotBlank() }, episodes).joinToString(" · ").ifEmpty { null },
+					listOfNotNull(item.instanceName ?: item.source, relativeAge(item.date)).joinToString(" · "),
+				),
+				onClick = { openDetails(if (item.isSonarr) SeerrRepository.MEDIA_TV else SeerrRepository.MEDIA_MOVIE, item.tmdbId) },
+				density = RowDensity.Large,
+			)
 		}
 	}
 
@@ -788,6 +835,7 @@ class RequestsFragment : Fragment() {
 	private fun IssuesTabContent() {
 		val state by issues.state.collectAsState()
 		val filter by issueFilter.collectAsState()
+		val counts by issueCounts.collectAsState()
 
 		PagedGrid(
 			state = state,
@@ -795,15 +843,10 @@ class RequestsFragment : Fragment() {
 			columns = 2,
 			emptyMessage = stringResource(R.string.je_requests_issues_empty),
 			header = {
-				Row(
-					horizontalArrangement = Arrangement.spacedBy(8.dp),
-					modifier = Modifier
-						.focusGroup()
-						.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
-				) {
+				ChipRow(modifier = Modifier.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom)) {
 					IssueFilter.entries.forEach { value ->
-						ChoiceButton(
-							text = stringResource(
+						FilterChip(
+							label = stringResource(
 								when (value) {
 									IssueFilter.ALL -> R.string.je_requests_filter_all
 									IssueFilter.OPEN -> R.string.je_requests_issue_open
@@ -811,6 +854,7 @@ class RequestsFragment : Fragment() {
 								}
 							),
 							selected = value == filter,
+							count = counts[value],
 							onClick = {
 								if (issueFilter.value != value) {
 									issueFilter.value = value
@@ -823,29 +867,28 @@ class RequestsFragment : Fragment() {
 			},
 		) { card ->
 			val issue = card.issue
-			PosterCard(
-				posterUrl = card.posterUrl,
-				placeholder = if (card.mediaType == SeerrRepository.MEDIA_TV) R.drawable.ic_tv else R.drawable.ic_clapperboard,
-				onClick = { openDetails(card.mediaType, issue.media?.tmdbId) },
-			) {
-				CardTitle(card.title ?: stringResource(R.string.je_requests_issue_unknown_title), card.year)
-				Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-					StatusChip(
+			ListRow(
+				title = card.title ?: stringResource(R.string.je_requests_issue_unknown_title),
+				titleTrailing = card.year,
+				leading = RowLeading.Poster(card.posterUrl, if (card.mediaType == SeerrRepository.MEDIA_TV) R.drawable.ic_tv else R.drawable.ic_clapperboard),
+				badges = listOf(
+					StatusBadgeSpec(
+						if (issue.isResolved) JeStatus.Available else JeStatus.Warning,
 						stringResource(if (issue.isResolved) R.string.je_requests_issue_resolved else R.string.je_requests_issue_open),
-						if (issue.isResolved) ColorGreen else ColorAmber,
-					)
-					StatusChip(stringResource(issueTypeLabel(issue.issueType)), ColorGrey)
-					issue.episodeLabel?.let { CardLine(it) }
-				}
-				issue.message?.let { CardLine(it, Tokens.Color.colorGrey100, maxLines = 2) }
-				CardLine(
+					),
+					StatusBadgeSpec(JeStatus.Neutral, stringResource(issueTypeLabel(issue.issueType))),
+				),
+				supporting = listOfNotNull(
+					listOfNotNull(issue.episodeLabel, issue.message).joinToString(" · ").ifEmpty { null },
 					listOfNotNull(
 						issue.createdBy?.name,
 						relativeAge(issue.createdAt),
 						issue.comments.size.takeIf { it > 1 }?.let { stringResource(R.string.je_requests_issue_comments, it) },
-					).joinToString(" · ")
-				)
-			}
+					).joinToString(" · ").ifEmpty { null },
+				),
+				onClick = { openDetails(card.mediaType, issue.media?.tmdbId) },
+				density = RowDensity.Large,
+			)
 		}
 	}
 
@@ -857,3 +900,10 @@ class RequestsFragment : Fragment() {
 	}
 }
 
+/** A dialog of the Requests page; null in the fragment's state when none is shown. */
+private sealed interface RequestDialog {
+	val card: RequestsRepository.RequestCard
+
+	data class Menu(override val card: RequestsRepository.RequestCard, val actionable: Boolean) : RequestDialog
+	data class Decline(override val card: RequestsRepository.RequestCard) : RequestDialog
+}

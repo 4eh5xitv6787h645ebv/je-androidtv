@@ -44,12 +44,13 @@ class RequestsRepository(
 	 */
 	data class RequestCard(val request: ArrRequest, val posterUrl: String?, val protectedTitle: Boolean)
 
-	data class RequestsResult(val cards: List<RequestCard>, val totalPages: Int, val canApproveRequests: Boolean)
+	/** [totalResults] is the server's count for the filter (before hidden titles are dropped), for the page's counts. */
+	data class RequestsResult(val cards: List<RequestCard>, val totalPages: Int, val canApproveRequests: Boolean, val totalResults: Int = 0)
 
 	/** An issue with the title it is about (looked up on Seerr, as the web does). */
 	data class IssueCard(val issue: SeerrIssue, val title: String?, val year: String?, val posterUrl: String?, val mediaType: String?)
 
-	data class IssuesResult(val cards: List<IssueCard>, val totalPages: Int)
+	data class IssuesResult(val cards: List<IssueCard>, val totalPages: Int, val totalResults: Int = 0)
 
 	/** Queue rows plus the *arr instances that failed; failures never blank the rows that did load. */
 	data class QueueResult(val entries: List<QueueEntry>, val errors: List<QueueError>)
@@ -78,7 +79,7 @@ class RequestsRepository(
 		val visible = response.requests.filterNot { hidden.isHidden(it.tmdbId, it.jellyfinMediaId) }
 
 		val cards = withArtwork(visible)
-		return RequestsResult(cards, response.totalPages, response.canApproveRequests)
+		return RequestsResult(cards, response.totalPages, response.canApproveRequests, response.totalResults)
 	}
 
 	/**
@@ -211,7 +212,7 @@ class RequestsRepository(
 				mediaType = issue.media?.mediaType,
 			)
 		}
-		return IssuesResult(cards, response.pageInfo.pages)
+		return IssuesResult(cards, response.pageInfo.pages, response.pageInfo.results)
 	}
 
 	private data class IssueTitleKey(val mediaType: String, val tmdbId: Int) {

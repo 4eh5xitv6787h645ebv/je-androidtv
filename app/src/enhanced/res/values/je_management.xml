@@ -83,8 +83,9 @@
         <item quantity="one">%1$d entry</item>
         <item quantity="other">%1$d entries</item>
     </plurals>
-    <string name="je_management_hc_filter_scope">Where: %1$s</string>
-    <string name="je_management_hc_filter_type">Type: %1$s</string>
+    <string name="je_management_hc_where">Where</string>
+    <string name="je_management_hc_type">Type</string>
+    <string name="je_management_hc_clear_filters">Clear filters</string>
     <string name="je_management_hc_restore_all">Restore all (%1$d)</string>
     <plurals name="je_management_hc_restore_all_title">
         <item quantity="one">Restore %1$d title?</item>

@@ -1,14 +1,15 @@
 package org.jellyfin.androidtv.enhanced.management.spoiler
 
-import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -31,16 +32,20 @@ import org.jellyfin.androidtv.enhanced.data.SpoilerGuardEntry
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardPendingEntry
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.management.ManagementNavigation
-import org.jellyfin.androidtv.enhanced.management.ManagementRow
-import org.jellyfin.androidtv.enhanced.management.ManagementSectionHeader
 import org.jellyfin.androidtv.enhanced.management.actionFocusKey
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.management.formatDate
 import org.jellyfin.androidtv.enhanced.management.libraryPosterUrls
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowAction
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.SectionHeader
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 import java.util.UUID
@@ -70,6 +75,8 @@ class SpoilerGuardFragment : Fragment() {
 
 	private val state = MutableStateFlow<LoadState<Page>>(LoadState.Loading)
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
+	/** The "Turn off" waiting for confirmation, if any. */
+	private val confirming = MutableStateFlow<PendingRemoval?>(null)
 	private val listFocus = ListFocus()
 	private var started = false
 
@@ -120,7 +127,7 @@ class SpoilerGuardFragment : Fragment() {
 		val busyKeys by busy.collectAsState()
 		val ready = (load as? LoadState.Ready)?.value
 
-		EnhancedScreen(
+		PageScaffold(
 			title = stringResource(R.string.je_spoiler_guard),
 			subtitle = ready?.let { pluralStringResource(R.plurals.je_management_sg_count, it.entries.size + it.pending.size, it.entries.size + it.pending.size) },
 		) {
@@ -128,65 +135,77 @@ class SpoilerGuardFragment : Fragment() {
 				state = load,
 				empty = { it.entries.isEmpty() && it.pending.isEmpty() },
 				emptyMessage = stringResource(R.string.je_management_sg_empty),
+				emptyIcon = R.drawable.je_ic_blur_on,
 			) { page ->
 				listFocus.Effect()
 
 				LazyColumn(
-					contentPadding = PaddingValues(bottom = 32.dp),
-					verticalArrangement = Arrangement.spacedBy(8.dp),
+					contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.pageBottom),
+					verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
 				) {
+					var first = true
 					for (kind in SpoilerGuardRepository.Kind.entries) {
 						val group = page.entries.filter { it.kind == kind }
 						if (group.isEmpty()) continue
-						item(key = "header-$kind") { ManagementSectionHeader(stringResource(kind.sectionTitle())) }
+						val top = !first
+						first = false
+						item(key = "header-$kind") { GroupHeader(stringResource(kind.sectionTitle()), group.size, top) }
 						items(group, key = { rowKey(it) }) { entry ->
 							val key = rowKey(entry)
-							ManagementRow(
+							ListRow(
 								title = entry.name.ifBlank { stringResource(R.string.je_management_untitled) },
-								subtitle = formatDate(entry.enabledAt)?.let { stringResource(R.string.je_management_sg_since, it) },
-								posterUrl = entry.itemId?.let { page.posters[it] },
-								fallbackIcon = kind.icon(),
-								actionLabel = stringResource(R.string.je_management_sg_turn_off),
-								busy = key in busyKeys,
-								onAction = { confirmRemove(page, key, entry.name) { spoilerGuardRepository.removeEntry(entry) } },
-								onOpen = entry.itemId?.let { id ->
-									{
-										if (kind == SpoilerGuardRepository.Kind.COLLECTION) ManagementNavigation.openCollection(this@SpoilerGuardFragment, id)
-										else ManagementNavigation.openDetails(id)
-									}
+								supporting = listOfNotNull(formatDate(entry.enabledAt)?.let { stringResource(R.string.je_management_sg_since, it) }),
+								leading = RowLeading.Poster(entry.itemId?.let { page.posters[it] }, kind.icon()),
+								actions = listOf(
+									RowAction(
+										icon = null,
+										label = stringResource(R.string.je_management_sg_turn_off),
+										onClick = { confirmRemove(page, key, entry.name) { spoilerGuardRepository.removeEntry(entry) } },
+										busy = key in busyKeys,
+										modifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
+									)
+								),
+								onClick = {
+									val id = entry.itemId ?: return@ListRow
+									if (kind == SpoilerGuardRepository.Kind.COLLECTION) ManagementNavigation.openCollection(this@SpoilerGuardFragment, id)
+									else ManagementNavigation.openDetails(id)
 								},
 								mainModifier = Modifier.focusRequester(listFocus.requester(key)),
-								actionModifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
 							)
 						}
 					}
 
 					if (page.pending.isNotEmpty()) {
-						item(key = "header-pending") { ManagementSectionHeader(stringResource(R.string.je_management_sg_pending)) }
+						val top = !first
+						item(key = "header-pending") { GroupHeader(stringResource(R.string.je_management_sg_pending), page.pending.size, top) }
 						items(page.pending, key = { rowKey(it) }) { entry ->
 							val key = rowKey(entry)
 							val tmdbId = entry.tmdbId
-							ManagementRow(
+							ListRow(
 								title = entry.displayName.ifBlank { stringResource(R.string.je_management_untitled) },
-								subtitle = listOfNotNull(
-									stringResource(if (entry.mediaType == "tv") R.string.je_management_type_show else R.string.je_management_type_movie),
-									formatDate(entry.requestedAt)?.let { stringResource(R.string.je_management_sg_since, it) },
-								).joinToString(" · "),
+								supporting = listOf(
+									listOfNotNull(
+										stringResource(if (entry.mediaType == "tv") R.string.je_management_type_show else R.string.je_management_type_movie),
+										formatDate(entry.requestedAt)?.let { stringResource(R.string.je_management_sg_since, it) },
+									).joinToString(" · ")
+								),
 								// Pending titles are protected by intent: no TMDB artwork
-								posterUrl = null,
-								fallbackIcon = if (entry.mediaType == "tv") R.drawable.ic_tv else R.drawable.ic_clapperboard,
-								actionLabel = stringResource(R.string.je_management_sg_turn_off),
-								busy = key in busyKeys,
-								onAction = {
-									if (tmdbId != null) confirmRemove(page, key, entry.displayName) {
-										spoilerGuardRepository.setPending(entry.mediaType, tmdbId, null, enabled = false)
-									}
-								},
-								onOpen = if (page.seerrUsable && tmdbId != null) {
-									{ ManagementNavigation.openSeerr(entry.mediaType, tmdbId) }
-								} else null,
+								leading = RowLeading.Poster(null, if (entry.mediaType == "tv") R.drawable.ic_tv else R.drawable.ic_clapperboard),
+								actions = listOf(
+									RowAction(
+										icon = null,
+										label = stringResource(R.string.je_management_sg_turn_off),
+										onClick = {
+											if (tmdbId != null) confirmRemove(page, key, entry.displayName) {
+												spoilerGuardRepository.setPending(entry.mediaType, tmdbId, null, enabled = false)
+											}
+										},
+										busy = key in busyKeys,
+										modifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
+									)
+								),
+								onClick = { if (page.seerrUsable && tmdbId != null) ManagementNavigation.openSeerr(entry.mediaType, tmdbId) },
 								mainModifier = Modifier.focusRequester(listFocus.requester(key)),
-								actionModifier = Modifier.focusRequester(listFocus.requester(actionFocusKey(key))),
 							)
 						}
 					}
@@ -196,50 +215,69 @@ class SpoilerGuardFragment : Fragment() {
 					page.rowKeys.firstOrNull()?.let { key -> listFocus.moveTo(key) }
 				}
 			}
+
+			val removal by confirming.collectAsState()
+			JeConfirmDialog(
+				visible = removal != null,
+				title = stringResource(R.string.je_spoiler_disable_title),
+				body = stringResource(R.string.je_spoiler_disable_message),
+				confirmLabel = stringResource(R.string.je_spoiler_disable_confirm),
+				destructive = true,
+				onConfirm = { removal?.let { applyRemove(it) } },
+				onDismissRequest = { confirming.value = null },
+			)
 		}
 	}
 
-	private fun confirmRemove(page: Page, key: String, name: String, remove: suspend () -> Unit) {
-		val context = context ?: return
-		if (key in busy.value) return
+	@Composable
+	private fun GroupHeader(text: String, count: Int, top: Boolean) {
+		SectionHeader(
+			text = text,
+			count = count,
+			modifier = Modifier.padding(top = if (top) JeSpace.sectionGap - JeSpace.rowGap else 0.dp),
+		)
+	}
 
-		fun apply() {
-			busy.update { it + key }
-			lifecycleScope.launch {
-				try {
-					remove()
-					// Before the row goes: "Turn off" was pressed on its action button, so land on the next row's. With
-					// nothing left, the empty state's Back takes the focus.
-					val latest = (state.value as? LoadState.Ready)?.value ?: page
-					ListFocus.neighbour(latest.rowKeys, listOf(key))?.let { listFocus.moveTo(actionFocusKey(it)) }
-					state.update { current ->
-						if (current !is LoadState.Ready) current
-						else LoadState.Ready(current.value.copy(
-							entries = current.value.entries.filterNot { rowKey(it) == key },
-							pending = current.value.pending.filterNot { rowKey(it) == key },
-						))
-					}
-					val ctx = this@SpoilerGuardFragment.context ?: return@launch
-					Toast.makeText(ctx, ctx.getString(R.string.je_management_sg_removed, name), Toast.LENGTH_SHORT).show()
-				} catch (err: CancellationException) {
-					throw err
-				} catch (err: Exception) {
-					Timber.w(err, "Failed to turn off Spoiler Guard for %s", key)
-					val ctx = this@SpoilerGuardFragment.context ?: return@launch
-					Toast.makeText(ctx, errorMessage(ctx, err), Toast.LENGTH_LONG).show()
-				} finally {
-					busy.update { it - key }
+	/** A pending "Turn off": the row, the title for the toast, and the write. */
+	private class PendingRemoval(val page: Page, val key: String, val name: String, val remove: suspend () -> Unit)
+
+	private fun confirmRemove(page: Page, key: String, name: String, remove: suspend () -> Unit) {
+		if (key in busy.value) return
+		val removal = PendingRemoval(page, key, name, remove)
+		if (page.skipConfirm) applyRemove(removal)
+		else confirming.value = removal
+	}
+
+	private fun applyRemove(removal: PendingRemoval) {
+		val key = removal.key
+		if (key in busy.value) return
+		busy.update { it + key }
+		lifecycleScope.launch {
+			try {
+				removal.remove()
+				// Before the row goes: "Turn off" was pressed on its action button, so land on the next row's. With
+				// nothing left, the empty state's Back takes the focus.
+				val latest = (state.value as? LoadState.Ready)?.value ?: removal.page
+				ListFocus.neighbour(latest.rowKeys, listOf(key))?.let { listFocus.moveTo(actionFocusKey(it)) }
+				state.update { current ->
+					if (current !is LoadState.Ready) current
+					else LoadState.Ready(current.value.copy(
+						entries = current.value.entries.filterNot { rowKey(it) == key },
+						pending = current.value.pending.filterNot { rowKey(it) == key },
+					))
 				}
+				val ctx = this@SpoilerGuardFragment.context ?: return@launch
+				Toast.makeText(ctx, ctx.getString(R.string.je_management_sg_removed, removal.name), Toast.LENGTH_SHORT).show()
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Failed to turn off Spoiler Guard for %s", key)
+				val ctx = this@SpoilerGuardFragment.context ?: return@launch
+				Toast.makeText(ctx, errorMessage(ctx, err), Toast.LENGTH_LONG).show()
+			} finally {
+				busy.update { it - key }
 			}
 		}
-
-		if (page.skipConfirm) apply()
-		else AlertDialog.Builder(context)
-			.setTitle(R.string.je_spoiler_disable_title)
-			.setMessage(R.string.je_spoiler_disable_message)
-			.setPositiveButton(R.string.je_spoiler_disable_confirm) { _, _ -> apply() }
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
 	}
 
 	private companion object {

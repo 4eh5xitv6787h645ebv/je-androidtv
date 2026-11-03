@@ -1,35 +1,24 @@
 package org.jellyfin.androidtv.enhanced.activity
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.Toast
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.Lifecycle
@@ -43,10 +32,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
-import org.jellyfin.androidtv.enhanced.calendar.PageChip
-import org.jellyfin.androidtv.enhanced.calendar.PageImage
-import org.jellyfin.androidtv.enhanced.calendar.PageListRow
-import org.jellyfin.androidtv.enhanced.calendar.PageNotice
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.canOpen
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
@@ -54,14 +39,23 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.Protection
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.ChipRow
+import org.jellyfin.androidtv.enhanced.ui.design.FilterChip
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowDensity
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.SectionHeader
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.design.Tokens
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
@@ -175,8 +169,8 @@ class ActivityFragment : Fragment() {
 	private fun createContent() = content {
 		val state by loadState.collectAsState()
 
-		EnhancedScreen(title = stringResource(R.string.je_activity_title)) {
-			LoadStateContent(state) { feed -> FeedContent(feed) }
+		PageScaffold(title = stringResource(R.string.je_activity_title)) {
+			LoadStateContent(state, loading = SkeletonShape.Rows(density = RowDensity.Compact)) { feed -> FeedContent(feed) }
 		}
 	}
 
@@ -193,17 +187,17 @@ class ActivityFragment : Fragment() {
 		val entryKeys = remember(entries) { entries?.let { ActivityLogic.uniqueKeys(it, ActivityLogic::entryKey) } }
 
 		LazyColumn(
-			contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 4.dp, bottom = 48.dp),
-			verticalArrangement = Arrangement.spacedBy(8.dp),
+			contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, top = 4.dp, bottom = JeSpace.pageBottom),
+			verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
 		) {
 			when (val streamState = currentStreams) {
 				Streams.Hidden, Streams.Loading -> Unit
 				is Streams.Failed -> item(key = "streams-failed") {
-					PageNotice(stringResource(R.string.je_activity_streams_failed, streamState.message ?: stringResource(R.string.je_error_generic)))
+					ActivityNotice(stringResource(R.string.je_activity_streams_failed, streamState.message ?: stringResource(R.string.je_error_generic)))
 				}
 				is Streams.Ready -> {
-					item(key = "streams-header") { SectionHeader(stringResource(R.string.je_activity_streams_title, sessions.size)) }
-					if (sessions.isEmpty()) item(key = "streams-none") { PageNotice(stringResource(R.string.je_activity_streams_none)) }
+					item(key = "streams-header") { GroupHeader(stringResource(R.string.je_activity_streams_title), sessions.size, top = false) }
+					if (sessions.isEmpty()) item(key = "streams-none") { ActivityNotice(stringResource(R.string.je_activity_streams_none)) }
 					itemsIndexed(sessions, key = { index, _ -> sessionKeys[index] }) { index, session ->
 						SessionRow(feed, session, if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
 					}
@@ -211,24 +205,22 @@ class ActivityFragment : Fragment() {
 			}
 
 			if (entries == null || entryKeys == null) {
-				if (currentStreams !is Streams.Ready) item(key = "feed-off") { PageNotice(stringResource(R.string.je_activity_feed_off)) }
+				if (currentStreams !is Streams.Ready) item(key = "feed-off") { ActivityNotice(stringResource(R.string.je_activity_feed_off)) }
 				if (sessions.isEmpty()) {
 					item(key = "back") {
-						Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus)) {
-							Text(stringResource(R.string.je_hub_back))
-						}
+						JeButton(text = stringResource(R.string.je_hub_back), onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus))
 					}
 				}
 				return@LazyColumn
 			}
 
-			item(key = "feed-header") { SectionHeader(stringResource(R.string.je_activity_title)) }
+			item(key = "feed-header") { GroupHeader(stringResource(R.string.je_activity_feed_title), null, top = currentStreams is Streams.Ready) }
 			if (categories.size > 1) {
 				item(key = "chips") {
-					Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+					ChipRow {
 						for (category in categories) {
 							val chipModifier = if (sessions.isEmpty() && category == categories.first()) Modifier.focusRequester(firstFocus) else Modifier
-							PageChip(
+							FilterChip(
 								label = stringResource(categoryLabel(category)),
 								selected = category in currentSelection,
 								onClick = { selected.value = currentSelection.let { if (category in it) it - category else it + category } },
@@ -242,14 +234,12 @@ class ActivityFragment : Fragment() {
 			val nothingFocusable = sessions.isEmpty() && entries.isEmpty() && categories.size <= 1
 			if (nothingFocusable) {
 				item(key = "back") {
-					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus)) {
-						Text(stringResource(R.string.je_hub_back))
-					}
+					JeButton(text = stringResource(R.string.je_hub_back), onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(firstFocus))
 				}
 			}
 			if (entries.isEmpty()) {
 				item(key = "feed-empty") {
-					PageNotice(stringResource(if (currentSelection.isEmpty()) R.string.je_activity_empty else R.string.je_activity_empty_filtered))
+					ActivityNotice(stringResource(if (currentSelection.isEmpty()) R.string.je_activity_empty else R.string.je_activity_empty_filtered))
 				}
 			}
 			itemsIndexed(entries, key = { index, _ -> entryKeys[index] }) { index, entry ->
@@ -266,8 +256,14 @@ class ActivityFragment : Fragment() {
 	}
 
 	@Composable
-	private fun SectionHeader(text: String) {
-		Text(text = text, fontSize = 20.sp, color = Tokens.Color.colorWhite, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+	private fun GroupHeader(text: String, count: Int?, top: Boolean) {
+		SectionHeader(text = text, count = count, modifier = Modifier.padding(top = if (top) JeSpace.sectionGap - JeSpace.rowGap else 0.dp))
+	}
+
+	/** A failed source, an empty section or the feed being off: an inline notice in the list. */
+	@Composable
+	private fun ActivityNotice(text: String) {
+		Notice(NoticeKind.Info, text, inline = true)
 	}
 
 	private fun categoryLabel(type: ActivityType) = when (type) {
@@ -304,19 +300,20 @@ class ActivityFragment : Fragment() {
 		val detail = listOfNotNull(
 			age,
 			if (entry.type == ActivityType.WATCHED && !entry.completed) stringResource(R.string.je_activity_progress, ActivityLogic.percent(entry.progress)) else null,
-		).joinToString("  ·  ")
+		).joinToString(" · ")
+		val review = entry.content?.takeIf { it.isNotBlank() && entry.type == ActivityType.REVIEWED && !hideReview }
 
-		PageListRow(onClick = { item?.id?.toUUIDOrNull()?.let(::open) }, modifier = modifier) {
-			Avatar(entry.userId, entry.userName, entry.userHasPrimaryImage)
-			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(text = line, fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-				Text(text = detail, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
-				entry.content?.takeIf { it.isNotBlank() && entry.type == ActivityType.REVIEWED && !hideReview }?.let {
-					Text(text = it, fontSize = 14.sp, color = secondaryTextColor(), maxLines = 2, overflow = TextOverflow.Ellipsis)
-				}
-			}
-			if (item != null) PageImage(url = posterUrl(item.id, item.seriesId, item.hasPrimaryImage, item.seriesHasPrimaryImage), modifier = Modifier.size(40.dp, 60.dp))
-		}
+		ListRow(
+			title = line,
+			leading = RowLeading.Poster(
+				item?.let { posterUrl(it.id, it.seriesId, it.hasPrimaryImage, it.seriesHasPrimaryImage) },
+				R.drawable.je_ic_activity_timeline,
+			),
+			supporting = listOfNotNull(detail, review),
+			onClick = { item?.id?.toUUIDOrNull()?.let(::open) },
+			mainModifier = modifier,
+			density = RowDensity.Compact,
+		)
 	}
 
 	@Composable
@@ -335,17 +332,18 @@ class ActivityFragment : Fragment() {
 			playMethodLabel(playState?.playMethod),
 			if (playState?.isPaused == true) stringResource(R.string.je_activity_streams_paused) else null,
 			ActivityLogic.sessionPercent(playState?.positionTicks, item?.runTimeTicks)?.let { "$it%" },
-		).joinToString("  ·  ")
+		).joinToString(" · ")
+		val percent = ActivityLogic.sessionPercent(playState?.positionTicks, item?.runTimeTicks)
 
-		PageListRow(onClick = { item?.id?.toUUIDOrNull()?.let(::open) }, modifier = modifier) {
-			Avatar(session.userId, session.userName, session.userHasPrimaryImage)
-			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(text = title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				Text(text = who, fontSize = 14.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
-				if (status.isNotEmpty()) Text(text = status, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
-			}
-			if (item != null) PageImage(url = posterUrl(item.id, item.seriesId, true, item.seriesId != null), modifier = Modifier.size(40.dp, 60.dp))
-		}
+		ListRow(
+			title = title,
+			leading = RowLeading.Avatar(avatarUrl(session.userId, session.userHasPrimaryImage), session.userName),
+			supporting = listOfNotNull(who.ifBlank { null }, status.ifBlank { null }),
+			progress = percent?.let { it / 100f },
+			onClick = { item?.id?.toUUIDOrNull()?.let(::open) },
+			mainModifier = modifier,
+			density = RowDensity.Compact,
+		)
 	}
 
 	@Composable
@@ -356,23 +354,8 @@ class ActivityFragment : Fragment() {
 		else -> method?.takeIf { it.isNotBlank() }
 	}
 
-	@Composable
-	private fun Avatar(userId: String, userName: String, hasImage: Boolean) {
-		val url = if (hasImage && userId.isNotBlank()) enhancedApi.imageUrl("/Users/$userId/Images/Primary", null, 96) else null
-		if (url != null) {
-			PageImage(url = url, modifier = Modifier.size(44.dp).clip(CircleShape))
-		} else {
-			Box(
-				contentAlignment = Alignment.Center,
-				modifier = Modifier
-					.size(44.dp)
-					.clip(CircleShape)
-					.background(Tokens.Color.colorGrey700),
-			) {
-				Text(text = userName.take(1).uppercase(), fontSize = 18.sp)
-			}
-		}
-	}
+	private fun avatarUrl(userId: String, hasImage: Boolean): String? =
+		if (hasImage && userId.isNotBlank()) enhancedApi.imageUrl("/Users/$userId/Images/Primary", null, 96) else null
 
 	/** Episodes use the show's poster (an episode's own image is often a random frame), like the web feed. */
 	private fun posterUrl(itemId: String, seriesId: String?, hasPrimary: Boolean, seriesHasPrimary: Boolean): String? = when {

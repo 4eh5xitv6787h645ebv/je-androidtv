@@ -1,21 +1,11 @@
 package org.jellyfin.androidtv.enhanced.calendar
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
@@ -25,7 +15,8 @@ import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
 import org.jellyfin.design.Tokens
 import java.util.UUID
 
-// Small pieces shared by the Calendar, Bookmarks, Activity and About pages.
+// Small pieces shared by the Calendar, Bookmarks, Activity and About pages. PageChip and PageImage remain for Catch Up
+// until it moves to the design system (FilterChip, MediaCard / ListRow artwork).
 
 /** Like [runCatching], but lets coroutine cancellation through instead of turning it into a failure. */
 internal inline fun <T> attempt(block: () -> T): Result<T> = try {
@@ -64,30 +55,6 @@ internal fun PageChip(label: String, selected: Boolean, onClick: () -> Unit, mod
 	}
 }
 
-/** A focusable full-width list row; long-press OK runs [onLongClick]. */
-@Composable
-internal fun PageListRow(
-	onClick: () -> Unit,
-	modifier: Modifier = Modifier,
-	onLongClick: (() -> Unit)? = null,
-	content: @Composable RowScope.() -> Unit,
-) {
-	Button(
-		onClick = onClick,
-		onLongClick = onLongClick,
-		shape = JellyfinTheme.shapes.medium,
-		contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp),
-		modifier = modifier.fillMaxWidth(),
-	) {
-		Row(
-			horizontalArrangement = Arrangement.spacedBy(16.dp),
-			verticalAlignment = Alignment.CenterVertically,
-			modifier = Modifier.fillMaxWidth(),
-			content = content,
-		)
-	}
-}
-
 /** An image from a URL (server or external) on a neutral background, so missing artwork keeps the layout. */
 @Composable
 internal fun PageImage(url: String?, modifier: Modifier = Modifier) {
@@ -105,15 +72,4 @@ internal fun PageImage(url: String?, modifier: Modifier = Modifier) {
 			)
 		}
 	}
-}
-
-/** A one-line inline notice (a failed source, a partial result). */
-@Composable
-internal fun PageNotice(text: String, modifier: Modifier = Modifier) {
-	Text(
-		text = text,
-		color = secondaryTextColor(),
-		fontSize = 14.sp,
-		modifier = modifier.padding(vertical = 2.dp),
-	)
 }

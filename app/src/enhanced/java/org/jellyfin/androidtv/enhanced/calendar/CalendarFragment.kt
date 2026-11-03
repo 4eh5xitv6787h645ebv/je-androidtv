@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.calendar
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -12,7 +11,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -26,9 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
 import androidx.lifecycle.lifecycleScope
@@ -45,14 +41,27 @@ import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.ChipRow
+import org.jellyfin.androidtv.enhanced.ui.design.ChipSeparator
+import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.FilterChip
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeIconButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatuses
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.Notice
+import org.jellyfin.androidtv.enhanced.ui.design.NoticeKind
+import org.jellyfin.androidtv.enhanced.ui.design.Overline
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowDensity
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.SectionHeader
+import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.design.Tokens
 import org.jellyfin.sdk.model.serializer.toUUIDOrNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
@@ -273,26 +282,32 @@ class CalendarFragment : Fragment() {
 		val rangeFormat = remember { DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM) }
 		val todayFocus = remember { FocusRequester() }
 
-		EnhancedScreen(
+		PageScaffold(
 			title = stringResource(R.string.je_calendar_title),
 			subtitle = stringResource(
 				R.string.je_calendar_range,
 				windowStart.format(rangeFormat),
 				windowStart.plusDays(CalendarLogic.WINDOW_DAYS - 1).format(rangeFormat),
 			),
-			headerActions = {
-				Button(onClick = { moveTo(CalendarLogic.shiftWeeks(windowStart, -1, firstDay)) }) {
-					Text(stringResource(R.string.je_calendar_previous_week))
-				}
-				Button(onClick = { moveTo(LocalDate.now(zone)) }, modifier = Modifier.focusRequester(todayFocus)) {
-					Text(stringResource(R.string.je_calendar_today))
-				}
-				Button(onClick = { moveTo(CalendarLogic.shiftWeeks(windowStart, 1, firstDay)) }) {
-					Text(stringResource(R.string.je_calendar_next_week))
-				}
+			actions = {
+				JeIconButton(
+					icon = R.drawable.je_ic_calendar_chevron_left,
+					contentDescription = stringResource(R.string.je_calendar_previous_week),
+					onClick = { moveTo(CalendarLogic.shiftWeeks(windowStart, -1, firstDay)) },
+				)
+				JeButton(
+					text = stringResource(R.string.je_calendar_today),
+					onClick = { moveTo(LocalDate.now(zone)) },
+					modifier = Modifier.focusRequester(todayFocus),
+				)
+				JeIconButton(
+					icon = R.drawable.je_design_ic_chevron_right,
+					contentDescription = stringResource(R.string.je_calendar_next_week),
+					onClick = { moveTo(CalendarLogic.shiftWeeks(windowStart, 1, firstDay)) },
+				)
 			},
 		) {
-			LoadStateContent(state) { loaded ->
+			LoadStateContent(state, loading = SkeletonShape.Rows(density = RowDensity.Large)) { loaded ->
 				Agenda(loaded, currentFilter, todayFocus)
 			}
 		}
@@ -318,38 +333,42 @@ class CalendarFragment : Fragment() {
 		Column(modifier = Modifier.fillMaxSize()) {
 			Filters(loaded, currentFilter)
 
-			Column(modifier = Modifier.padding(horizontal = 48.dp)) {
+			Column(
+				modifier = Modifier.padding(horizontal = JeSpace.pageHorizontal),
+				verticalArrangement = Arrangement.spacedBy(4.dp),
+			) {
 				for (error in loaded.response.errors) {
-					PageNotice(stringResource(R.string.je_calendar_source_failed, error.instanceName ?: error.source.orEmpty(), error.reason.orEmpty()))
+					CalendarNotice(stringResource(R.string.je_calendar_source_failed, error.instanceName ?: error.source.orEmpty(), error.reason.orEmpty()))
 				}
-				if (loaded.seerrEnabled && loaded.requested == null) PageNotice(stringResource(R.string.je_calendar_requests_failed))
-				if (loaded.requestedTruncated) PageNotice(stringResource(R.string.je_calendar_requests_truncated, CalendarRepository.MAX_REQUEST_PAGES * CalendarRepository.REQUEST_PAGE_SIZE))
-				if (!loaded.spoiler.complete) PageNotice(stringResource(R.string.je_calendar_spoiler_unavailable))
+				if (loaded.seerrEnabled && loaded.requested == null) CalendarNotice(stringResource(R.string.je_calendar_requests_failed))
+				if (loaded.requestedTruncated) CalendarNotice(stringResource(R.string.je_calendar_requests_truncated, CalendarRepository.MAX_REQUEST_PAGES * CalendarRepository.REQUEST_PAGE_SIZE))
+				if (!loaded.spoiler.complete) CalendarNotice(stringResource(R.string.je_calendar_spoiler_unavailable))
 				// A source that failed only for the upcoming range would make guarded releases vanish from both groups
 				val upcomingErrors = loaded.upcoming?.errors.orEmpty()
 				if (upcomingErrors.isNotEmpty()) {
 					Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-						PageNotice(stringResource(R.string.je_calendar_upcoming_failed, CalendarLogic.sourceNames(upcomingErrors).joinToString()))
-						Button(onClick = { reload(retry = true) }) { Text(stringResource(R.string.je_retry)) }
+						CalendarNotice(stringResource(R.string.je_calendar_upcoming_failed, CalendarLogic.sourceNames(upcomingErrors).joinToString()))
+						JeButton(text = stringResource(R.string.je_design_retry), onClick = { reload(retry = true) })
 					}
 				}
 			}
 
 			if (agenda.isEmpty) {
 				val filtered = currentFilter != CalendarFilter() || loaded.config.forceOnlyRequested
-				Text(
-					text = stringResource(if (filtered) R.string.je_calendar_empty_filtered else R.string.je_calendar_empty),
-					color = secondaryTextColor(),
-					fontSize = 18.sp,
-					modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
+				// The week buttons in the header are the way on: the focus goes to Today, as before
+				EmptyState(
+					title = stringResource(if (filtered) R.string.je_calendar_empty_filtered else R.string.je_calendar_empty),
+					icon = R.drawable.ic_calendar,
+					action = null,
+					modifier = Modifier.weight(1f),
 				)
 				LaunchedEffect(loaded) { requestInitialFocus(fallbackFocus) }
 				return@Column
 			}
 
 			LazyColumn(
-				contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
-				verticalArrangement = Arrangement.spacedBy(8.dp),
+				contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, top = 4.dp, bottom = JeSpace.pageBottom),
+				verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
 			) {
 				val firstEvent = agenda.days.firstOrNull()?.second?.first() ?: agenda.undated.first()
 				for ((day, events) in agenda.days) {
@@ -359,7 +378,7 @@ class CalendarFragment : Fragment() {
 					}
 				}
 				if (agenda.undated.isNotEmpty()) {
-					item(key = "undated") { GroupHeader(stringResource(R.string.je_calendar_undated)) }
+					item(key = "undated") { Overline(stringResource(R.string.je_calendar_undated), Modifier.padding(top = JeSpace.sectionGap - JeSpace.rowGap)) }
 					items(agenda.undated, key = { "${it.source}-${it.instanceName}-${it.eventId}" }) { event ->
 						EventRow(loaded, event, requested, if (event === firstEvent) Modifier.focusRequester(firstEventFocus) else Modifier)
 					}
@@ -378,32 +397,33 @@ class CalendarFragment : Fragment() {
 				.sorted()
 		}
 
-		Row(
-			horizontalArrangement = Arrangement.spacedBy(8.dp),
-			verticalAlignment = Alignment.CenterVertically,
+		val requestedChip = loaded.seerrEnabled && loaded.requested != null && !loaded.config.forceOnlyRequested
+		ChipRow(
 			modifier = Modifier
 				.horizontalScroll(rememberScrollState())
-				.padding(horizontal = 48.dp, vertical = 4.dp),
+				.padding(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, bottom = JeSpace.headerBottom),
 		) {
 			if (sources.size > 1) {
 				for (source in sources) {
-					PageChip(source, source in currentFilter.sources, onClick = {
+					FilterChip(source, source in currentFilter.sources, onClick = {
 						filter.value = currentFilter.copy(sources = currentFilter.sources.toggle(source))
 					})
 				}
+				ChipSeparator()
 			}
-			PageChip(stringResource(R.string.je_calendar_movies), CalendarFilter.Kind.MOVIE in currentFilter.kinds, onClick = {
+			FilterChip(stringResource(R.string.je_calendar_movies), CalendarFilter.Kind.MOVIE in currentFilter.kinds, onClick = {
 				filter.value = currentFilter.copy(kinds = currentFilter.kinds.toggle(CalendarFilter.Kind.MOVIE))
 			})
-			PageChip(stringResource(R.string.je_calendar_episodes), CalendarFilter.Kind.EPISODE in currentFilter.kinds, onClick = {
+			FilterChip(stringResource(R.string.je_calendar_episodes), CalendarFilter.Kind.EPISODE in currentFilter.kinds, onClick = {
 				filter.value = currentFilter.copy(kinds = currentFilter.kinds.toggle(CalendarFilter.Kind.EPISODE))
 			})
-			PageChip(stringResource(R.string.je_calendar_has_file), currentFilter.hasFileOnly, onClick = {
+			ChipSeparator()
+			FilterChip(stringResource(R.string.je_calendar_has_file), currentFilter.hasFileOnly, onClick = {
 				filter.value = currentFilter.copy(hasFileOnly = !currentFilter.hasFileOnly)
 			})
 			// Enforced server-side filtering needs no chip; without a request list there's nothing to filter by
-			if (loaded.seerrEnabled && loaded.requested != null && !loaded.config.forceOnlyRequested) {
-				PageChip(stringResource(R.string.je_calendar_requested), currentFilter.requestedOnly, onClick = {
+			if (requestedChip) {
+				FilterChip(stringResource(R.string.je_calendar_requested), currentFilter.requestedOnly, onClick = {
 					filter.value = currentFilter.copy(requestedOnly = !currentFilter.requestedOnly)
 				})
 			}
@@ -424,12 +444,13 @@ class CalendarFragment : Fragment() {
 
 	@Composable
 	private fun GroupHeader(label: String) {
-		Text(
-			text = label,
-			fontSize = 20.sp,
-			color = Tokens.Color.colorWhite,
-			modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
-		)
+		SectionHeader(text = label, modifier = Modifier.padding(top = JeSpace.sectionGap - JeSpace.rowGap))
+	}
+
+	/** A failed source or a partial result: an inline warning above the agenda. */
+	@Composable
+	private fun CalendarNotice(text: String) {
+		Notice(NoticeKind.Warning, text, inline = true)
 	}
 
 	@Composable
@@ -448,21 +469,21 @@ class CalendarFragment : Fragment() {
 			// "Series finale" is a plot fact: never for a guarded title
 			if (protection.guarded) null else finaleLabel(event.finaleType),
 			event.instanceName?.takeIf { it.isNotBlank() } ?: event.source.takeIf { it.isNotBlank() },
-		).joinToString("  ·  ")
+		).joinToString(" · ")
 		val isRequested = event.requestKey?.let { it in requested } == true
 
-		PageListRow(onClick = { open(event) }, modifier = modifier) {
-			PageImage(url = poster, modifier = Modifier.size(56.dp, 84.dp))
-			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-				Text(text = event.title, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				subtitle?.let { Text(text = it, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-				if (meta.isNotEmpty()) Text(text = meta, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
-			}
-			Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-				if (event.hasFile) Text(stringResource(R.string.je_calendar_marker_downloaded), fontSize = 13.sp, color = Tokens.Color.colorGreen300)
-				if (isRequested) Text(stringResource(R.string.je_calendar_marker_requested), fontSize = 13.sp, color = Tokens.Color.colorOrange300)
-			}
-		}
+		ListRow(
+			title = event.title,
+			leading = RowLeading.Poster(poster, if (event.isMovie) R.drawable.ic_clapperboard else R.drawable.ic_tv),
+			badges = listOfNotNull(
+				JeStatuses.label("Downloaded").takeIf { event.hasFile },
+				JeStatuses.label("Requested").takeIf { isRequested },
+			),
+			supporting = listOfNotNull(subtitle, meta.ifEmpty { null }),
+			onClick = { open(event) },
+			mainModifier = modifier,
+			density = RowDensity.Large,
+		)
 	}
 
 	@Composable

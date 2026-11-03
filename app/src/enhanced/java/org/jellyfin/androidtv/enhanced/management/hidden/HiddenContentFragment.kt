@@ -1,7 +1,5 @@
 package org.jellyfin.androidtv.enhanced.management.hidden
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
-import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -9,13 +7,13 @@ import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.pluralStringResource
@@ -35,19 +33,27 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.management.ManagementNavigation
-import org.jellyfin.androidtv.enhanced.management.ManagementRow
 import org.jellyfin.androidtv.enhanced.management.actionFocusKey
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.management.formatDate
 import org.jellyfin.androidtv.enhanced.management.libraryPosterUrls
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
-import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
+import org.jellyfin.androidtv.enhanced.ui.design.ChoiceChip
+import org.jellyfin.androidtv.enhanced.ui.design.EmptyState
+import org.jellyfin.androidtv.enhanced.ui.design.JeButton
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
+import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
+import org.jellyfin.androidtv.enhanced.ui.design.JeStatus
+import org.jellyfin.androidtv.enhanced.ui.design.ListRow
+import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
+import org.jellyfin.androidtv.enhanced.ui.design.PageScaffold
+import org.jellyfin.androidtv.enhanced.ui.design.RowAction
+import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
+import org.jellyfin.androidtv.enhanced.ui.design.StatusBadgeSpec
+import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
-import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
-import org.jellyfin.design.Tokens
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 import java.util.UUID
@@ -81,6 +87,8 @@ class HiddenContentFragment : Fragment() {
 
 	private val state = MutableStateFlow<LoadState<Page>>(LoadState.Loading)
 	private val filters = MutableStateFlow(Filters())
+	/** The entries "Restore all" is asking about, while its confirmation is open. */
+	private val restoreAllPending = MutableStateFlow<List<HiddenEntry>?>(null)
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
 	private val listFocus = ListFocus()
 	private var started = false
@@ -160,23 +168,33 @@ class HiddenContentFragment : Fragment() {
 		val page = (load as? LoadState.Ready)?.value
 		val visible = page?.let { HiddenEntries.filter(it.entries, currentFilters.scope, currentFilters.type) }.orEmpty()
 
-		EnhancedScreen(
+		val scopeOptions = HiddenScopeFilter.entries.map { stringResource(it.label()) }
+		val typeOptions = HiddenTypeFilter.entries.map { stringResource(it.label()) }
+
+		PageScaffold(
 			title = stringResource(R.string.je_management_hc_title),
 			subtitle = page?.let { pluralStringResource(R.plurals.je_management_hc_count, it.entries.size, it.entries.size) },
-			headerActions = if (page != null && page.entries.isNotEmpty()) {
+			actions = if (page != null && page.entries.isNotEmpty()) {
 				{
 					// Where the focus goes when the filtered list empties but other entries remain
-					Button(
-						onClick = { filters.update { it.copy(scope = it.scope.next()) } },
+					ChoiceChip(
+						label = stringResource(R.string.je_management_hc_where),
+						options = scopeOptions,
+						selected = currentFilters.scope.ordinal,
+						onSelect = { index -> filters.update { it.copy(scope = HiddenScopeFilter.entries[index]) } },
 						modifier = Modifier.focusRequester(listFocus.requester(HEADER_FOCUS)),
-					) {
-						Text(stringResource(R.string.je_management_hc_filter_scope, stringResource(currentFilters.scope.label())))
-					}
-					Button(onClick = { filters.update { it.copy(type = it.type.next()) } }) {
-						Text(stringResource(R.string.je_management_hc_filter_type, stringResource(currentFilters.type.label())))
-					}
-					if (visible.isNotEmpty()) Button(onClick = { confirmRestoreAll(visible) }) {
-						Text(stringResource(R.string.je_management_hc_restore_all, visible.size))
+					)
+					ChoiceChip(
+						label = stringResource(R.string.je_management_hc_type),
+						options = typeOptions,
+						selected = currentFilters.type.ordinal,
+						onSelect = { index -> filters.update { it.copy(type = HiddenTypeFilter.entries[index]) } },
+					)
+					if (visible.isNotEmpty()) {
+						JeButton(
+							text = stringResource(R.string.je_management_hc_restore_all, visible.size),
+							onClick = { restoreAllPending.value = visible },
+						)
 					}
 				}
 			} else null,
@@ -185,21 +203,22 @@ class HiddenContentFragment : Fragment() {
 				state = load,
 				empty = { it.entries.isEmpty() },
 				emptyMessage = stringResource(R.string.je_management_hc_empty),
+				emptyIcon = R.drawable.je_ic_visibility_off,
 			) { ready ->
 				listFocus.Effect()
 
 				if (visible.isEmpty()) {
-					Text(
-						text = stringResource(R.string.je_management_hc_filter_empty),
-						color = secondaryTextColor(),
-						modifier = Modifier.padding(horizontal = 48.dp, vertical = 16.dp),
+					val clearLabel = stringResource(R.string.je_management_hc_clear_filters)
+					EmptyState(
+						title = stringResource(R.string.je_management_hc_filter_empty),
+						action = remember(clearLabel) { EmptyAction(clearLabel) { filters.value = Filters() } },
 					)
 					return@LoadStateContent
 				}
 
 				LazyColumn(
-					contentPadding = PaddingValues(top = 8.dp, bottom = 32.dp),
-					verticalArrangement = Arrangement.spacedBy(8.dp),
+					contentPadding = PaddingValues(start = JeSpace.pageHorizontal, end = JeSpace.pageHorizontal, top = 4.dp, bottom = JeSpace.pageBottom),
+					verticalArrangement = Arrangement.spacedBy(JeSpace.rowGap),
 				) {
 					items(visible, key = { it.key }) { entry ->
 						val title = HiddenEntries.displayTitle(entry, ready.guardedSeries).ifBlank { stringResource(R.string.je_management_untitled) }
@@ -220,6 +239,17 @@ class HiddenContentFragment : Fragment() {
 					visible.firstOrNull()?.let { listFocus.moveTo(it.key) }
 				}
 			}
+
+			val restoring by restoreAllPending.collectAsState()
+			val restoreCount = rememberLastNonNull(restoring)?.size ?: 0
+			JeConfirmDialog(
+				visible = restoring != null,
+				title = pluralStringResource(R.plurals.je_management_hc_restore_all_title, restoreCount, restoreCount),
+				body = stringResource(R.string.je_management_hc_restore_all_message),
+				confirmLabel = stringResource(R.string.je_management_hc_restore),
+				onConfirm = { restoring?.let { restoreAll(it) } },
+				onDismissRequest = { restoreAllPending.value = null },
+			)
 		}
 	}
 
@@ -240,28 +270,34 @@ class HiddenContentFragment : Fragment() {
 			formatDate(entry.hiddenAt)?.let { stringResource(R.string.je_management_hc_hidden_on, it) },
 		).joinToString(" · ")
 
-		ManagementRow(
+		val onOpen: (() -> Unit)? = when {
+			itemId != null -> {
+				{ ManagementNavigation.openDetails(itemId) }
+			}
+
+			page.seerrUsable && tmdbId != null && (entry.type.equals("Movie", true) || entry.type.equals("Series", true)) -> {
+				{ ManagementNavigation.openSeerr(entry.mediaType, tmdbId) }
+			}
+
+			else -> null
+		}
+
+		ListRow(
 			title = title,
-			subtitle = subtitle,
-			posterUrl = posterUrl(page, entry),
-			fallbackIcon = if (entry.mediaType == "tv") R.drawable.ic_tv else R.drawable.ic_clapperboard,
-			actionLabel = stringResource(if (entry.isGlobal) R.string.je_unhide else R.string.je_management_hc_restore),
-			busy = busy,
-			onAction = onAction,
-			onOpen = when {
-				itemId != null -> {
-					{ ManagementNavigation.openDetails(itemId) }
-				}
-
-				page.seerrUsable && tmdbId != null && (entry.type.equals("Movie", true) || entry.type.equals("Series", true)) -> {
-					{ ManagementNavigation.openSeerr(entry.mediaType, tmdbId) }
-				}
-
-				else -> null
-			},
+			supporting = listOf(subtitle),
+			leading = RowLeading.Poster(posterUrl(page, entry), if (entry.mediaType == "tv") R.drawable.ic_tv else R.drawable.ic_clapperboard),
+			badges = listOf(StatusBadgeSpec(JeStatus.Neutral, stringResource(entry.scopeLabel()))),
+			actions = listOf(
+				RowAction(
+					icon = null,
+					label = stringResource(if (entry.isGlobal) R.string.je_unhide else R.string.je_management_hc_restore),
+					onClick = onAction,
+					busy = busy,
+					modifier = actionModifier,
+				)
+			),
+			onClick = { onOpen?.invoke() },
 			mainModifier = mainModifier,
-			actionModifier = actionModifier,
-			chips = listOf(stringResource(entry.scopeLabel())),
 		)
 	}
 
@@ -309,35 +345,27 @@ class HiddenContentFragment : Fragment() {
 		}
 	}
 
-	private fun confirmRestoreAll(entries: List<HiddenEntry>) {
-		val context = context ?: return
+	private fun restoreAll(entries: List<HiddenEntry>) {
 		val keys = entries.map { it.key }.toSet()
-		AlertDialog.Builder(context)
-			.setTitle(context.resources.getQuantityString(R.plurals.je_management_hc_restore_all_title, keys.size, keys.size))
-			.setMessage(R.string.je_management_hc_restore_all_message)
-			.setPositiveButton(R.string.je_management_hc_restore) { _, _ ->
-				busy.update { it + keys }
-				lifecycleScope.launch {
-					try {
-						// One whole-document write for the lot; entries added meanwhile are kept
-						hiddenContentRepository.removeEntries(keys)
-						// "Restore all" goes away with the filtered list
-						listFocus.moveTo(if (hasEntriesBesides(keys)) HEADER_FOCUS else null)
-						removeLocally(keys)
-						load(showLoading = false)
-					} catch (err: CancellationException) {
-						throw err
-					} catch (err: Exception) {
-						Timber.w(err, "Failed to restore hidden content")
-						val ctx = this@HiddenContentFragment.context ?: return@launch
-						Toast.makeText(ctx, errorMessage(ctx, err), Toast.LENGTH_LONG).show()
-					} finally {
-						busy.update { it - keys }
-					}
-				}
+		busy.update { it + keys }
+		lifecycleScope.launch {
+			try {
+				// One whole-document write for the lot; entries added meanwhile are kept
+				hiddenContentRepository.removeEntries(keys)
+				// "Restore all" goes away with the filtered list
+				listFocus.moveTo(if (hasEntriesBesides(keys)) HEADER_FOCUS else null)
+				removeLocally(keys)
+				load(showLoading = false)
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Failed to restore hidden content")
+				val ctx = this@HiddenContentFragment.context ?: return@launch
+				Toast.makeText(ctx, errorMessage(ctx, err), Toast.LENGTH_LONG).show()
+			} finally {
+				busy.update { it - keys }
 			}
-			.setNegativeButton(android.R.string.cancel, null)
-			.show()
+		}
 	}
 
 	/**
@@ -361,9 +389,6 @@ class HiddenContentFragment : Fragment() {
 
 	private companion object {
 		const val HEADER_FOCUS = "header-scope-filter"
-
-		fun HiddenScopeFilter.next() = HiddenScopeFilter.entries[(ordinal + 1) % HiddenScopeFilter.entries.size]
-		fun HiddenTypeFilter.next() = HiddenTypeFilter.entries[(ordinal + 1) % HiddenTypeFilter.entries.size]
 
 		@StringRes
 		fun HiddenScopeFilter.label() = when (this) {
