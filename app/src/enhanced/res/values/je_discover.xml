@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Discover page -->
+    <string name="je_discover_title">Discover</string>
+    <string name="je_discover_description">Trending, popular and upcoming titles to request on Seerr</string>
+    <string name="je_discover_unavailable">Discover isn\'t turned on for this server or your account.</string>
+    <string name="je_discover_trending">Trending</string>
+    <string name="je_discover_popular_movies">Popular movies</string>
+    <string name="je_discover_popular_tv">Popular TV shows</string>
+    <string name="je_discover_upcoming_movies">Upcoming movies</string>
+    <string name="je_discover_upcoming_tv">Upcoming TV shows</string>
+    <string name="je_discover_movie_genres">Movie genres</string>
+    <string name="je_discover_tv_genres">TV genres</string>
+    <string name="je_discover_studios">Studios</string>
+    <string name="je_discover_networks">Networks</string>
+
+    <!-- Discovery grid sort presets -->
+    <string name="je_discover_sort">Sort:</string>
+    <string name="je_discover_sort_popular">Popular</string>
+    <string name="je_discover_sort_top_rated">Top rated</string>
+    <string name="je_discover_sort_newest">Newest</string>
+    <string name="je_discover_sort_oldest">Oldest</string>
+
+    <!-- Random pick -->
+    <string name="je_discover_random">Pick something for me</string>
+    <string name="je_discover_random_picking">Picking…</string>
+    <string name="je_discover_random_title">Pick something</string>
+    <string name="je_discover_random_description">Opens a random movie or show from your library</string>
+    <string name="je_discover_random_no_types">Random picks are set to include neither movies nor shows. Change it in the Jellyfin Enhanced settings.</string>
+    <string name="je_discover_random_nothing">Nothing found in your library.</string>
+    <string name="je_discover_random_nothing_unwatched">Nothing unwatched found in your library.</string>
+    <string name="je_discover_random_source_missing">Your random source no longer exists, so this was picked from the whole library.</string>
+    <string name="je_discover_random_source_empty">Nothing to pick in %1$s, so this was picked from the whole library.</string>
+</resources>

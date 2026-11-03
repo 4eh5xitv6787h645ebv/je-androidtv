@@ -190,7 +190,100 @@ sealed interface SeerrSource {
 	@Serializable
 	@SerialName("similar")
 	data class Similar(val mediaType: String, val tmdbId: Int, override val title: String) : SeerrSource
+
+	/** One of the plugin's fixed Discover feeds (Trending, Popular, Upcoming). */
+	@Serializable
+	@SerialName("discover")
+	data class Discover(val feed: SeerrDiscoverFeed, override val title: String) : SeerrSource
+
+	/** A TMDB genre of one media type, by id (the Discover screen's genre tiles). */
+	@Serializable
+	@SerialName("discover-genre")
+	data class DiscoverGenre(val mediaType: String, val genreId: Int, override val title: String) : SeerrSource
+
+	/**
+	 * A TMDB production company by id: its movies, plus its series when the plugin has a TMDB key (Seerr itself
+	 * only filters series by network). The Discover screen's Studios tiles.
+	 */
+	@Serializable
+	@SerialName("company")
+	data class Company(val companyId: Int, override val title: String) : SeerrSource
+
+	/**
+	 * A TMDB TV network by id, plus the movies of [companyId], the network's own production company, when it has a
+	 * clean one. The Discover screen's Networks tiles.
+	 */
+	@Serializable
+	@SerialName("network")
+	data class Network(val networkId: Int, val companyId: Int?, override val title: String) : SeerrSource
+
+	/** All parts of a TMDB collection, oldest first. */
+	@Serializable
+	@SerialName("collection")
+	data class Collection(val collectionTmdbId: Int, override val title: String) : SeerrSource
 }
+
+/** The plugin's fixed `jellyseerr/discover/...` feeds, in the web's Discover page order. */
+@Serializable
+enum class SeerrDiscoverFeed(
+	val path: String,
+	/** The media type every result has, or null for the mixed Trending feed. */
+	val mediaType: String?,
+) {
+	@SerialName("trending")
+	TRENDING("jellyseerr/discover/trending", null),
+
+	@SerialName("movies")
+	POPULAR_MOVIES("jellyseerr/discover/movies", "movie"),
+
+	@SerialName("tv")
+	POPULAR_TV("jellyseerr/discover/tv", "tv"),
+
+	@SerialName("movies-upcoming")
+	UPCOMING_MOVIES("jellyseerr/discover/movies/upcoming", "movie"),
+
+	@SerialName("tv-upcoming")
+	UPCOMING_TV("jellyseerr/discover/tv/upcoming", "tv");
+
+	val upcoming get() = this == UPCOMING_MOVIES || this == UPCOMING_TV
+}
+
+/**
+ * Sort presets of the discovery grid, the same four the web offers. [POPULAR] sends no `sortBy` (Seerr's default
+ * is popularity). TV feeds sort by first air date instead of release date.
+ */
+@Serializable
+enum class SeerrSort(private val movieSortBy: String?) {
+	POPULAR(null),
+	TOP_RATED("vote_average.desc"),
+	NEWEST("release_date.desc"),
+	OLDEST("release_date.asc");
+
+	/** The `sortBy` query value for a feed of [mediaType], or null to leave Seerr's default order. */
+	fun sortBy(mediaType: String?): String? =
+		if (mediaType == "tv") movieSortBy?.replace("release_date", "first_air_date") else movieSortBy
+}
+
+/**
+ * Whether the source's feeds accept a `sortBy`. Only Seerr's plain movie/TV discover routes (with or without a
+ * genre, company, network or keyword) read it; Trending and Upcoming answer 400 to it, and recommendations,
+ * person credits and collections have a fixed order.
+ */
+val SeerrSource.sortable: Boolean
+	get() = when (this) {
+		is SeerrSource.Discover -> feed == SeerrDiscoverFeed.POPULAR_MOVIES || feed == SeerrDiscoverFeed.POPULAR_TV
+		is SeerrSource.DiscoverGenre,
+		is SeerrSource.Company,
+		is SeerrSource.Network,
+		is SeerrSource.Genre,
+		is SeerrSource.Studio,
+		is SeerrSource.Keyword -> true
+
+		is SeerrSource.Person,
+		is SeerrSource.Recommended,
+		is SeerrSource.Similar,
+		is SeerrSource.Collection -> false
+	}
 
 object SeerrImages {
 	private const val BASE = "https://image.tmdb.org/t/p/"
