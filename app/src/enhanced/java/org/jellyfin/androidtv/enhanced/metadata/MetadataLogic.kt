@@ -283,8 +283,9 @@ private val MDBLIST_LABELS = mapOf(
 
 private val MDBLIST_DEFAULT_ORDER = listOf("tmdb", "tomatoes", "popcorn", "imdb", "trakt", "metacritic")
 
+/** A raw source value keeps its precision (Letterboxd 3.85), whole numbers drop the `.0`. */
 private fun formatScore(value: Double): String =
-	if (value == floor(value)) value.toLong().toString() else "%.1f".format(Locale.ROOT, value).trimEnd('0').trimEnd('.')
+	if (value == floor(value)) value.toLong().toString() else value.toBigDecimal().stripTrailingZeros().toPlainString()
 
 /**
  * MDBList chips, following the web: only sources with a value, only the admin's `MdblistRatingsSources` (in that
