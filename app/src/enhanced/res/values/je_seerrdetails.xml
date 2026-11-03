@@ -17,5 +17,10 @@
     <string name="je_seerrdetails_request_declined">Declined</string>
     <string name="je_seerrdetails_request_failed">Failed</string>
     <string name="je_seerrdetails_request_completed">Completed</string>
+    <plurals name="je_seerrdetails_season_count">
+        <item quantity="one">%1$d season</item>
+        <item quantity="other">%1$d seasons</item>
+    </plurals>
+    <string name="je_seerrdetails_runtime">%1$dh %2$dm</string>
     <string name="je_seerrdetails_more_requests">and %1$d more</string>
 </resources>
