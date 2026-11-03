@@ -16,6 +16,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
@@ -265,9 +266,13 @@ class SeerrRepository(
 	/**
 	 * Load the next page of every unfinished feed and interleave them. Results are filtered the way the web filters
 	 * discovery cards: duplicates, hidden titles, and (when configured) titles in the library or blocklisted.
-	 * Throws when every attempted feed failed.
+	 * Throws when every attempted feed failed, or when the Hidden Content document can't be read; the cursor isn't
+	 * moved then, so a retry loads the same pages.
 	 */
 	suspend fun loadNext(cursor: FeedCursor, recommendations: Boolean = false): Batch = coroutineScope {
+		// Loaded, not `current`: see filterResults
+		val state = enhancedRepository.ensureLoaded()
+		val hiddenCall = async { hiddenFilter(state, recommendations) }
 		val indices = (0 until cursor.size).filter { !cursor.done[it] }
 		val attempts = indices.map { i ->
 			async {
@@ -278,6 +283,8 @@ class SeerrRepository(
 		}.map { it.await() }
 
 		if (attempts.isNotEmpty() && attempts.all { it.isFailure }) throw attempts.first().exceptionOrNull()!!
+		// Before the cursor moves on: a failed read must not skip the pages it would have filtered
+		val hidden = hiddenCall.await()
 
 		val lists = mutableListOf<List<SeerrResult>>()
 		indices.zip(attempts).forEach { (i, attempt) ->
@@ -290,24 +297,42 @@ class SeerrRepository(
 			val max = lists.maxOfOrNull { it.size } ?: 0
 			for (j in 0 until max) for (list in lists) list.getOrNull(j)?.let(::add)
 		}
-		Batch(filterResults(interleaved, recommendations), partialFailure = attempts.any { it.isFailure })
+		Batch(filterResults(interleaved, state, hidden), partialFailure = attempts.any { it.isFailure })
 	}
 
+	/** Titles hidden everywhere that discovery cards drop: TMDB ids and Jellyfin ids (dash-less, lower case). */
+	private class HiddenFilter(val tmdbIds: Set<String>, val itemIds: Set<String>) {
+		companion object {
+			val NONE = HiddenFilter(emptySet(), emptySet())
+		}
+	}
+
+	/**
+	 * The user's hidden titles, when Hidden Content applies to these results. Throws when the document can't be read:
+	 * results shown unfiltered could include titles the user hid, so the caller shows its error (and Retry) instead.
+	 */
+	private suspend fun hiddenFilter(state: EnhancedState, recommendations: Boolean): HiddenFilter {
+		if (!state.hiddenContent) return HiddenFilter.NONE
+		val hidden = hiddenContentRepository.get()
+		val filterHidden = hidden.settings.enabled &&
+			(if (recommendations) hidden.settings.filterRecommendations else hidden.settings.filterDiscovery)
+		return if (filterHidden) HiddenFilter(hidden.hiddenTmdbIds, hidden.hiddenItemIds) else HiddenFilter.NONE
+	}
+
+	/** Filters [results] like [loadNext] does. Throws when the Hidden Content document can't be read. */
 	suspend fun filterResults(results: List<SeerrResult>, recommendations: Boolean = false): List<SeerrResult> {
 		// Loaded, not `current`: a screen restored after process death can get here before the state is loaded, and
 		// the unloaded state reads as "no plugin" (Spoiler Guard off)
 		val state = enhancedRepository.ensureLoaded()
-		val hidden = if (state.hiddenContent) runCatching { hiddenContentRepository.get() }.getOrNull() else null
-		val filterHidden = hidden != null && hidden.settings.enabled &&
-			(if (recommendations) hidden.settings.filterRecommendations else hidden.settings.filterDiscovery)
-		val hiddenIds = if (filterHidden) hidden.hiddenTmdbIds else emptySet()
-		val hiddenItemIds = if (filterHidden) hidden.hiddenItemIds else emptySet()
+		return filterResults(results, state, hiddenFilter(state, recommendations))
+	}
 
+	private suspend fun filterResults(results: List<SeerrResult>, state: EnhancedState, hidden: HiddenFilter): List<SeerrResult> {
 		val seen = HashSet<String>()
 		val filtered = results.filter { item ->
 			seen.add(item.dedupeKey) &&
-				item.id.toString() !in hiddenIds &&
-				item.mediaInfo?.jellyfinMediaId?.replace("-", "")?.lowercase() !in hiddenItemIds &&
+				item.id.toString() !in hidden.tmdbIds &&
+				item.mediaInfo?.jellyfinMediaId?.replace("-", "")?.lowercase() !in hidden.itemIds &&
 				!(state.config.jellyseerrExcludeLibraryItems && item.mediaInfo?.jellyfinMediaId != null) &&
 				!(state.config.jellyseerrExcludeBlocklistedItems && item.mediaInfo?.status == SeerrMediaStatus.BLOCKLISTED)
 		}
