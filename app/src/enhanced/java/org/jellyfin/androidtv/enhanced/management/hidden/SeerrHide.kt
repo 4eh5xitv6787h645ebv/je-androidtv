@@ -97,7 +97,7 @@ class SeerrHideDetailsContributor(
 		val hidden = hiddenContentRepository.get().isHiddenTmdb(context.tmdbId, jellyfinId)
 		val fragment = context.fragment
 
-		return listOf(SeerrDetailsAction(fragment.getString(if (hidden) R.string.je_unhide else R.string.je_hide)) {
+		return listOf(SeerrDetailsAction(fragment.getString(if (hidden) R.string.je_unhide else R.string.je_hide), if (hidden) R.drawable.je_ic_visibility else R.drawable.je_ic_visibility_off) {
 			val ctx = fragment.context ?: return@SeerrDetailsAction
 			if (hidden) {
 				fragment.lifecycleScope.launch {
