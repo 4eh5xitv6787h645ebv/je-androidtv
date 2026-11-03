@@ -166,6 +166,15 @@ class SpoilerSnapshot(
 	/** False when protection is on but some of it couldn't be resolved, so some titles are withheld blindly. */
 	val complete get() = !enabled || (state != null && collectionMovieIds != null)
 
+	/**
+	 * Whether anything could be protected: the lists have an entry (pending opt-ins included) or couldn't be read.
+	 * False means every title is [Protection.NONE].
+	 */
+	val guardsAnything: Boolean
+		get() = enabled && state.let {
+			it == null || it.series.isNotEmpty() || it.movies.isNotEmpty() || it.collections.isNotEmpty() || it.pendingTmdb.isNotEmpty()
+		}
+
 	private val series by lazy { state?.series?.keys?.map(::normalize)?.toSet().orEmpty() }
 	private val movies by lazy { state?.movies?.keys?.map(::normalize)?.toSet().orEmpty() }
 	private val collections by lazy { state?.collections?.keys?.map(::normalize)?.toSet().orEmpty() }
@@ -252,8 +261,9 @@ class SpoilerSnapshot(
  * including an unreadable plugin configuration ([EnhancedState.configUnavailable]).
  *
  * A complete snapshot is reused for [CACHE_TTL_MS] so the contributors of one details screen share it. It is only
- * reused while [SpoilerGuardRepository] still holds the same state object: every Spoiler Guard write in this client
- * clears that, so a title the user just guarded is never checked against an older list.
+ * cached when no Spoiler Guard write in this client overlapped its load, and only reused while
+ * [SpoilerGuardRepository.generation] hasn't moved since and the repository still holds the same state object, so a
+ * title the user just guarded is never checked against an older list (not even one read while the write was in flight).
  */
 class SpoilerProtection(
 	private val enhancedRepository: EnhancedRepository,
@@ -261,7 +271,13 @@ class SpoilerProtection(
 	private val enhancedApi: EnhancedApi,
 	private val clock: () -> Long = System::currentTimeMillis,
 ) {
-	private class Cached(val token: String?, val enhanced: EnhancedState, val at: Long, val snapshot: SpoilerSnapshot)
+	private class Cached(
+		val token: String?,
+		val enhanced: EnhancedState,
+		val generation: Long,
+		val at: Long,
+		val snapshot: SpoilerSnapshot,
+	)
 
 	private val mutex = Mutex()
 	private var cached: Cached? = null
@@ -277,12 +293,16 @@ class SpoilerProtection(
 			cached?.takeIf {
 				it.token == token &&
 					it.enhanced == enhanced &&
+					it.generation == spoilerGuardRepository.generation &&
 					clock() - it.at in 0 until CACHE_TTL_MS &&
 					spoilerGuardRepository.cachedState() === it.snapshot.state
 			}?.let { return@withLock it.snapshot }
 
+			val generation = spoilerGuardRepository.generation
 			load(enhanced).also { snapshot ->
-				cached = if (snapshot.complete) Cached(token, enhanced, clock(), snapshot) else null
+				// A write that started or ended during the load may not be in it: use it this once, don't keep it
+				val unchanged = spoilerGuardRepository.generation == generation
+				cached = if (snapshot.complete && unchanged) Cached(token, enhanced, generation, clock(), snapshot) else null
 			}
 		}
 	}
@@ -313,11 +333,16 @@ class SpoilerProtection(
 	 * The movies in the user's guarded collections, or null when membership couldn't be established.
 	 *
 	 * The collections are listed as the user, and the plugin's Hidden Content filter drops hidden items from that
-	 * listing (`GET /Items` is a "library" surface), although the server's Spoiler Guard still protects them as members.
-	 * No unfiltered route lists a collection's children, so every item in the user's Hidden Content document is
-	 * counted as a possible member too. That over-protects hidden movies outside the collections, which the user
-	 * doesn't see in the library anyway, and never misses a member. The plugin drops its own copy of the document
-	 * on every write, so the listing and the document can't disagree after a hide or unhide.
+	 * listing (`GET /Items` is a "library" surface, and the filter lowers `TotalRecordCount` to match), although the
+	 * server's Spoiler Guard still protects them as members. No unfiltered route lists a collection's children, so every
+	 * item in the user's Hidden Content document is counted as a possible member too. That over-protects hidden movies
+	 * outside the collections, which the user doesn't see in the library anyway.
+	 *
+	 * The document alone can't prove the union complete: the plugin reads an empty, corrupt or unreadable file as an
+	 * empty document (HTTP 200), while its filter keeps hiding with the copy it cached up to 30 s earlier. So each
+	 * collection's own `ChildCount` (`GET /Items/{id}`, a route the filter doesn't touch, so it counts hidden members
+	 * too) is compared with its listing: when members are missing from the listing and the document doesn't have at
+	 * least that many other ids that could be them, membership is unknown and every movie fails closed.
 	 */
 	private suspend fun collectionMovieIds(state: SpoilerGuardState, enhanced: EnhancedState): Set<String>? = try {
 		val api = enhancedApi.pinned()
@@ -327,21 +352,36 @@ class SpoilerProtection(
 			.map { entry -> entry.itemId?.toString() ?: entry.key }
 		coroutineScope {
 			val hiddenCall = async { if (enhanced.hiddenContent) hiddenItemIds(api, userId) else emptySet() }
-			val listed = ids.map { collectionId ->
+			val listings = ids.map { collectionId ->
 				async {
+					val childCount = if (enhanced.hiddenContent) async { childCount(api, collectionId, userId) } else null
 					val response = api.get("/Items", mapOf("parentId" to collectionId, "userId" to userId, "enableImages" to false, "enableUserData" to false))
-					((response as? JsonObject)?.get("Items") as? JsonArray).orEmpty().mapNotNull { element ->
+					val listed = ((response as? JsonObject)?.get("Items") as? JsonArray).orEmpty().mapNotNull { element ->
 						((element as? JsonObject)?.get("Id") as? JsonPrimitive)?.contentOrNull?.let(SpoilerSnapshot::normalize)
-					}
+					}.toSet()
+					CollectionListing(listed, childCount?.await())
 				}
-			}.awaitAll().flatten()
-			listed.toSet() + hiddenCall.await()
+			}.awaitAll()
+			val hidden = hiddenCall.await()
+			if (listings.any { !it.accountedFor(hidden) }) {
+				Timber.w("A guarded collection has members that are neither listed nor hidden; withholding data for every movie")
+				null
+			} else {
+				listings.flatMap { it.listed }.toSet() + hidden
+			}
 		}
 	} catch (err: CancellationException) {
 		throw err
 	} catch (err: Exception) {
 		Timber.w(err, "Failed to list guarded collections; withholding data for every movie")
 		null
+	}
+
+	/** The number of items the server links to a collection for this user, hidden ones included. */
+	private suspend fun childCount(api: EnhancedApi, collectionId: String, userId: String): Int {
+		val item = api.get("/Items/$collectionId", mapOf("userId" to userId)) as? JsonObject
+			?: error("Unexpected collection response")
+		return (item["ChildCount"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: error("Collection without ChildCount")
 	}
 
 	/**
@@ -352,6 +392,21 @@ class SpoilerProtection(
 		val document = api.get("user-settings/${normalize(userId)}/hidden-content.json") as? JsonObject
 			?: error("Unexpected Hidden Content response")
 		return hiddenLibraryItemIds(HiddenContentRepository.Snapshot(document))
+	}
+
+	/**
+	 * One guarded collection as the user's listing shows it, and [childCount], the server's own count of its members
+	 * (null when the listing can't be filtered, so nothing needs accounting for).
+	 */
+	class CollectionListing(val listed: Set<String>, val childCount: Int?) {
+		/**
+		 * Whether the members missing from the listing could all be among [hidden]: at least as many hidden ids that
+		 * aren't listed as there are missing members. Fewer means a member is hidden by a document we can't see.
+		 */
+		fun accountedFor(hidden: Set<String>): Boolean {
+			val missing = (childCount ?: return true) - listed.size
+			return missing <= 0 || hidden.count { it !in listed } >= missing
+		}
 	}
 
 	companion object {

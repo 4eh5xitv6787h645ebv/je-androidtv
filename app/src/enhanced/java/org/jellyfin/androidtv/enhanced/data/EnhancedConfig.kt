@@ -167,7 +167,14 @@ data class EnhancedState(
 	/** Whether the signed-in user is a Jellyfin administrator, from the user's policy. */
 	val isAdmin: Boolean = false,
 ) {
+	/** Spoiler Guard is known to be on: decides whether to *show* its controls. */
 	val spoilerGuard get() = available && config.spoilerBlurEnabled
+
+	/**
+	 * Spoiler Guard is on or may be (the configuration is unknown): decides whether to *withhold* external story
+	 * fields, ratings and artwork. Never use [spoilerGuard] for that, an unreadable configuration would fail open.
+	 */
+	val spoilerGuardMayApply get() = spoilerGuard || configUnavailable
 	val hiddenContent get() = available && config.hiddenContentEnabled
 
 	/** Whether to offer Hide buttons and menu entries, following the user's Hidden Content settings. */

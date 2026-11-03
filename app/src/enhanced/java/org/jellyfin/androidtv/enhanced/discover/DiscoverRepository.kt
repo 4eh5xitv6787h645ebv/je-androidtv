@@ -82,7 +82,7 @@ class DiscoverRepository(
 	 * can't be checked) the tiles show the genre name alone.
 	 */
 	suspend fun genreBackdropsAllowed(): Boolean {
-		if (!enhancedRepository.current.spoilerGuard) return true
+		if (!enhancedRepository.ensureLoaded().spoilerGuardMayApply) return true
 		val state = try {
 			spoilerGuardRepository.getState()
 		} catch (err: CancellationException) {

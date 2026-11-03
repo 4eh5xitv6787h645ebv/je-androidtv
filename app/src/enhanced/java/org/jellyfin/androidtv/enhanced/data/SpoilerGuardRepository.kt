@@ -20,6 +20,7 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * The user's Spoiler Guard preferences (`Prefs` in the document, also `GET spoiler-blur/user-prefs`). The category
@@ -92,9 +93,20 @@ class SpoilerGuardRepository(
 
 	private val prefsMutex = Mutex()
 
-	/** The last state read with [getState], with the token it was read with, for synchronous menus. */
+	private class Cached(val token: String?, val generation: Long, val state: SpoilerGuardState)
+
+	/** The last state read with [getState], with the token and [generation] it was read with, for synchronous menus. */
 	@Volatile
-	private var cached: Pair<String?, SpoilerGuardState>? = null
+	private var cached: Cached? = null
+
+	private val writes = AtomicLong()
+
+	/**
+	 * Increases when a Spoiler Guard write in this client starts and again when it ends (successful or not: a failed
+	 * write may still have landed). A state read while the generation changed may predate the write, so it must not
+	 * be cached; caches built from [getState] compare the generation instead of trusting their own age.
+	 */
+	val generation: Long get() = writes.get()
 
 	companion object {
 		fun kindOf(item: BaseItemDto): Kind? = when (item.type) {
@@ -163,13 +175,28 @@ class SpoilerGuardRepository(
 
 	suspend fun getState(): SpoilerGuardState {
 		val token = enhancedApi.accessToken
+		val before = generation
 		val state = EnhancedApi.json.decodeFromJsonElement<SpoilerGuardState>(enhancedApi.get("spoiler-blur/series"))
-		cached = token to state
+		// A write started or ended during the read: the response may be the old state, so don't remember it
+		if (generation == before) cached = Cached(token, before, state)
 		return state
 	}
 
 	/** The state last read by [getState] for the current account, if any. May be stale; re-read before acting. */
-	fun cachedState(): SpoilerGuardState? = cached?.takeIf { it.first == enhancedApi.accessToken }?.second
+	fun cachedState(): SpoilerGuardState? =
+		cached?.takeIf { it.token == enhancedApi.accessToken && it.generation == generation }?.state
+
+	/** Run a write between two [generation] bumps, dropping the cached state before and after. */
+	private suspend fun <T> write(block: suspend () -> T): T {
+		writes.incrementAndGet()
+		cached = null
+		try {
+			return block()
+		} finally {
+			writes.incrementAndGet()
+			cached = null
+		}
+	}
 
 	/** The user's preferences. Errors (including the plugin's 503 for a corrupt document) are thrown, not defaulted. */
 	suspend fun getPrefs(): SpoilerGuardPrefs =
@@ -194,8 +221,7 @@ class SpoilerGuardRepository(
 			}
 		}
 		val updated = JsonObject(fields)
-		api.post("spoiler-blur/user-prefs", updated)
-		cached = null
+		write { api.post("spoiler-blur/user-prefs", updated) }
 		EnhancedApi.json.decodeFromJsonElement(updated)
 	}
 
@@ -211,19 +237,19 @@ class SpoilerGuardRepository(
 
 	suspend fun setGuarded(kind: Kind, id: UUID, name: String?, guarded: Boolean) {
 		val path = "spoiler-blur/${kind.path}/${key(id)}"
-		cached = null
-		if (guarded) {
-			val body = if (kind.nameField != null && name != null) buildJsonObject { put(kind.nameField, name) } else null
-			enhancedApi.post(path, body)
-		} else {
-			enhancedApi.delete(path)
+		write {
+			if (guarded) {
+				val body = if (kind.nameField != null && name != null) buildJsonObject { put(kind.nameField, name) } else null
+				enhancedApi.post(path, body)
+			} else {
+				enhancedApi.delete(path)
+			}
 		}
 	}
 
 	/** Turn protection off for a listed entry, addressing it by its stored key. */
 	suspend fun removeEntry(entry: SpoilerGuardEntry) {
-		cached = null
-		enhancedApi.delete("spoiler-blur/${entry.kind.path}/${entry.itemId?.let(::key) ?: entry.key}")
+		write { enhancedApi.delete("spoiler-blur/${entry.kind.path}/${entry.itemId?.let(::key) ?: entry.key}") }
 	}
 
 	// Pending opt-ins for titles that aren't in the library yet (from the Seerr screens)
@@ -233,8 +259,9 @@ class SpoilerGuardRepository(
 
 	suspend fun setPending(mediaType: String, tmdbId: Int, displayName: String?, enabled: Boolean) {
 		val path = "spoiler-blur/pending/$mediaType/$tmdbId"
-		cached = null
-		if (enabled) enhancedApi.post(path, query = mapOf("displayName" to displayName))
-		else enhancedApi.delete(path)
+		write {
+			if (enabled) enhancedApi.post(path, query = mapOf("displayName" to displayName))
+			else enhancedApi.delete(path)
+		}
 	}
 }

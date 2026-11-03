@@ -34,7 +34,10 @@ class RequestsRepositoryTest : FunSpec({
 
 	class Fixture(state: EnhancedState) {
 		val api = mockk<EnhancedApi>()
-		val enhanced = mockk<EnhancedRepository> { every { current } returns state }
+		val enhanced = mockk<EnhancedRepository> {
+			every { current } returns state
+			coEvery { ensureLoaded(any()) } returns state
+		}
 		val seerr = mockk<SeerrRepository> {
 			// Mimic the shared artwork path: library titles get the server's poster
 			coEvery { refreshLibraryArtwork(any()) } answers {
@@ -114,6 +117,15 @@ class RequestsRepositoryTest : FunSpec({
 		val result = fixture.repository.queue()
 		result.entries.single().item.subtitle shouldBe "S01E01"
 		result.errors.single().reason shouldBe "timeout"
+	}
+
+	test("an unknown configuration fails closed: episode titles are withheld when the lists can't be read") {
+		val fixture = Fixture(EnhancedState(configUnavailable = true))
+		coEvery { fixture.api.get("arr/queue", any()) } returns json.parseToJsonElement(
+			"""{"items":[{"id":"1","source":"Sonarr","title":"Show","subtitle":"S01E01 - Pilot","seasonNumber":1,"episodeNumber":1}],"errors":[]}"""
+		)
+		coEvery { fixture.spoilers.getState() } throws EnhancedApi.EnhancedApiException(0, "offline")
+		fixture.repository.queue().entries.single().item.subtitle shouldBe "S01E01"
 	}
 
 	test("history is untouched when Spoiler Guard is off and passes visible:false through") {

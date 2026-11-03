@@ -81,8 +81,11 @@ class CalendarFragment : Fragment() {
 	private data class Loaded(
 		val start: LocalDate,
 		val response: CalendarResponse,
-		/** Releases from today on, independent of the window, for the undated group; null when no date can be hidden. */
-		val upcoming: List<CalendarEvent>?,
+		/**
+		 * Releases from today on, independent of the window, for the undated group; null when no date can be hidden.
+		 * Its errors are sources whose guarded releases may be missing from that group.
+		 */
+		val upcoming: CalendarResponse?,
 		val config: CalendarConfig,
 		/** Request keys; null when they couldn't be loaded (the highlight is optional unless it's enforced). */
 		val requested: Set<String>?,
@@ -110,13 +113,14 @@ class CalendarFragment : Fragment() {
 		reload()
 	}
 
-	private fun reload() {
+	/** [retry]: an explicit Retry, which re-reads an unknown configuration at once instead of waiting out its backoff. */
+	private fun reload(retry: Boolean = false) {
 		loadJob?.cancel()
 		loadState.value = LoadState.Loading
 		val windowStart = start.value
 		loadJob = lifecycleScope.launch {
 			val result = attempt {
-				val state = enhancedRepository.ensureLoaded()
+				val state = enhancedRepository.ensureLoaded(force = retry && enhancedRepository.current.configUnavailable)
 				// Without the configuration neither Spoiler Guard nor Hidden Content can be applied
 				if (state.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
 				coroutineScope {
@@ -127,7 +131,7 @@ class CalendarFragment : Fragment() {
 					}
 					val spoilerCall = async { spoilerProtection.snapshot() }
 					val upcomingCall = async {
-						if (CalendarLogic.mayHideDates(spoilerCall.await())) calendarRepository.upcomingEvents(LocalDate.now(zone), zone).events else null
+						if (CalendarLogic.mayHideDates(spoilerCall.await())) calendarRepository.upcomingEvents(LocalDate.now(zone), zone) else null
 					}
 					// A failed read is reported rather than showing titles the user hid
 					val hiddenCall = async { if (state.hiddenContent) CalendarHiddenFilter.of(hiddenContentRepository.get()) else null }
@@ -139,10 +143,12 @@ class CalendarFragment : Fragment() {
 					val response = eventsCall.await().let { response ->
 						if (hidden == null) response else response.copy(events = response.events.filterNot(hidden::isHidden))
 					}
-					val upcoming = upcomingCall.await()?.let { events -> if (hidden == null) events else events.filterNot(hidden::isHidden) }
+					val upcoming = upcomingCall.await()?.let { upcoming ->
+						if (hidden == null) upcoming else upcoming.copy(events = upcoming.events.filterNot(hidden::isHidden))
+					}
 					val spoiler = spoilerCall.await()
 					if (spoiler.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
-					val guardedIds = (response.events + upcoming.orEmpty())
+					val guardedIds = (response.events + upcoming?.events.orEmpty())
 						.filter { CalendarLogic.protection(it, spoiler).hideArtwork }
 						.mapNotNull { it.libraryItemId?.takeIf(String::isNotBlank) }
 					val posters = if (guardedIds.isEmpty()) emptyMap() else {
@@ -172,7 +178,7 @@ class CalendarFragment : Fragment() {
 				loadState.value = LoadState.Ready(loaded)
 			}.onFailure { err ->
 				Timber.w(err, "Failed to load the JE calendar")
-				loadState.value = LoadState.Error(err.serverMessage) { reload() }
+				loadState.value = LoadState.Error(err.serverMessage) { reload(retry = true) }
 			}
 		}
 	}
@@ -239,7 +245,7 @@ class CalendarFragment : Fragment() {
 				requested = requested,
 				forceOnlyRequested = loaded.config.forceOnlyRequested,
 				hideDate = { CalendarLogic.protection(it, loaded.spoiler).hideAirDate },
-				upcoming = loaded.upcoming,
+				upcoming = loaded.upcoming?.events,
 			)
 		}
 		val firstEventFocus = remember { FocusRequester() }
@@ -253,6 +259,14 @@ class CalendarFragment : Fragment() {
 				}
 				if (loaded.seerrEnabled && loaded.requested == null) PageNotice(stringResource(R.string.je_calendar_requests_failed))
 				if (!loaded.spoiler.complete) PageNotice(stringResource(R.string.je_calendar_spoiler_unavailable))
+				// A source that failed only for the upcoming range would make guarded releases vanish from both groups
+				val upcomingErrors = loaded.upcoming?.errors.orEmpty()
+				if (upcomingErrors.isNotEmpty()) {
+					Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+						PageNotice(stringResource(R.string.je_calendar_upcoming_failed, CalendarLogic.sourceNames(upcomingErrors).joinToString()))
+						Button(onClick = { reload(retry = true) }) { Text(stringResource(R.string.je_retry)) }
+					}
+				}
 			}
 
 			if (agenda.isEmpty) {
@@ -292,7 +306,7 @@ class CalendarFragment : Fragment() {
 	@Composable
 	private fun Filters(loaded: Loaded, currentFilter: CalendarFilter) {
 		val sources = remember(loaded) {
-			(loaded.response.events.map { it.source } + loaded.upcoming.orEmpty().map { it.source } + loaded.response.errors.mapNotNull { it.source })
+			(loaded.response.events.map { it.source } + loaded.upcoming?.events.orEmpty().map { it.source } + loaded.response.errors.mapNotNull { it.source })
 				.filter { it.isNotBlank() }
 				.distinctBy { it.lowercase() }
 				.sorted()

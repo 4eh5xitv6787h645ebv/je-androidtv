@@ -8,6 +8,10 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
@@ -38,6 +42,8 @@ class SpoilerProtectionServiceTest : FunSpec({
 		),
 		hiddenDocument: String = """{"Settings":{"Enabled":true,"FilterLibrary":true},"Items":{
 			"a":{"ItemId":"${HIDDEN_MOVIE}","HideScope":"global"}}}""",
+		/** The server's member count of the guarded collection: the listed movie and the hidden one. */
+		childCount: Int = 2,
 	) {
 		var now = 0L
 		var lastRead: SpoilerGuardState? = null
@@ -47,6 +53,7 @@ class SpoilerProtectionServiceTest : FunSpec({
 			// Like the real repository: getState() remembers the object it returned until a write clears it
 			coEvery { getState() } answers { guardState.copy().also { lastRead = it } }
 			every { cachedState() } answers { lastRead }
+			every { generation } returns 0L
 		}
 		val protection = SpoilerProtection(enhancedRepository, guard, api) { now }
 
@@ -56,6 +63,7 @@ class SpoilerProtectionServiceTest : FunSpec({
 			coEvery { api.currentUserId() } returns USER_KEY
 			coEvery { api.get("/Items", any()) } returns json.parseToJsonElement("""{"Items":[{"Id":"${SpoilerGuardRepository.key(LISTED_MOVIE)}"}]}""")
 			coEvery { api.get("user-settings/$USER_KEY/hidden-content.json", any()) } returns json.parseToJsonElement(hiddenDocument)
+			coEvery { api.get("/Items/$GUARDED_COLLECTION", any()) } returns json.parseToJsonElement("""{"Type":"BoxSet","ChildCount":$childCount}""")
 		}
 	}
 
@@ -93,11 +101,44 @@ class SpoilerProtectionServiceTest : FunSpec({
 		snapshot.forItem(movie(OTHER_MOVIE)) shouldBe Protection.FULL
 	}
 
+	test("an empty Hidden Content document can't account for members missing from the listing") {
+		// An unreadable file comes back as an empty document while the plugin's filter still hides from its cache
+		val fixture = Fixture(hiddenDocument = """{"Settings":{"Enabled":true,"FilterLibrary":true},"Items":{}}""")
+		val snapshot = fixture.protection.snapshot()
+		snapshot.complete shouldBe false
+		snapshot.forItem(movie(LISTED_MOVIE)).guarded shouldBe true
+		snapshot.forItem(movie(OTHER_MOVIE)) shouldBe Protection.FULL
+	}
+
+	test("a listing as long as the collection is complete without any hidden ids") {
+		val fixture = Fixture(hiddenDocument = """{"Settings":{"Enabled":true,"FilterLibrary":true},"Items":{}}""", childCount = 1)
+		val snapshot = fixture.protection.snapshot()
+		snapshot.complete shouldBe true
+		snapshot.forItem(movie(OTHER_MOVIE)) shouldBe Protection.NONE
+	}
+
+	test("a collection without a readable ChildCount leaves membership unknown") {
+		val fixture = Fixture()
+		coEvery { fixture.api.get("/Items/$GUARDED_COLLECTION", any()) } returns json.parseToJsonElement("""{"Type":"BoxSet"}""")
+		fixture.protection.snapshot().complete shouldBe false
+	}
+
+	test("missing members are accounted for only by enough hidden ids that aren't listed") {
+		val listing = SpoilerProtection.CollectionListing(listed = setOf("a", "b"), childCount = 4)
+		listing.accountedFor(setOf("c", "d")) shouldBe true
+		listing.accountedFor(setOf("a", "c")) shouldBe false
+		listing.accountedFor(emptySet()) shouldBe false
+		SpoilerProtection.CollectionListing(listed = setOf("a"), childCount = 1).accountedFor(emptySet()) shouldBe true
+		// The listing can't be filtered: nothing to account for
+		SpoilerProtection.CollectionListing(listed = setOf("a"), childCount = null).accountedFor(emptySet()) shouldBe true
+	}
+
 	test("the Hidden Content document is only read when the plugin filters library lists") {
 		val fixture = Fixture(enhanced = EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = true)))
 		val snapshot = fixture.protection.snapshot()
 		snapshot.forItem(movie(HIDDEN_MOVIE)) shouldBe Protection.NONE
 		coVerify(exactly = 0) { fixture.api.get("user-settings/$USER_KEY/hidden-content.json", any()) }
+		coVerify(exactly = 0) { fixture.api.get("/Items/$GUARDED_COLLECTION", any()) }
 	}
 
 	test("hidden ids count only when the user's settings filter the library, in any scope") {
@@ -125,6 +166,65 @@ class SpoilerProtectionServiceTest : FunSpec({
 		fixture.now += SpoilerProtection.CACHE_TTL_MS
 		(fixture.protection.snapshot() === afterWrite) shouldBe false
 		coVerify(exactly = 3) { fixture.guard.getState() }
+	}
+
+	test("a state read while a write is in flight is used once, never cached") {
+		val api = mockk<EnhancedApi>()
+		every { api.accessToken } returns "token"
+		val path = "spoiler-blur/movies/${SpoilerGuardRepository.key(OTHER_MOVIE)}"
+		var serverState = """{"Movies":{}}"""
+		val writeArrived = CompletableDeferred<Unit>()
+		val writeMayFinish = CompletableDeferred<Unit>()
+		coEvery { api.get("spoiler-blur/series", any()) } answers { json.parseToJsonElement(serverState) }
+		// The write is slow: a read made while it is in flight still gets the old list
+		coEvery { api.post(path, any(), any()) } coAnswers {
+			writeArrived.complete(Unit)
+			writeMayFinish.await()
+			serverState = """{"Movies":{"${SpoilerGuardRepository.key(OTHER_MOVIE)}":{}}}"""
+			JsonNull
+		}
+		val enhanced = EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = true))
+		val repository = SpoilerGuardRepository(api)
+		val protection = SpoilerProtection(mockk<EnhancedRepository> { coEvery { ensureLoaded(any()) } returns enhanced }, repository, api) { 0L }
+
+		coroutineScope {
+			val write = async { repository.setGuarded(SpoilerGuardRepository.Kind.MOVIE, OTHER_MOVIE, "Other", guarded = true) }
+			writeArrived.await()
+			// Read during the write: old state, so the movie isn't protected yet
+			protection.snapshot().forItem(movie(OTHER_MOVIE)) shouldBe Protection.NONE
+			writeMayFinish.complete(Unit)
+			write.await()
+		}
+
+		// Within the cache's lifetime, but the write happened: the new list is read
+		protection.snapshot().forItem(movie(OTHER_MOVIE)).guarded shouldBe true
+		repository.cachedState()?.movies?.keys shouldBe setOf(SpoilerGuardRepository.key(OTHER_MOVIE))
+		coVerify(exactly = 2) { api.get("spoiler-blur/series", any()) }
+	}
+
+	test("a read that overlaps a write isn't remembered by the repository") {
+		val api = mockk<EnhancedApi>()
+		every { api.accessToken } returns "token"
+		val readArrived = CompletableDeferred<Unit>()
+		val readMayFinish = CompletableDeferred<Unit>()
+		coEvery { api.get("spoiler-blur/series", any()) } coAnswers {
+			readArrived.complete(Unit)
+			readMayFinish.await()
+			json.parseToJsonElement("""{"Movies":{}}""")
+		}
+		coEvery { api.post(any(), any(), any()) } returns JsonNull
+		val repository = SpoilerGuardRepository(api)
+
+		coroutineScope {
+			val read = async { repository.getState() }
+			readArrived.await()
+			val before = repository.generation
+			repository.setPending("tv", 1399, "Show", enabled = true)
+			repository.generation shouldBe before + 2
+			readMayFinish.complete(Unit)
+			read.await()
+		}
+		repository.cachedState() shouldBe null
 	}
 
 	test("an incomplete snapshot is not reused") {

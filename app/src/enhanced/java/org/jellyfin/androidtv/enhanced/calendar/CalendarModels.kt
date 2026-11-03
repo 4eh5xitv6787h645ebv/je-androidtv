@@ -272,10 +272,15 @@ object CalendarLogic {
 
 	/**
 	 * Whether any release could have its date hidden under [spoiler], so the undated group needs its own query:
-	 * Spoiler Guard is on and either its air date category is in effect or its lists are incomplete (unresolved
-	 * titles are fully protected).
+	 * Spoiler Guard is on, the user guards something (or the lists couldn't be read), and either its air date category
+	 * is in effect or its lists are incomplete (unresolved titles are fully protected).
 	 */
-	fun mayHideDates(spoiler: SpoilerSnapshot): Boolean = spoiler.enabled && (spoiler.policy.hideAirDate || !spoiler.complete)
+	fun mayHideDates(spoiler: SpoilerSnapshot): Boolean =
+		spoiler.enabled && spoiler.guardsAnything && (spoiler.policy.hideAirDate || !spoiler.complete)
+
+	/** The distinct names of failed sources (instance name, else the source; the plugin always sends one), for one notice. */
+	fun sourceNames(errors: List<CalendarSourceError>): List<String> =
+		errors.mapNotNull { it.instanceName?.takeIf(String::isNotBlank) ?: it.source?.takeIf(String::isNotBlank) }.distinct()
 
 	/**
 	 * What to withhold for the event. Calendar data comes straight from Sonarr/Radarr (artwork, dates, titles), so

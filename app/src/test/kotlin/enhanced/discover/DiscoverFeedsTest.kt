@@ -39,7 +39,9 @@ private class Harness(tmdbEnabled: Boolean = false, private val respond: (String
 		}
 	}
 	val enhancedRepository = mockk<EnhancedRepository>().also {
-		every { it.current } returns EnhancedState(available = true, config = EnhancedPublicConfig(tmdbEnabled = tmdbEnabled))
+		val state = EnhancedState(available = true, config = EnhancedPublicConfig(tmdbEnabled = tmdbEnabled))
+		every { it.current } returns state
+		coEvery { it.ensureLoaded(any()) } returns state
 	}
 	val seerr = SeerrRepository(api, enhancedRepository, mockk(relaxed = true))
 }
@@ -165,9 +167,13 @@ class DiscoverFeedsTest : FunSpec({
 	}
 
 	test("genre backdrops are withheld while the user protects anything, or when that can't be checked") {
-		fun repository(spoilerGuard: Boolean, state: (suspend () -> SpoilerGuardState)): DiscoverRepository {
+		fun repository(
+			spoilerGuard: Boolean,
+			enhanced: EnhancedState = EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = spoilerGuard)),
+			state: (suspend () -> SpoilerGuardState),
+		): DiscoverRepository {
 			val enhancedRepository = mockk<EnhancedRepository>()
-			every { enhancedRepository.current } returns EnhancedState(available = true, config = EnhancedPublicConfig(spoilerBlurEnabled = spoilerGuard))
+			coEvery { enhancedRepository.ensureLoaded(any()) } returns enhanced
 			val spoilerGuardRepository = mockk<SpoilerGuardRepository>()
 			coEvery { spoilerGuardRepository.getState() } coAnswers { state() }
 			return DiscoverRepository(mockk(), enhancedRepository, mockk(), mockk(), mockk(), spoilerGuardRepository)
@@ -177,5 +183,11 @@ class DiscoverFeedsTest : FunSpec({
 		repository(spoilerGuard = true) { SpoilerGuardState(series = mapOf("abc" to JsonPrimitive(true))) }.genreBackdropsAllowed() shouldBe false
 		repository(spoilerGuard = true) { SpoilerGuardState(pendingTmdb = mapOf("tv-1" to JsonPrimitive(true))) }.genreBackdropsAllowed() shouldBe false
 		repository(spoilerGuard = true) { throw EnhancedApi.EnhancedApiException(500, "boom") }.genreBackdropsAllowed() shouldBe false
+		// Unknown configuration: Spoiler Guard may be on, so the lists decide (or their failure withholds)
+		val unknown = EnhancedState(configUnavailable = true)
+		repository(spoilerGuard = false, enhanced = unknown) { SpoilerGuardState(movies = mapOf("abc" to JsonPrimitive(true))) }
+			.genreBackdropsAllowed() shouldBe false
+		repository(spoilerGuard = false, enhanced = unknown) { throw EnhancedApi.EnhancedApiException(0, "offline") }
+			.genreBackdropsAllowed() shouldBe false
 	}
 })

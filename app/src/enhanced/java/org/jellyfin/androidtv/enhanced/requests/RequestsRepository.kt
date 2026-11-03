@@ -221,8 +221,8 @@ class RequestsRepository(
 	}
 
 	private suspend fun spoilerPolicy(): ArrSpoilerPolicy {
-		val enabled = enhancedRepository.current.spoilerGuard
-		if (!enabled) return ArrSpoilerPolicy.NONE
+		// Unknown configuration fails closed: the guard lists still apply, or everything is withheld if they can't be read
+		if (!enhancedRepository.ensureLoaded().spoilerGuardMayApply) return ArrSpoilerPolicy.NONE
 		val state = try {
 			spoilerGuardRepository.getState()
 		} catch (err: CancellationException) {

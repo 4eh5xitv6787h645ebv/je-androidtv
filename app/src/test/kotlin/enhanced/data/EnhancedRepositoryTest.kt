@@ -3,7 +3,9 @@ package org.jellyfin.androidtv.enhanced.data
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
+import io.mockk.clearMocks
 import io.mockk.coEvery
+import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
@@ -31,8 +33,10 @@ class EnhancedRepositoryTest : FunSpec({
 			coEvery { api.getText(any(), any()) } throws EnhancedApi.EnhancedApiException(404, "not found")
 		}
 
+		var now = 0L
+
 		// Created after the stubs: its init loads the state for the current user in the background
-		val repository by lazy { EnhancedRepository(api, users) }
+		val repository by lazy { EnhancedRepository(api, users) { now } }
 
 		fun configFails(err: Throwable) {
 			coEvery { api.get("public-config", any()) } throws err
@@ -50,8 +54,10 @@ class EnhancedRepositoryTest : FunSpec({
 		failed.configUnavailable shouldBe true
 		failed.available shouldBe false
 		failed.spoilerGuard shouldBe false
+		failed.spoilerGuardMayApply shouldBe true
 
 		fixture.configLoads()
+		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS
 		val loaded = fixture.repository.ensureLoaded()
 		loaded.available shouldBe true
 		loaded.configUnavailable shouldBe false
@@ -64,7 +70,33 @@ class EnhancedRepositoryTest : FunSpec({
 		fixture.repository.ensureLoaded().configUnavailable shouldBe true
 
 		coEvery { fixture.api.get("public-config", any()) } returns json.parseToJsonElement("[]")
+		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS
 		fixture.repository.ensureLoaded().configUnavailable shouldBe true
+	}
+
+	test("an unknown configuration is retried at most once per backoff, unless forced") {
+		val fixture = Fixture()
+		fixture.configFails(EnhancedApi.EnhancedApiException(0, "offline"))
+		fixture.repository.ensureLoaded().configUnavailable shouldBe true
+		clearMocks(fixture.api, answers = false)
+
+		fixture.configLoads()
+		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS - 1
+		fixture.repository.ensureLoaded().configUnavailable shouldBe true
+		coVerify(exactly = 0) { fixture.api.get("public-config", any()) }
+
+		fixture.repository.ensureLoaded(force = true).available shouldBe true
+		coVerify(exactly = 1) { fixture.api.get("public-config", any()) }
+	}
+
+	test("the backoff ends after its interval and is never cached as a missing plugin") {
+		val fixture = Fixture()
+		fixture.configFails(EnhancedApi.EnhancedApiException(503, "unavailable"))
+		fixture.repository.ensureLoaded().configUnavailable shouldBe true
+
+		fixture.configLoads()
+		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS
+		fixture.repository.ensureLoaded().available shouldBe true
 	}
 
 	test("a 404 means no plugin: stock behaviour, cached") {

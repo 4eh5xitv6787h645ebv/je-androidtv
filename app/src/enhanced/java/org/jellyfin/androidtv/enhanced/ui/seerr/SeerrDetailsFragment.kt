@@ -193,7 +193,7 @@ class SeerrDetailsFragment : Fragment() {
 					// story fields from the server's own (filtered) copy instead
 					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
 					val librarySeasonsCall = async { if (isTv && libraryId != null) librarySeasons(libraryId) else null }
-					val libraryStory = if (enhanced.spoilerGuard && libraryId != null) libraryStory(libraryId) else null
+					val libraryStory = if (enhanced.spoilerGuardMayApply && libraryId != null) libraryStory(libraryId) else null
 					val contributionContext = SeerrDetailsContext(
 						fragment = this@SeerrDetailsFragment,
 						mediaType = mediaType,
