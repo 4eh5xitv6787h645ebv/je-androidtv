@@ -12,8 +12,8 @@
     <string name="je_home_settings_caption">Extra rows on the home screen</string>
     <string name="je_home_settings_description">Rows added below your home sections. Saved on this device for this user.</string>
     <string name="je_home_settings_none">None of these rows is available on this server.</string>
-    <string name="je_home_settings_coming_up">The next 7 days of the calendar, for titles in your library</string>
-    <string name="je_home_settings_jump_back_in">Your bookmarks; select one to play from the saved moment</string>
-    <string name="je_home_settings_trending">Popular titles on Seerr that aren\'t in your library yet</string>
-    <string name="je_home_settings_catch_up">10 random unwatched titles, and a shortcut to Catch Up</string>
+    <string name="je_home_settings_coming_up">Next 7 days of the calendar, from your library</string>
+    <string name="je_home_settings_jump_back_in">Your bookmarks, played from the saved moment</string>
+    <string name="je_home_settings_trending">Popular on Seerr, not in your library yet</string>
+    <string name="je_home_settings_catch_up">10 unwatched titles and a Catch Up shortcut</string>
 </resources>

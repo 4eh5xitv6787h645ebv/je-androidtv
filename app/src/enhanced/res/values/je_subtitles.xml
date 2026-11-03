@@ -2,12 +2,12 @@
 <resources>
     <string name="je_subtitles_title">Subtitle style</string>
     <string name="je_subtitles_caption">Use your Jellyfin Enhanced subtitle appearance on this device</string>
-    <string name="je_subtitles_page_caption">Your subtitle appearance from the Jellyfin Enhanced settings in the web client, translated to this app\'s subtitle settings</string>
+    <string name="je_subtitles_page_caption">Your subtitle look from Jellyfin Enhanced, applied to this app. Turning it off brings your own settings back.</string>
 
-    <string name="je_subtitles_sync">Use my Jellyfin Enhanced subtitle style on this device</string>
-    <string name="je_subtitles_sync_off">Off: this device\'s own subtitle settings are used</string>
-    <string name="je_subtitles_sync_on">On: replaces this device\'s subtitle colours, size and position. Your own settings come back when you turn this off.</string>
-    <string name="je_subtitles_sync_paused">Paused: custom subtitle styles are turned off in your Jellyfin Enhanced settings, so nothing is changed</string>
+    <string name="je_subtitles_sync">Use my Enhanced subtitle style here</string>
+    <string name="je_subtitles_sync_off">This device\'s own subtitle settings are used</string>
+    <string name="je_subtitles_sync_on">Replaces this device\'s subtitle colours, size and position</string>
+    <string name="je_subtitles_sync_paused">Paused: custom styles are off in your Enhanced settings</string>
     <string name="je_subtitles_disabled_note">Custom subtitle styles are turned off in your Jellyfin Enhanced settings. Turn them on in the web client to use this style.</string>
 
     <string name="je_subtitles_mapping">What this device uses</string>

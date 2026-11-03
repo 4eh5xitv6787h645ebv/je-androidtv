@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.metadata
 
 import android.content.Context
 import android.widget.Toast
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,12 +20,14 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsIntro
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsNav
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsSection
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.form.Checkbox
 import org.jellyfin.androidtv.ui.base.form.RadioButton
 import org.jellyfin.androidtv.ui.base.list.ListButton
-import org.jellyfin.androidtv.ui.base.list.ListSection
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
 import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
@@ -64,12 +67,11 @@ private fun Context.saveFailed(err: Throwable) = Toast.makeText(
 private fun regionName(code: String): String =
 	java.util.Locale.Builder().setRegion(code).build().displayCountry.ifEmpty { code }
 
-@Composable
-private fun ElsewhereHeader(caption: String? = null) = ListSection(
-	overlineContent = { Text(stringResource(R.string.je_settings_title).uppercase()) },
-	headingContent = { Text(stringResource(R.string.je_metadata_elsewhere_title)) },
-	captionContent = caption?.let { { Text(it) } },
-)
+/** The page heading: overline, "Where to watch" and an optional one- or two-line intro. */
+private fun LazyListScope.elsewhereHeader(caption: @Composable (() -> String)? = null) {
+	item { SettingsSection(overline = stringResource(R.string.je_settings_title), heading = stringResource(R.string.je_metadata_elsewhere_title)) }
+	if (caption != null) item { SettingsIntro(caption()) }
+}
 
 /** Settings route [MetadataSettingsRoutes.ELSEWHERE]: region and streaming services for "where to watch". */
 @Composable
@@ -82,29 +84,24 @@ fun ElsewhereSettingsScreen() {
 	}
 
 	SettingsColumn {
-		item { ElsewhereHeader(stringResource(R.string.je_metadata_elsewhere_caption)) }
+		elsewhereHeader { stringResource(R.string.je_metadata_elsewhere_caption) }
 		loadStateItem(state)
 		val ready = (state as? LoadState.Ready)?.value ?: return@SettingsColumn
 
 		item {
-			ListButton(
-				headingContent = { Text(stringResource(R.string.je_metadata_elsewhere_region)) },
-				captionContent = {
-					Text(
-						ready.settings.region?.let { "${regionName(it)} ($it)" }
-							?: stringResource(R.string.je_metadata_elsewhere_region_default, ready.defaultRegion)
-					)
-				},
+			SettingsNav(
+				title = stringResource(R.string.je_metadata_elsewhere_region),
+				caption = ready.settings.region?.let { "${regionName(it)} ($it)" }
+					?: stringResource(R.string.je_metadata_elsewhere_region_default, ready.defaultRegion),
 				onClick = { router.push(MetadataSettingsRoutes.ELSEWHERE_REGION) },
-				modifier = Modifier.focusKey(MetadataSettingsRoutes.ELSEWHERE_REGION),
+				// The focus starts on the first row, not on the page heading
+				modifier = Modifier.focusKey(MetadataSettingsRoutes.ELSEWHERE_REGION, initialFocus = true),
 			)
 		}
 		item {
-			ListButton(
-				headingContent = { Text(stringResource(R.string.je_metadata_elsewhere_services)) },
-				captionContent = {
-					Text(ready.settings.services.joinToString(", ").ifEmpty { stringResource(R.string.je_metadata_elsewhere_services_all) }, maxLines = 2)
-				},
+			SettingsNav(
+				title = stringResource(R.string.je_metadata_elsewhere_services),
+				caption = ready.settings.services.joinToString(", ").ifEmpty { stringResource(R.string.je_metadata_elsewhere_services_all) },
 				onClick = { router.push(MetadataSettingsRoutes.ELSEWHERE_SERVICES) },
 				modifier = Modifier.focusKey(MetadataSettingsRoutes.ELSEWHERE_SERVICES),
 			)
@@ -156,7 +153,7 @@ fun ElsewhereRegionSettingsScreen() {
 	}
 
 	SettingsColumn {
-		item { ElsewhereHeader(stringResource(R.string.je_metadata_elsewhere_region)) }
+		elsewhereHeader { stringResource(R.string.je_metadata_elsewhere_region) }
 		loadStateItem(state)
 		val (screen, regions) = (state as? LoadState.Ready)?.value ?: return@SettingsColumn
 		val current = screen.settings.region?.uppercase()
@@ -226,12 +223,12 @@ fun ElsewhereServicesSettingsScreen() {
 	}
 
 	SettingsColumn {
-		item { ElsewhereHeader(stringResource(R.string.je_metadata_elsewhere_services_caption)) }
+		elsewhereHeader { stringResource(R.string.je_metadata_elsewhere_services_caption) }
 		loadStateItem(state)
 		val (screen, services) = (state as? LoadState.Ready)?.value ?: return@SettingsColumn
 		val chosen = selected.orEmpty()
 
-		item { ListSection(headingContent = { Text(regionName(screen.effectiveRegion)) }) }
+		item { SettingsSection(overline = regionName(screen.effectiveRegion)) }
 		items(services, key = { it }) { name ->
 			ListButton(
 				headingContent = { Text(name) },

@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import kotlinx.coroutines.CancellationException
@@ -26,8 +27,10 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.management.errorMessage
+import org.jellyfin.androidtv.enhanced.ui.design.SettingsNav
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.ui.navigation.LocalRouter
+import org.jellyfin.androidtv.ui.navigation.focus.focusKey
 import org.jellyfin.androidtv.ui.settings.Routes
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
@@ -123,40 +126,63 @@ private fun JeUserSettingsScreen(@StringRes title: Int, sections: List<Pair<Int,
 
 					is JeUserSetting.Choice -> {
 						val value = setting.value(docs.user, docs.public)
-						val label = setting.options.firstOrNull { it.first == value }?.let { stringResource(it.second) } ?: value
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), label, busy, first) { save(setting, JsonPrimitive(setting.next(value))) }
+						val selected = setting.options.indexOfFirst { it.first == value }
+						EnhancedChoiceRow(
+							key = setting.key,
+							title = stringResource(setting.title),
+							options = setting.options.map { stringResource(it.second) },
+							selected = selected,
+							value = setting.options.getOrNull(selected)?.let { stringResource(it.second) } ?: value,
+							saving = busy,
+							initialFocus = first,
+						) { index -> save(setting, JsonPrimitive(setting.options[index].first)) }
 					}
 
 					is JeUserSetting.Number -> {
 						val value = setting.value(docs.user, docs.public)
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), stringResource(R.string.je_management_set_seconds, value), busy, first) {
-							save(setting, JsonPrimitive(setting.next(value)))
-						}
+						// A stored value outside the options stays pickable so it isn't lost silently
+						val numbers = (setting.options + value).distinct().sorted()
+						val labels = numbers.map { stringResource(R.string.je_management_set_seconds, it) }
+						EnhancedChoiceRow(
+							key = setting.key,
+							title = stringResource(setting.title),
+							options = labels,
+							selected = numbers.indexOf(value),
+							value = labels[numbers.indexOf(value)],
+							saving = busy,
+							initialFocus = first,
+						) { index -> save(setting, JsonPrimitive(numbers[index])) }
 					}
 
 					is JeUserSetting.TriState -> {
 						val value = setting.value(docs.user)
-						val label = stringResource(
-							when (value) {
-								null -> R.string.je_management_set_server_default
-								true -> R.string.je_management_set_on
-								false -> R.string.je_management_set_off
-							}
+						val values = listOf(null, true, false)
+						val labels = listOf(
+							stringResource(R.string.je_management_set_server_default),
+							stringResource(R.string.je_management_set_on),
+							stringResource(R.string.je_management_set_off),
 						)
-						EnhancedChoiceRow(setting.key, stringResource(setting.title), listOfNotNull(label, caption).joinToString(" · "), busy, first) {
-							save(setting, setting.next(value)?.let(::JsonPrimitive) ?: JsonNull)
-						}
+						val selected = values.indexOf(value)
+						EnhancedChoiceRow(
+							key = setting.key,
+							title = stringResource(setting.title),
+							options = labels,
+							selected = selected,
+							value = listOfNotNull(labels[selected], caption).joinToString(" · "),
+							saving = busy,
+							initialFocus = first,
+						) { index -> save(setting, values[index]?.let(::JsonPrimitive) ?: JsonNull) }
 					}
 				}
 			}
 			// The web's auto-skip fields don't drive this app's player: lead to the setting that does
 			if (section == R.string.je_management_set_section_skip) item(key = "media_segments") {
-				EnhancedChoiceRow(
-					key = "media_segments",
+				SettingsNav(
 					title = stringResource(R.string.je_management_set_media_segments),
-					value = stringResource(R.string.je_management_set_media_segments_desc),
-					saving = false,
-				) { router.push(Routes.PLAYBACK_MEDIA_SEGMENTS) }
+					caption = stringResource(R.string.je_management_set_media_segments_desc),
+					onClick = { router.push(Routes.PLAYBACK_MEDIA_SEGMENTS) },
+					modifier = Modifier.focusKey("je_media_segments"),
+				)
 			}
 		}
 	}

@@ -9,8 +9,7 @@ import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.management.settings.EnhancedToggleRow
 import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsHeader
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.list.ListMessage
+import org.jellyfin.androidtv.enhanced.management.settings.enhancedSettingsUnavailable
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 
@@ -34,7 +33,8 @@ fun HomeRowsSettingsScreen() {
 		)
 
 		if (!state.available || offered.isEmpty()) {
-			item { ListMessage { Text(stringResource(R.string.je_home_settings_none)) } }
+			enhancedSettingsUnavailable { stringResource(R.string.je_home_settings_none) }
+			return@SettingsColumn
 		}
 
 		for (kind in offered) {
@@ -45,6 +45,8 @@ fun HomeRowsSettingsScreen() {
 					caption = stringResource(kind.caption),
 					checked = kind in enabled,
 					saving = false,
+					// The focus starts on the first row, not on the page heading
+					initialFocus = kind == offered.first(),
 					onToggle = { store.setEnabled(kind, kind !in enabled) },
 				)
 			}
