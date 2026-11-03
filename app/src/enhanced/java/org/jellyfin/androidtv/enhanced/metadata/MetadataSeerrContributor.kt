@@ -1,9 +1,9 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,12 +36,13 @@ class MetadataSeerrContributor(private val repository: MetadataRepository) : See
 
 		// The details screen rebuilds its sections on every reload (a Spoiler Guard opt-in, settings changed elsewhere)
 		// and they keep their slot in the composition: key the result by everything that decides what may be shown,
-		// and drop the old one before loading, so ratings loaded before the title was protected never linger
+		// and drop the old one in the same frame the key changes (a fresh state from remember, not a reset inside the
+		// effect, which only runs after that frame drew), so ratings loaded before the title was protected never linger
 		val key = SectionKey(target, state, mdblist, seerrRatings, providers, awards)
 		return {
-			val info by produceState<MetadataInfo?>(null, key) {
-				value = null
-				value = load(target, mdblist, seerrRatings, providers, awards, config.mdblistRatingsShowPercentSymbol)
+			var info by remember(key) { mutableStateOf<MetadataInfo?>(null) }
+			LaunchedEffect(key) {
+				info = load(target, mdblist, seerrRatings, providers, awards, config.mdblistRatingsShowPercentSymbol)
 			}
 			info?.let { SeerrMetadataSection(it) }
 		}
