@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -61,6 +63,14 @@ import org.jellyfin.androidtv.enhanced.seerr.SeerrPartialRequestSettings
 import org.jellyfin.androidtv.enhanced.seerr.SeerrQuota
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSeason
+import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrDates
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrDetailsExtras
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrDetailsLoader
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrMediaRequest
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrRequestStatus
+import org.jellyfin.androidtv.enhanced.seerrdetails.SeerrSeasonAvailability
+import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
@@ -70,6 +80,7 @@ import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
+import java.util.Locale
 import java.util.UUID
 
 /** Details for a Seerr movie or show with request controls, the TV counterpart of JE's "More info" modal. */
@@ -77,6 +88,8 @@ class SeerrDetailsFragment : Fragment() {
 	companion object {
 		const val ARG_MEDIA_TYPE = "media_type"
 		const val ARG_TMDB_ID = "tmdb_id"
+
+		private const val MAX_CAST = 20
 	}
 
 	private val seerrRepository by inject<SeerrRepository>()
@@ -89,6 +102,10 @@ class SeerrDetailsFragment : Fragment() {
 		val loading: Boolean = true,
 		val error: String? = null,
 		val details: SeerrDetails? = null,
+		/** Cast, requests, certifications… of the same details response. */
+		val extras: SeerrDetailsExtras = SeerrDetailsExtras(),
+		/** Season numbers of the library copy of a show, or null when unknown. */
+		val librarySeasons: Set<Int>? = null,
 		val enhanced: EnhancedState = EnhancedState(),
 		val partial: SeerrPartialRequestSettings? = null,
 		val quota: SeerrQuota? = null,
@@ -118,6 +135,8 @@ class SeerrDetailsFragment : Fragment() {
 		val year: String?,
 		val posterUrl: String?,
 		val backdropUrl: String?,
+		/** The library copy's actors, as filtered by the server (empty when it strips cast). */
+		val cast: List<SeerrDetailsCastEntry>,
 	)
 
 	private val state = MutableStateFlow(UiState())
@@ -149,6 +168,7 @@ class SeerrDetailsFragment : Fragment() {
 		year = null,
 		posterUrl = null,
 		backdropUrl = null,
+		cast = emptyList(),
 	)
 
 	private fun reload() {
@@ -159,17 +179,19 @@ class SeerrDetailsFragment : Fragment() {
 				// coroutineScope so a failed call surfaces here instead of cancelling (and crashing) lifecycleScope
 				val loaded = coroutineScope {
 					val enhanced = enhancedRepository.ensureLoaded()
-					val detailsCall = async { seerrRepository.details(mediaType, tmdbId) }
+					val detailsCall = async { SeerrDetailsLoader.load(enhancedApi, mediaType, tmdbId) }
 					val partialCall = async { if (isTv) seerrRepository.partialRequestSettings() else null }
 					val quotaCall = async { if (enhanced.config.jellyseerrShowQuotaInfo) seerrRepository.quota() else null }
 					val spoilerCall = async {
 						if (enhanced.spoilerGuard) runCatching { spoilerGuardRepository.getState() }.getOrNull() else null
 					}
-					val details = detailsCall.await()
+					val bundle = detailsCall.await()
+					val details = bundle.details
 					val spoilerState = spoilerCall.await()
 					// Seerr's JSON doesn't go through the plugin's Spoiler Guard filter. For titles in the library, show the
 					// story fields from the server's own (filtered) copy instead
 					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
+					val librarySeasonsCall = async { if (isTv && libraryId != null) librarySeasons(libraryId) else null }
 					val libraryStory = if (enhanced.spoilerGuard && libraryId != null) libraryStory(libraryId) else null
 					val contributionContext = SeerrDetailsContext(
 						fragment = this@SeerrDetailsFragment,
@@ -194,6 +216,8 @@ class SeerrDetailsFragment : Fragment() {
 					UiState(
 						loading = false,
 						details = details,
+						extras = bundle.extras,
+						librarySeasons = librarySeasonsCall.await(),
 						enhanced = enhanced,
 						partial = partialCall.await(),
 						quota = quotaCall.await(),
@@ -286,8 +310,11 @@ class SeerrDetailsFragment : Fragment() {
 				)
 			}
 
+			// Scrolls so the rows below the buttons can be reached; focus brings them into view
 			Column(
-				modifier = Modifier.fillMaxWidth(),
+				modifier = Modifier
+					.fillMaxWidth()
+					.verticalScroll(rememberScrollState()),
 				verticalArrangement = Arrangement.spacedBy(10.dp),
 			) {
 				Text(text = details.displayTitle, fontSize = 32.sp, color = Tokens.Color.colorWhite, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -300,6 +327,8 @@ class SeerrDetailsFragment : Fragment() {
 					details.genres.joinToString(", ") { it.name }.ifEmpty { null },
 				).joinToString("   ·   ")
 				if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 16.sp)
+				// Age rating and original title come from Seerr/TMDB only, so not for protected library titles
+				if (story == null) SeerrDetailsMetaStrip(extraMeta(ui, details))
 
 				Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
 					SeerrStatusBadge(status)
@@ -337,7 +366,7 @@ class SeerrDetailsFragment : Fragment() {
 					} else this
 
 					if (ui.enhanced.seerrUsable) {
-						requestLabel(status)?.let { label ->
+						requestLabel(ui, details)?.let { label ->
 							Button(onClick = { startRequest(details) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
 								Text(stringResource(label))
 							}
@@ -363,8 +392,6 @@ class SeerrDetailsFragment : Fragment() {
 					}
 				}
 
-				for (section in ui.sections) section()
-
 				if (!ui.enhanced.seerrUsable) {
 					Text(stringResource(R.string.je_seerr_unavailable), color = Tokens.Color.colorGrey300)
 				}
@@ -386,6 +413,32 @@ class SeerrDetailsFragment : Fragment() {
 						)
 					}
 				}
+
+				SeerrDetailsRequesters(requesterLines(ui.extras.standardRequests))
+
+				// Feature sections (issues…), each handling its own loading and failures
+				for (section in ui.sections) section()
+
+				if (isTv) {
+					SeerrDetailsSeasonsRow(seasonEntries(ui, details)) { season ->
+						if (season.requestable && ui.enhanced.seerrUsable && !ui.busy && requestLabel(ui, details) != null) startRequest(details)
+					}
+				}
+
+				SeerrDetailsCastRow(castEntries(ui)) { person ->
+					navigationRepository.navigate(
+						EnhancedDestinations.seerrDiscovery(
+							SeerrSource.Person(
+								jellyfinPersonId = person.jellyfinPersonId,
+								tmdbPersonId = person.tmdbPersonId,
+								name = person.name,
+								title = getString(R.string.je_more_with_title, person.name),
+							)
+						)
+					)
+				}
+
+				Spacer(modifier = Modifier.height(8.dp))
 			}
 		}
 
@@ -395,13 +448,93 @@ class SeerrDetailsFragment : Fragment() {
 		}
 	}
 
-	/** The label for the request button for a given status, or null when nothing can be requested. */
-	private fun requestLabel(status: Int?): Int? = when {
-		SeerrMediaStatus.isRequestable(status) -> R.string.je_request
-		// TV shows can still request seasons that aren't requested yet
-		isTv && status == SeerrMediaStatus.PARTIALLY_AVAILABLE -> R.string.je_request_missing
-		isTv && (status == SeerrMediaStatus.PENDING || status == SeerrMediaStatus.PROCESSING) -> R.string.je_request_more
-		else -> null
+	/** The label for the request button, or null when nothing can be requested. */
+	private fun requestLabel(ui: UiState, details: SeerrDetails): Int? {
+		val status = details.mediaInfo?.effectiveStatus
+		return when {
+			SeerrMediaStatus.isRequestable(status) -> R.string.je_request
+			// TV shows can still request seasons that aren't available or requested yet, even when Seerr calls the
+			// show available
+			!isTv || requestableSeasons(details, ui).isEmpty() -> null
+			status == SeerrMediaStatus.PARTIALLY_AVAILABLE || status == SeerrMediaStatus.AVAILABLE -> R.string.je_request_missing
+			else -> R.string.je_request_more
+		}
+	}
+
+	/** Secondary metadata from Seerr: age rating and original title. */
+	private fun extraMeta(ui: UiState, details: SeerrDetails): List<String> {
+		val countries = listOf(Locale.getDefault().country, "US").filter { it.isNotBlank() }.distinct()
+		return listOfNotNull(
+			ui.extras.certification(countries)?.let { getString(R.string.je_seerrdetails_rated, it) },
+			ui.extras.originalTitleIfDifferent(details.displayTitle)?.let { getString(R.string.je_seerrdetails_original_title, it) },
+		)
+	}
+
+	/** "Requested by X · date · status · seasons" for the latest few standard requests. */
+	private fun requesterLines(requests: List<SeerrMediaRequest>): List<String> {
+		val shown = 3
+		val lines = requests.take(shown).map { request ->
+			listOfNotNull(
+				request.requestedBy?.label?.let { getString(R.string.je_seerrdetails_requested_by, it) }
+					?: getString(R.string.je_seerrdetails_requested),
+				SeerrDates.format(request.createdAt),
+				when (request.status) {
+					SeerrRequestStatus.PENDING -> R.string.je_seerrdetails_request_pending
+					SeerrRequestStatus.APPROVED -> R.string.je_seerrdetails_request_approved
+					SeerrRequestStatus.DECLINED -> R.string.je_seerrdetails_request_declined
+					SeerrRequestStatus.FAILED -> R.string.je_seerrdetails_request_failed
+					SeerrRequestStatus.COMPLETED -> R.string.je_seerrdetails_request_completed
+					else -> null
+				}?.let(::getString),
+				request.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
+					.takeIf { isTv && it.isNotEmpty() }
+					?.let { getString(R.string.je_seerrdetails_request_seasons, it.joinToString(", ")) },
+			).joinToString("   ·   ")
+		}
+		return if (requests.size > shown) lines + getString(R.string.je_seerrdetails_more_requests, requests.size - shown) else lines
+	}
+
+	/** Season cards with each season's effective status. Seerr's season names are withheld for protected titles. */
+	private fun seasonEntries(ui: UiState, details: SeerrDetails): List<SeerrDetailsSeasonEntry> {
+		val guarded = ui.libraryStory != null
+		return details.seasons
+			.filter { it.seasonNumber > 0 || it.episodeCount > 0 }
+			.distinctBy { it.seasonNumber }
+			.sortedBy { it.seasonNumber }
+			.map { season ->
+				val status = SeerrSeasonAvailability.seasonStatus(details, ui.extras.requests, ui.librarySeasons, season.seasonNumber)
+				SeerrDetailsSeasonEntry(
+					seasonNumber = season.seasonNumber,
+					label = when {
+						season.seasonNumber == 0 -> getString(R.string.je_specials)
+						guarded || season.name.isNullOrBlank() -> getString(R.string.je_season_number, season.seasonNumber)
+						else -> season.name
+					},
+					episodeCount = season.episodeCount,
+					status = status,
+					requestable = season.episodeCount > 0 && SeerrMediaStatus.isRequestable(status),
+				)
+			}
+	}
+
+	/**
+	 * The cast row: Seerr's credits for titles that aren't in the library, the server's own (Spoiler Guard filtered)
+	 * people for library titles while Spoiler Guard is on. Nothing while those are withheld.
+	 */
+	private fun castEntries(ui: UiState): List<SeerrDetailsCastEntry> {
+		ui.libraryStory?.let { return it.cast }
+		return ui.extras.cast
+			.sortedBy { it.order ?: Int.MAX_VALUE }
+			.take(MAX_CAST)
+			.map { member ->
+				SeerrDetailsCastEntry(
+					name = member.name.orEmpty(),
+					role = member.character,
+					imageUrl = SeerrImages.poster(member.profilePath, "w185"),
+					tmdbPersonId = member.id,
+					jellyfinPersonId = null,
+				)
+			}
 	}
 
 	private fun startRequest(details: SeerrDetails) {
@@ -456,7 +589,7 @@ class SeerrDetailsFragment : Fragment() {
 			return
 		}
 
-		val requestable = requestableSeasons(details, partial)
+		val requestable = requestableSeasons(details)
 		if (requestable.isEmpty()) {
 			toast(getString(R.string.je_nothing_found))
 			return
@@ -488,12 +621,23 @@ class SeerrDetailsFragment : Fragment() {
 			.show()
 	}
 
-	private fun requestableSeasons(details: SeerrDetails, partial: SeerrPartialRequestSettings?): List<SeerrSeason> {
-		return details.seasons
-			.filter { it.episodeCount > 0 }
-			.filter { it.seasonNumber > 0 || partial?.enableSpecialEpisodes == true }
-			.filter { SeerrMediaStatus.isRequestable(details.mediaInfo?.effectiveSeasonStatus(it.seasonNumber)) }
-			.sortedBy { it.seasonNumber }
+	/** Seasons that can still be requested, considering open requests and the library's own seasons. */
+	private fun requestableSeasons(details: SeerrDetails, ui: UiState = state.value): List<SeerrSeason> =
+		SeerrSeasonAvailability.requestableSeasons(
+			details = details,
+			requests = ui.extras.requests,
+			librarySeasons = ui.librarySeasons,
+			includeSpecials = ui.partial?.enableSpecialEpisodes == true,
+		)
+
+	/** Season numbers of the library copy, or null when they can't be loaded (Seerr's statuses apply then). */
+	private suspend fun librarySeasons(id: UUID): Set<Int>? = try {
+		SeerrDetailsLoader.librarySeasons(enhancedApi, id.toString())
+	} catch (err: CancellationException) {
+		throw err
+	} catch (err: Exception) {
+		Timber.w(err, "Failed to load library seasons")
+		null
 	}
 
 	/** The library copy's story fields; failures reach the screen's Retry UI while cached fields stay withheld. */
@@ -510,6 +654,22 @@ class SeerrDetailsFragment : Fragment() {
 			// Server image routes, so the plugin's artwork protection applies
 			posterUrl = primaryTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Primary", it, 500) },
 			backdropUrl = backdropTag?.let { enhancedApi.imageUrl("/Items/$id/Images/Backdrop/0", it, 1280) },
+			cast = (item["People"] as? JsonArray).orEmpty()
+				.mapNotNull { it as? JsonObject }
+				.filter { (it["Type"] as? JsonPrimitive)?.contentOrNull == "Actor" }
+				.take(MAX_CAST)
+				.mapNotNull { person ->
+					val name = (person["Name"] as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+					val personId = (person["Id"] as? JsonPrimitive)?.contentOrNull
+					val imageTag = (person["PrimaryImageTag"] as? JsonPrimitive)?.contentOrNull
+					SeerrDetailsCastEntry(
+						name = name,
+						role = (person["Role"] as? JsonPrimitive)?.contentOrNull,
+						imageUrl = if (personId != null && imageTag != null) enhancedApi.imageUrl("/Items/$personId/Images/Primary", imageTag, 300) else null,
+						tmdbPersonId = null,
+						jellyfinPersonId = personId,
+					)
+				},
 		)
 	}
 

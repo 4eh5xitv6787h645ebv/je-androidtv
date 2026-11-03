@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Richer Seerr details -->
+    <string name="je_seerrdetails_cast">Cast</string>
+    <string name="je_seerrdetails_seasons">Seasons</string>
+    <plurals name="je_seerrdetails_episodes">
+        <item quantity="one">%1$d episode</item>
+        <item quantity="other">%1$d episodes</item>
+    </plurals>
+    <string name="je_seerrdetails_rated">Rated %1$s</string>
+    <string name="je_seerrdetails_original_title">Original title: %1$s</string>
+    <string name="je_seerrdetails_requested_by">Requested by %1$s</string>
+    <string name="je_seerrdetails_requested">Requested</string>
+    <string name="je_seerrdetails_request_seasons">Seasons %1$s</string>
+    <string name="je_seerrdetails_request_pending">Awaiting approval</string>
+    <string name="je_seerrdetails_request_approved">Approved</string>
+    <string name="je_seerrdetails_request_declined">Declined</string>
+    <string name="je_seerrdetails_request_failed">Failed</string>
+    <string name="je_seerrdetails_request_completed">Completed</string>
+    <string name="je_seerrdetails_more_requests">and %1$d more</string>
+</resources>
