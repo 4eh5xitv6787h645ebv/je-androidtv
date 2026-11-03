@@ -114,8 +114,6 @@ object EnhancedDetails {
 				if (event == Lifecycle.Event.ON_DESTROY) actionsByFragment.remove(fragment)
 			})
 		}
-		if (actions.isEmpty()) return
-
 		fragment.lifecycleScope.launch {
 			val state = enhancedRepository.ensureLoaded()
 			if (!state.available || !fragment.isAlive) return@launch
@@ -180,7 +178,7 @@ object EnhancedDetails {
 				}
 			}
 
-			if (fragment.isAlive) fitActions(row, actions)
+			if (fragment.isAlive && actions.isNotEmpty()) fitActions(row, actions)
 		}
 	}
 
@@ -431,7 +429,7 @@ object EnhancedDetails {
 
 	/** Append Seerr rows below the regular rows of the details screen. */
 	@JvmStatic
-	fun addRows(fragment: Fragment, rowsAdapter: MutableObjectAdapter<Row>, item: BaseItemDto) {
+	fun addRows(fragment: Fragment, rowsAdapter: MutableObjectAdapter<Row>, item: BaseItemDto, reload: Runnable) {
 		val context = fragment.requireContext()
 
 		fragment.lifecycleScope.launch {
@@ -467,7 +465,7 @@ object EnhancedDetails {
 			}
 
 			// Feature contributions
-			val detailsContext = DetailsContext(fragment, item, state) { }
+			val detailsContext = DetailsContext(fragment, item, state) { reload.run() }
 			for (contributor in contributors) {
 				val rows = runCatching { contributor.rows(detailsContext) }
 					.onFailure { Timber.w(it, "Details rows from %s failed", contributor::class.simpleName) }

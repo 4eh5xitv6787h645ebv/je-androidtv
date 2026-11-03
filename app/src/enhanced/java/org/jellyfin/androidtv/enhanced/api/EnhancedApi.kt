@@ -8,10 +8,17 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.jellyfin.sdk.Jellyfin
 import org.jellyfin.sdk.api.client.ApiClient
 import org.jellyfin.sdk.api.client.HttpMethod
+import org.jellyfin.sdk.api.client.util.AuthorizationHeaderBuilder
 import timber.log.Timber
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 /**
  * Thin wrapper around the Jellyfin SDK client for calling the Jellyfin Enhanced plugin's REST API
@@ -32,11 +39,22 @@ class EnhancedApi(
 			coerceInputValues = true
 			explicitNulls = false
 		}
+
+		private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+
+		/** One client for all instances (pinned copies included): connection pool and threads are shared. */
+		private val httpClient: OkHttpClient by lazy {
+			OkHttpClient.Builder()
+				.connectTimeout(15, TimeUnit.SECONDS)
+				.readTimeout(60, TimeUnit.SECONDS)
+				.build()
+		}
 	}
 
 	/**
-	 * A non-2xx response. [body] is the parsed error body when there was one, [code] the plugin's error code
-	 * (`unlinked`, `blocked`, `missing_query`, ...) and [serverMessage] its human readable message, when present.
+	 * A non-2xx response (or, with [status] 0, a network failure). [body] is the parsed error body when there was
+	 * one, [code] the plugin's error code (`unlinked`, `blocked`, `missing_query`, ...) and [serverMessage] its
+	 * human readable message, when present.
 	 */
 	class EnhancedApiException(
 		val status: Int,
@@ -103,6 +121,11 @@ class EnhancedApi(
 	private fun parse(response: TextResponse): JsonElement =
 		if (response.text.isBlank()) JsonNull else json.parseToJsonElement(response.text)
 
+	/**
+	 * Plain OkHttp transport: the SDK's `request()` throws on non-2xx responses and discards the body, but the
+	 * plugin's error bodies carry the code and message the UI needs. Authentication is the same header the SDK
+	 * sends, built from this client's (possibly pinned) token and client/device info.
+	 */
 	private suspend fun call(
 		method: HttpMethod,
 		path: String,
@@ -110,31 +133,48 @@ class EnhancedApi(
 		body: JsonElement?,
 	): TextResponse = withContext(Dispatchers.IO) {
 		val fullPath = if (path.startsWith("/")) path else "$BASE/$path"
-		val response = try {
-			api.request(
-				method = method,
-				pathTemplate = fullPath,
-				pathParameters = emptyMap(),
-				queryParameters = query.filterValues { it != null },
-				requestBody = body,
+		val url = api.createUrl(fullPath, emptyMap(), query.filterValues { it != null }, false)
+		val authorization = AuthorizationHeaderBuilder.buildHeader(
+			api.clientInfo.name,
+			api.clientInfo.version,
+			api.deviceInfo.id,
+			api.deviceInfo.name,
+			api.accessToken,
+		)
+		val request = Request.Builder()
+			.url(url)
+			.header("Authorization", authorization)
+			.header("Accept", "application/json")
+			.method(
+				method.name,
+				when {
+					body != null -> json.encodeToString(JsonElement.serializer(), body).toRequestBody(JSON_MEDIA_TYPE)
+					method == HttpMethod.POST -> "{}".toRequestBody(JSON_MEDIA_TYPE)
+					else -> null
+				},
 			)
-		} catch (err: org.jellyfin.sdk.api.client.exception.InvalidStatusException) {
-			throw EnhancedApiException(err.status, "JE $method $fullPath failed with ${err.status}")
-		}
+			.build()
 
-		val text = response.body.decodeToString()
-		if (response.status !in 200..299) {
-			Timber.w("JE %s %s -> %d %s", method, fullPath, response.status, text.take(200))
-			val errorBody = runCatching { if (text.isBlank()) null else json.parseToJsonElement(text) }.getOrNull()
-			val obj = errorBody as? JsonObject
-			throw EnhancedApiException(
-				status = response.status,
-				message = "JE $method $fullPath failed with ${response.status}",
-				body = errorBody,
-				code = (obj?.get("code") as? JsonPrimitive)?.contentOrNull,
-				serverMessage = (obj?.get("message") as? JsonPrimitive)?.contentOrNull,
-			)
+		val response = try {
+			httpClient.newCall(request).execute()
+		} catch (err: IOException) {
+			throw EnhancedApiException(0, "JE $method $fullPath failed: ${err.message}")
 		}
-		TextResponse(response.status, text, response.headers)
+		response.use { res ->
+			val text = res.body?.string().orEmpty()
+			if (res.code !in 200..299) {
+				Timber.w("JE %s %s -> %d %s", method, fullPath, res.code, text.take(200))
+				val errorBody = runCatching { if (text.isBlank()) null else json.parseToJsonElement(text) }.getOrNull()
+				val obj = errorBody as? JsonObject
+				throw EnhancedApiException(
+					status = res.code,
+					message = "JE $method $fullPath failed with ${res.code}",
+					body = errorBody,
+					code = (obj?.get("code") as? JsonPrimitive)?.contentOrNull,
+					serverMessage = (obj?.get("message") as? JsonPrimitive)?.contentOrNull,
+				)
+			}
+			TextResponse(res.code, text, res.headers.toMultimap())
+		}
 	}
 }

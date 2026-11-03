@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.ui.details
 
 import android.view.ViewGroup
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.findViewTreeCompositionContext
 import androidx.leanback.widget.HeaderItem
@@ -45,11 +46,12 @@ class EnhancedComposeRowPresenter : RowPresenter() {
 	override fun onBindRowViewHolder(vh: ViewHolder, item: Any) {
 		super.onBindRowViewHolder(vh, item)
 		val row = item as? EnhancedComposeRow ?: return
-		(vh.view as ComposeView).setContent { JellyfinTheme { row.content(row) } }
+		// Keyed by the row so a recycled view never carries another row's remembered state
+		(vh.view as ComposeView).setContent { key(row) { JellyfinTheme { row.content(row) } } }
 	}
 
 	override fun onUnbindRowViewHolder(vh: ViewHolder) {
-		(vh.view as ComposeView).setContent {}
+		(vh.view as ComposeView).disposeComposition()
 		super.onUnbindRowViewHolder(vh)
 	}
 }

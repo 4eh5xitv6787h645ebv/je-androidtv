@@ -54,6 +54,8 @@ class EnhancedSettingsRepository(
 		val updated = JsonObject(fields)
 		document.api.post("user-settings/${document.userKey}/$file", updated)
 		val saved = Document(document.api, document.userKey, file, updated)
+		// Only publish into the shared state if the app is still signed in as the user whose document this is
+		if (enhancedApi.accessToken != document.api.accessToken) return@withLock saved
 		if (file == SETTINGS) {
 			runCatching { EnhancedApi.json.decodeFromJsonElement<EnhancedUserSettings>(updated) }
 				.onSuccess { enhancedRepository.updateUserSettings(it) }

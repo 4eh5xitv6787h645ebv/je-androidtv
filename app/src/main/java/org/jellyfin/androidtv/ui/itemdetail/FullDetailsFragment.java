@@ -482,7 +482,7 @@ public class FullDetailsFragment extends Fragment implements RecordingIndicatorV
 
             updateInfo(detailsOverviewRow.getItem());
             addAdditionalRows(mRowsAdapter);
-            EnhancedDetails.addRows(FullDetailsFragment.this, mRowsAdapter, mBaseItem);
+            EnhancedDetails.addRows(FullDetailsFragment.this, mRowsAdapter, mBaseItem, () -> loadItem(mBaseItem.getId()));
 
         }
     }
