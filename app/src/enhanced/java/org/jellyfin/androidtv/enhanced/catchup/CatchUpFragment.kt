@@ -256,7 +256,7 @@ class CatchUpFragment : Fragment() {
 				else picker.value = SeasonPicker(series, list)
 			}.onFailure { err ->
 				Timber.w(err, "Couldn't load seasons for Catch Up")
-				toast(getString(R.string.je_catchup_failed, series.name.orEmpty(), errorText(err)))
+				toast { getString(R.string.je_catchup_failed, series.name.orEmpty(), errorText(err)) }
 			}
 		}
 	}
@@ -269,7 +269,10 @@ class CatchUpFragment : Fragment() {
 		lifecycleScope.launch {
 			val result = attempt {
 				when (action) {
-					is CatchUpAction.Watched -> session.markWatched(item, action)
+					is CatchUpAction.Watched -> session.markWatched(item, action) { count ->
+						// Each episode is its own request, so a long show takes a moment
+						if (count >= SLOW_MARK_COUNT) toast { getString(R.string.je_catchup_marking, count, item.name.orEmpty()) }
+					}
 					is CatchUpAction.Watchlist -> action.also { session.addToWatchlist(it) }
 					CatchUpAction.Dismiss -> action
 				}
@@ -280,18 +283,18 @@ class CatchUpFragment : Fragment() {
 				if (applied is CatchUpAction.Dismiss) session.saveDismissed(deck.value.dismissed)
 				session.log(CatchUpEvents.forAction(CatchUpDone(item, applied), ok = true))
 				val name = item.name.orEmpty()
-				toast(
+				toast {
 					when (applied) {
 						is CatchUpAction.Watched -> getString(R.string.je_catchup_done_watched, name)
 						is CatchUpAction.Watchlist -> getString(R.string.je_catchup_done_watchlist, name)
 						CatchUpAction.Dismiss -> getString(R.string.je_catchup_done_dismiss, name)
 					}
-				)
+				}
 				refill()
 			}.onFailure { err ->
 				Timber.w(err, "Catch Up %s failed", action.logName)
 				session.log(CatchUpEvents.forAction(CatchUpDone(item, action), ok = false))
-				toast(getString(R.string.je_catchup_failed, item.name.orEmpty(), errorText(err)))
+				toast { getString(R.string.je_catchup_failed, item.name.orEmpty(), errorText(err)) }
 			}
 		}
 	}
@@ -311,10 +314,21 @@ class CatchUpFragment : Fragment() {
 			result.onSuccess {
 				deck.update { it.undo()?.first ?: it }
 				if (last.action is CatchUpAction.Dismiss) session.saveDismissed(deck.value.dismissed)
-				toast(getString(R.string.je_catchup_undone, last.item.name.orEmpty()))
+				toast { getString(R.string.je_catchup_undone, last.item.name.orEmpty()) }
 			}.onFailure { err ->
 				Timber.w(err, "Catch Up undo failed")
-				toast(getString(R.string.je_catchup_undo_failed, errorText(err)))
+				// The entry stays on the stack either way; after a partial undo it only holds what's still marked
+				if (err is CatchUpPartialUndoException) {
+					deck.update { it.withRemainingUndo(err.remaining) }
+					val left = err.remaining.markedIds.size
+					toast {
+						resources.getQuantityString(
+							R.plurals.je_catchup_undo_partial, left, last.item.name.orEmpty(), left, errorText(err.cause ?: err)
+						)
+					}
+				} else {
+					toast { getString(R.string.je_catchup_undo_failed, errorText(err)) }
+				}
 			}
 		}
 	}
@@ -394,8 +408,17 @@ class CatchUpFragment : Fragment() {
 		(err as? EnhancedApi.EnhancedApiException)?.serverMessage?.takeIf { it.isNotBlank() }
 			?: getString(R.string.je_error_generic)
 
-	private fun toast(text: String) {
+	/**
+	 * Shows a toast if the page is still attached. [text] is only built then: the server writes finish even after the
+	 * user left the page, and the fragment's resources are gone by the time they report back.
+	 */
+	private inline fun toast(text: () -> String) {
 		val context = context ?: return
-		Toast.makeText(context, text, Toast.LENGTH_SHORT).show()
+		Toast.makeText(context, text(), Toast.LENGTH_SHORT).show()
+	}
+
+	private companion object {
+		/** From this many items, marking says up front that it's working. */
+		const val SLOW_MARK_COUNT = 24
 	}
 }

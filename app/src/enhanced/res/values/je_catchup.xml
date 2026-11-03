@@ -33,6 +33,11 @@
     <string name="je_catchup_undone">Undone: %1$s</string>
     <string name="je_catchup_failed">Couldn\'t update %1$s: %2$s</string>
     <string name="je_catchup_undo_failed">Couldn\'t undo: %1$s</string>
+    <plurals name="je_catchup_undo_partial">
+        <item quantity="one">Couldn\'t finish undoing %1$s: %2$d episode is still marked watched (%3$s). Press Undo again to finish.</item>
+        <item quantity="other">Couldn\'t finish undoing %1$s: %2$d episodes are still marked watched (%3$s). Press Undo again to finish.</item>
+    </plurals>
+    <string name="je_catchup_marking">Marking %1$d episodes of %2$s as watched…</string>
     <string name="je_catchup_no_session">You\'re not signed in.</string>
 
     <string name="je_catchup_empty">You\'re all caught up</string>

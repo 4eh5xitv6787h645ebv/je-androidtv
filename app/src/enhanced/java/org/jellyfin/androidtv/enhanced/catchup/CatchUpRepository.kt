@@ -3,8 +3,10 @@ package org.jellyfin.androidtv.enhanced.catchup
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.decodeFromJsonElement
 import org.jellyfin.androidtv.auth.repository.SessionRepository
@@ -111,23 +113,36 @@ class CatchUpSession internal constructor(
 		).items
 
 	/**
-	 * Marks the targets played. For shows it first records which episodes were already played, so undo can put them
-	 * back. If a later target fails, the earlier ones are reverted before the error is rethrown.
+	 * Marks the targets played, one item at a time: the movie, or the episodes under the chosen show or seasons that
+	 * aren't played yet. The returned action remembers exactly those ids for undo. [onCount] gets the number of items
+	 * before writing starts. If a write fails, the ones this call marked are unmarked again before the error is
+	 * rethrown; episodes that were played before are never touched.
+	 *
+	 * The writes run to the end even when the caller is cancelled (the user left the page), so a press is never left
+	 * half applied without an undo entry.
 	 */
-	suspend fun markWatched(item: CatchUpItem, action: CatchUpAction.Watched): CatchUpAction.Watched {
-		val previouslyPlayed = if (item.isSeries) action.targetIds.flatMap { playedEpisodes(it) }.distinct() else emptyList()
-		val marked = mutableListOf<String>()
-		try {
-			for (target in action.targetIds) {
-				api.post(playedPath(target))
-				marked += target
-			}
-		} catch (err: Exception) {
-			if (marked.isNotEmpty()) attempt { unmarkWatched(marked, previouslyPlayed) }
-				.onFailure { Timber.w(it, "Couldn't roll back a partial Catch Up watched action") }
-			throw err
+	suspend fun markWatched(
+		item: CatchUpItem,
+		action: CatchUpAction.Watched,
+		onCount: (Int) -> Unit = {},
+	): CatchUpAction.Watched {
+		val ids = when {
+			item.isSeries -> action.targetIds.flatMap { unplayedEpisodes(it) }.distinct()
+			// Already played (watched elsewhere since it was dealt): nothing to mark, so undo won't unmark it either
+			item.userData?.played == true -> emptyList()
+			else -> listOf(item.id)
 		}
-		return action.copy(previouslyPlayed = previouslyPlayed)
+		onCount(ids.size)
+		withContext(NonCancellable) {
+			val result = PlayedWrites.run(ids) { api.post(playedPath(it)) }
+			val error = result.error ?: return@withContext
+			if (result.done.isNotEmpty()) {
+				PlayedWrites.run(result.done) { api.delete(playedPath(it)) }.error
+					?.let { Timber.w(it, "Couldn't roll back a partial Catch Up watched action") }
+			}
+			throw error
+		}
+		return action.copy(markedIds = ids)
 	}
 
 	/** Likes the title: JE's watchlist is the Likes flag, the same one its Seerr watchlist sync uses. */
@@ -135,10 +150,13 @@ class CatchUpSession internal constructor(
 		api.post("/Users/$userId/Items/${action.likedId}/Rating", query = mapOf("likes" to true))
 	}
 
-	/** Reverses a server-side action. Dismissals are local and need nothing here. */
+	/**
+	 * Reverses a server-side action. Dismissals are local and need nothing here. A Watched undo that fails part way
+	 * throws [CatchUpPartialUndoException] with what's left to unmark.
+	 */
 	suspend fun revert(action: CatchUpAction) {
 		when (action) {
-			is CatchUpAction.Watched -> unmarkWatched(action.targetIds, action.previouslyPlayed)
+			is CatchUpAction.Watched -> unmarkWatched(action)
 			is CatchUpAction.Watchlist -> if (!action.alreadyLiked) api.delete("/Users/$userId/Items/${action.likedId}/Rating")
 			CatchUpAction.Dismiss -> Unit
 		}
@@ -151,12 +169,19 @@ class CatchUpSession internal constructor(
 		}
 	}
 
-	private suspend fun unmarkWatched(targetIds: List<String>, previouslyPlayed: List<String>) {
-		for (target in targetIds) api.delete(playedPath(target))
-		for (episode in previouslyPlayed) api.post(playedPath(episode))
+	/** Unmarks exactly the items the action marked; like marking, it runs to the end once started. */
+	private suspend fun unmarkWatched(action: CatchUpAction.Watched) {
+		val result = withContext(NonCancellable) { PlayedWrites.run(action.markedIds) { api.delete(playedPath(it)) } }
+		val error = result.error ?: return
+		if (result.done.isEmpty()) throw error
+		throw CatchUpPartialUndoException(action.copy(markedIds = result.remaining), result.done.size, error)
 	}
 
-	private suspend fun playedEpisodes(parentId: String): List<String> =
+	/**
+	 * The episodes under [parentId] that aren't played yet. This is the server-filtered listing, so episodes hidden
+	 * with Hidden Content aren't in it and are neither marked nor (on undo) unmarked.
+	 */
+	private suspend fun unplayedEpisodes(parentId: String): List<String> =
 		EnhancedApi.json.decodeFromJsonElement<CatchUpItemsPage>(
 			api.get(
 				"/Items",
@@ -165,7 +190,9 @@ class CatchUpSession internal constructor(
 					"ParentId" to parentId,
 					"Recursive" to true,
 					"IncludeItemTypes" to "Episode",
-					"Filters" to "IsPlayed",
+					"Filters" to "IsUnplayed",
+					// Missing episodes can't be watched; marking the parent skipped them too
+					"IsMissing" to false,
 					"EnableImages" to false,
 					"EnableUserData" to false,
 				),

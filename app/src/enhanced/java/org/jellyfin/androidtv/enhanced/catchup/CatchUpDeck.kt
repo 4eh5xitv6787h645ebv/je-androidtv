@@ -78,6 +78,12 @@ data class CatchUpDeck(
 		return deck to last
 	}
 
+	/** The last undo only got part of the way: [remaining] replaces the top of the undo stack so Undo can finish it. */
+	fun withRemainingUndo(remaining: CatchUpAction): CatchUpDeck {
+		val last = history.lastOrNull() ?: return this
+		return copy(history = history.dropLast(1) + last.copy(action = remaining))
+	}
+
 	/** Removes a card without an undo entry (e.g. it was watched from its details page). */
 	fun drop(itemId: String): CatchUpDeck {
 		val key = normalizeItemId(itemId)
