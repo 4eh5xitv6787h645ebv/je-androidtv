@@ -35,7 +35,9 @@ import kotlinx.serialization.json.Json
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
+import org.jellyfin.androidtv.enhanced.seerr.SeerrSort
 import org.jellyfin.androidtv.enhanced.seerr.SeerrSource
+import org.jellyfin.androidtv.enhanced.seerr.sortable
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
@@ -49,11 +51,13 @@ import timber.log.Timber
 
 /**
  * Grid of Seerr results for a [SeerrSource] ("More from <person>", a genre, a studio...). Movie and TV feeds are
- * interleaved and paged in as the user scrolls, like the web's discovery sections.
+ * interleaved and paged in as the user scrolls, like the web's discovery sections. Sources whose routes take a
+ * `sortBy` get the web's sort presets; the chosen one survives a trip to details and back.
  */
 class SeerrDiscoveryFragment : Fragment() {
 	companion object {
 		const val ARG_SOURCE = "source"
+		private const val STATE_SORT = "sort"
 		private const val COLUMNS = 8
 		private const val LOAD_MORE_THRESHOLD = COLUMNS * 2
 		// Stop chaining page loads after this many pages in a row added nothing visible
@@ -74,6 +78,7 @@ class SeerrDiscoveryFragment : Fragment() {
 	private var loadJob: Job? = null
 
 	private val filter = MutableStateFlow(Filter.ALL)
+	private val sort = MutableStateFlow(SeerrSort.POPULAR)
 	private val status = MutableStateFlow<String?>(null)
 	private val failed = MutableStateFlow(false)
 	private val paused = MutableStateFlow(false)
@@ -81,7 +86,21 @@ class SeerrDiscoveryFragment : Fragment() {
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 		source = Json.decodeFromString(SeerrSource.serializer(), requireArguments().getString(ARG_SOURCE)!!)
+		savedInstanceState?.getString(STATE_SORT)?.let { name -> SeerrSort.entries.firstOrNull { it.name == name } }?.let { sort.value = it }
 	}
+
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		outState.putString(STATE_SORT, sort.value.name)
+	}
+
+	/** Sources whose results are all one media type don't need the All / Movies / TV switch. */
+	private val singleMediaType
+		get() = when (val current = source) {
+			is SeerrSource.Discover -> current.feed.mediaType != null
+			is SeerrSource.DiscoverGenre, is SeerrSource.Collection -> true
+			else -> false
+		}
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
 		val context = requireContext()
@@ -136,7 +155,7 @@ class SeerrDiscoveryFragment : Fragment() {
 		loadJob = lifecycleScope.launch {
 			if (allResults.isEmpty()) status.value = getString(R.string.je_loading)
 			try {
-				val resolved = cursor ?: SeerrRepository.FeedCursor(seerrRepository.feedsFor(source)).also { cursor = it }
+				val resolved = cursor ?: SeerrRepository.FeedCursor(seerrRepository.feedsFor(source, sort.value)).also { cursor = it }
 				if (!resolved.hasMore) {
 					hasMore = false
 				} else {
@@ -198,6 +217,20 @@ class SeerrDiscoveryFragment : Fragment() {
 		}
 	}
 
+	/** Start over with the new order: the loaded pages were fetched in the old one. */
+	private fun changeSort(value: SeerrSort) {
+		if (sort.value == value) return
+		sort.value = value
+		loadJob?.cancel()
+		loadJob = null
+		cursor = null
+		hasMore = true
+		emptyPages = 0
+		allResults.clear()
+		adapter.clear()
+		loadMore()
+	}
+
 	private fun matchesFilter(item: SeerrResult) = when (filter.value) {
 		Filter.ALL -> true
 		Filter.MOVIES -> item.isMovie
@@ -213,6 +246,7 @@ class SeerrDiscoveryFragment : Fragment() {
 	@androidx.compose.runtime.Composable
 	private fun Header() {
 		val currentFilter by filter.collectAsState()
+		val currentSort by sort.collectAsState()
 		val currentStatus by status.collectAsState()
 		val currentFailed by failed.collectAsState()
 		val currentPaused by paused.collectAsState()
@@ -226,7 +260,7 @@ class SeerrDiscoveryFragment : Fragment() {
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				listOf(
+				if (!singleMediaType) listOf(
 					Filter.ALL to R.string.je_filter_all,
 					Filter.MOVIES to R.string.je_filter_movies,
 					Filter.TV to R.string.je_filter_tv,
@@ -244,6 +278,29 @@ class SeerrDiscoveryFragment : Fragment() {
 						) else ButtonDefaults.colors(),
 					) {
 						Text(stringResource(label))
+					}
+				}
+				if (source.sortable) {
+					Text(
+						text = stringResource(R.string.je_discover_sort),
+						color = Tokens.Color.colorGrey300,
+						modifier = Modifier.padding(start = if (singleMediaType) 0.dp else 16.dp),
+					)
+					listOf(
+						SeerrSort.POPULAR to R.string.je_discover_sort_popular,
+						SeerrSort.TOP_RATED to R.string.je_discover_sort_top_rated,
+						SeerrSort.NEWEST to R.string.je_discover_sort_newest,
+						SeerrSort.OLDEST to R.string.je_discover_sort_oldest,
+					).forEach { (value, label) ->
+						Button(
+							onClick = { changeSort(value) },
+							colors = if (currentSort == value) ButtonDefaults.colors(
+								containerColor = JellyfinTheme.colorScheme.buttonActive,
+								contentColor = JellyfinTheme.colorScheme.onButtonActive,
+							) else ButtonDefaults.colors(),
+						) {
+							Text(stringResource(label))
+						}
 					}
 				}
 				currentStatus?.let { Text(text = it, color = Tokens.Color.colorGrey300, modifier = Modifier.padding(start = 16.dp)) }

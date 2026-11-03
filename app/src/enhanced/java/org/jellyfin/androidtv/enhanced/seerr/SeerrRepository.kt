@@ -65,15 +65,15 @@ class SeerrRepository(
 	private suspend inline fun <reified T> getAs(path: String, query: Map<String, Any?> = emptyMap()): T =
 		EnhancedApi.json.decodeFromJsonElement(enhancedApi.get(path, query))
 
-	private fun pageFeed(path: String, extra: Map<String, Any?> = emptyMap()) = Feed { page ->
+	private fun pageFeed(path: String, extra: Map<String, Any?> = emptyMap(), sort: SeerrSort = SeerrSort.POPULAR) = Feed { page ->
+		// TV-by-company/network feeds can omit mediaType
+		val mediaType = when {
+			"/tv" in path -> MEDIA_TV
+			"/movie" in path -> MEDIA_MOVIE
+			else -> null
+		}
 		if (page > MAX_TMDB_PAGE) SeerrPage(page = page, totalPages = MAX_TMDB_PAGE)
-		else getAs<SeerrPage>(path, extra + ("page" to page)).let { result ->
-			// TV-by-company/network feeds can omit mediaType
-			val mediaType = when {
-				"/tv" in path -> MEDIA_TV
-				"/movie" in path -> MEDIA_MOVIE
-				else -> null
-			}
+		else getAs<SeerrPage>(path, extra + ("page" to page) + ("sortBy" to sort.sortBy(mediaType))).let { result ->
 			if (mediaType == null) result
 			else result.copy(results = result.results.map { if (it.mediaType == null) it.copy(mediaType = mediaType) else it })
 		}
@@ -82,13 +82,46 @@ class SeerrRepository(
 	// Feeds for each discovery source
 
 	/** Resolve [source] into its feeds. An empty list means nothing could be matched on TMDB. */
-	suspend fun feedsFor(source: SeerrSource): List<Feed> = when (source) {
-		is SeerrSource.Recommended -> listOf(pageFeed("jellyseerr/${source.mediaType}/${source.tmdbId}/recommendations"))
-		is SeerrSource.Similar -> listOf(pageFeed("jellyseerr/${source.mediaType}/${source.tmdbId}/similar"))
-		is SeerrSource.Person -> personFeeds(source)
-		is SeerrSource.Genre -> genreFeeds(source.name)
-		is SeerrSource.Studio -> studioFeeds(source)
-		is SeerrSource.Keyword -> keywordFeeds(source.name)
+	suspend fun feedsFor(source: SeerrSource): List<Feed> = feedsFor(source, SeerrSort.POPULAR)
+
+	/**
+	 * Resolve [source] into its feeds, ordered by [sort] where the source supports it ([SeerrSource.sortable]);
+	 * other sources ignore [sort], since some of their routes reject a `sortBy`.
+	 */
+	suspend fun feedsFor(source: SeerrSource, sort: SeerrSort): List<Feed> {
+		val order = if (source.sortable) sort else SeerrSort.POPULAR
+		return when (source) {
+			is SeerrSource.Recommended -> listOf(pageFeed("jellyseerr/${source.mediaType}/${source.tmdbId}/recommendations"))
+			is SeerrSource.Similar -> listOf(pageFeed("jellyseerr/${source.mediaType}/${source.tmdbId}/similar"))
+			is SeerrSource.Person -> personFeeds(source)
+			is SeerrSource.Genre -> genreFeeds(source.name, order)
+			is SeerrSource.Studio -> studioFeeds(source, order)
+			is SeerrSource.Keyword -> keywordFeeds(source.name, order)
+			is SeerrSource.Discover -> listOf(pageFeed(source.feed.path, sort = order))
+			is SeerrSource.DiscoverGenre -> listOf(pageFeed(
+				if (source.mediaType == MEDIA_TV) "jellyseerr/discover/tv/genre/${source.genreId}"
+				else "jellyseerr/discover/movies/genre/${source.genreId}",
+				sort = order,
+			))
+
+			// As the web's category page: the company's movies beside its series, which only the plugin's TMDB-backed
+			// route can list
+			is SeerrSource.Company -> listOfNotNull(
+				pageFeed("jellyseerr/discover/movies/studio/${source.companyId}", sort = order),
+				if (enhancedRepository.current.config.tmdbEnabled) pageFeed("jellyseerr/discover/tv/studio/${source.companyId}", sort = order) else null,
+			)
+
+			is SeerrSource.Network -> listOfNotNull(
+				pageFeed("jellyseerr/discover/tv/network/${source.networkId}", sort = order),
+				source.companyId?.let { pageFeed("jellyseerr/discover/movies/studio/$it", sort = order) },
+			)
+
+			is SeerrSource.Collection -> listOf(Feed { page ->
+				// The parts come in one response; hand them out as a single page
+				val parts = if (page == 1) collectionParts(source.collectionTmdbId) else emptyList()
+				SeerrPage(page = page, totalPages = 1, totalResults = parts.size, results = parts)
+			})
+		}
 	}
 
 	private suspend fun personFeeds(source: SeerrSource.Person): List<Feed> {
@@ -143,13 +176,13 @@ class SeerrRepository(
 				it.name.contains(name, ignoreCase = true) || name.contains(it.name, ignoreCase = true)
 			}?.id
 
-	private suspend fun genreFeeds(name: String): List<Feed> = coroutineScope {
+	private suspend fun genreFeeds(name: String, sort: SeerrSort): List<Feed> = coroutineScope {
 		// Only successful catalogs are cached; a failure propagates so the whole lookup can be retried
 		val movieGenres = async { genres(MEDIA_MOVIE) }
 		val tvGenres = async { genres(MEDIA_TV) }
 		listOfNotNull(
-			matchGenre(movieGenres.await(), name)?.let { pageFeed("jellyseerr/discover/movies/genre/$it") },
-			matchGenre(tvGenres.await(), name)?.let { pageFeed("jellyseerr/discover/tv/genre/$it") },
+			matchGenre(movieGenres.await(), name)?.let { pageFeed("jellyseerr/discover/movies/genre/$it", sort = sort) },
+			matchGenre(tvGenres.await(), name)?.let { pageFeed("jellyseerr/discover/tv/genre/$it", sort = sort) },
 		)
 	}
 
@@ -158,7 +191,7 @@ class SeerrRepository(
 		return TV_NETWORKS[key] ?: TV_NETWORKS.entries.firstOrNull { (n, _) -> key.contains(n) || n.contains(key) }?.value
 	}
 
-	private suspend fun studioFeeds(source: SeerrSource.Studio): List<Feed> {
+	private suspend fun studioFeeds(source: SeerrSource.Studio, sort: SeerrSort): List<Feed> {
 		val mappedCompanyId = source.jellyfinStudioId?.let { id ->
 			runCatching {
 				(enhancedApi.get("studio/$id").jsonObject["tmdbId"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
@@ -178,10 +211,10 @@ class SeerrRepository(
 		val tmdbEnabled = enhancedRepository.current.config.tmdbEnabled
 
 		return listOfNotNull(
-			companyId?.let { pageFeed("jellyseerr/discover/movies/studio/$it") },
+			companyId?.let { pageFeed("jellyseerr/discover/movies/studio/$it", sort = sort) },
 			when {
-				networkId != null -> pageFeed("jellyseerr/discover/tv/network/$networkId")
-				companyId != null && tmdbEnabled -> pageFeed("jellyseerr/discover/tv/studio/$companyId")
+				networkId != null -> pageFeed("jellyseerr/discover/tv/network/$networkId", sort = sort)
+				companyId != null && tmdbEnabled -> pageFeed("jellyseerr/discover/tv/studio/$companyId", sort = sort)
 				else -> null
 			},
 		)
@@ -200,7 +233,7 @@ class SeerrRepository(
 		})?.get("id")?.let { (it as? JsonPrimitive)?.intOrNull }
 	}
 
-	private suspend fun keywordFeeds(name: String): List<Feed> {
+	private suspend fun keywordFeeds(name: String, sort: SeerrSort): List<Feed> {
 		val results = enhancedApi.get("tmdb/search/keyword", mapOf("query" to name)).jsonObject["results"]
 			?.jsonArray.orEmpty().mapNotNull { it as? JsonObject }
 		val keywordId = (results.firstOrNull { (it["name"] as? JsonPrimitive)?.contentOrNull.equals(name, ignoreCase = true) } ?: results.firstOrNull())
@@ -208,8 +241,8 @@ class SeerrRepository(
 			?: return emptyList()
 
 		return listOf(
-			pageFeed("jellyseerr/discover/movies/keyword/$keywordId"),
-			pageFeed("jellyseerr/discover/tv/keyword/$keywordId"),
+			pageFeed("jellyseerr/discover/movies/keyword/$keywordId", sort = sort),
+			pageFeed("jellyseerr/discover/tv/keyword/$keywordId", sort = sort),
 		)
 	}
 
@@ -326,13 +359,16 @@ class SeerrRepository(
 	suspend fun collectionMissing(boxSetId: String): List<SeerrResult> {
 		val tmdbId = (enhancedApi.get("boxset/$boxSetId").jsonObject["tmdbId"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull()
 			?: return emptyList()
-		val parts = enhancedApi.get("jellyseerr/collection/$tmdbId").jsonObject["parts"]?.jsonArray.orEmpty()
-			.mapNotNull { runCatching { EnhancedApi.json.decodeFromJsonElement<SeerrResult>(it) }.getOrNull() }
-			.map { if (it.mediaType == null) it.copy(mediaType = MEDIA_MOVIE) else it }
-			.filter { it.status != SeerrMediaStatus.AVAILABLE }
-			.sortedBy { it.releaseDate ?: "9999" }
+		val parts = collectionParts(tmdbId).filter { it.status != SeerrMediaStatus.AVAILABLE }
 		return filterResults(parts)
 	}
+
+	/** Every part of the TMDB collection [collectionTmdbId], oldest first (undated ones last), unfiltered. */
+	suspend fun collectionParts(collectionTmdbId: Int): List<SeerrResult> =
+		enhancedApi.get("jellyseerr/collection/$collectionTmdbId").jsonObject["parts"]?.jsonArray.orEmpty()
+			.mapNotNull { runCatching { EnhancedApi.json.decodeFromJsonElement<SeerrResult>(it) }.getOrNull() }
+			.map { if (it.mediaType == null) it.copy(mediaType = MEDIA_MOVIE) else it }
+			.sortedBy { it.releaseDate ?: "9999" }
 
 	// Details and requests
 
