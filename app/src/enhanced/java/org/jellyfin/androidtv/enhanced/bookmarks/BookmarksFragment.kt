@@ -259,6 +259,12 @@ class BookmarksFragment : Fragment() {
 		playbackHelper.retrieveAndPlay(listOf(itemId), false, BookmarkLogic.ticks(row.entry.bookmark.timestampSeconds), 0, context)
 	}
 
+	/** A closed dialog leaves nothing focused and the toolbar would take it: back to the row, if it is still listed. */
+	private fun refocus(row: BookmarkRow) {
+		val rows = (loadState.value as? LoadState.Ready)?.value?.rows ?: return
+		if (rows.any { it.key == row.key }) listFocus.moveTo(row.key)
+	}
+
 	private fun showMenu(row: BookmarkRow) {
 		val context = context ?: return
 		if (row.key in busy.value) return
@@ -274,6 +280,7 @@ class BookmarksFragment : Fragment() {
 			.setTitle(title(row))
 			.setItems(actions.map { it.first }.toTypedArray()) { _, which -> actions[which].second() }
 			.setNegativeButton(android.R.string.cancel, null)
+			.setOnDismissListener { refocus(row) }
 			.show()
 	}
 
@@ -301,6 +308,7 @@ class BookmarksFragment : Fragment() {
 			.setView(frame)
 			.setPositiveButton(R.string.je_bookmarks_save) { _, _ -> rename(row, BookmarkLogic.labelForSave(input.text?.toString(), seconds)) }
 			.setNegativeButton(android.R.string.cancel, null)
+			.setOnDismissListener { refocus(row) }
 			.show()
 	}
 
@@ -335,6 +343,7 @@ class BookmarksFragment : Fragment() {
 			.setMessage(getString(R.string.je_bookmarks_delete_message, title(row), BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds)))
 			.setPositiveButton(R.string.je_bookmarks_delete) { _, _ -> delete(row) }
 			.setNegativeButton(android.R.string.cancel, null)
+			.setOnDismissListener { refocus(row) }
 			.show()
 	}
 
@@ -345,6 +354,7 @@ class BookmarksFragment : Fragment() {
 			.setMessage(R.string.je_bookmarks_stale_message)
 			.setPositiveButton(R.string.je_bookmarks_delete) { _, _ -> delete(row) }
 			.setNegativeButton(android.R.string.cancel, null)
+			.setOnDismissListener { refocus(row) }
 			.show()
 	}
 
