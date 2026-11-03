@@ -9,7 +9,10 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.sdk.model.api.UserDto
@@ -36,14 +39,29 @@ class EnhancedRepositoryTest : FunSpec({
 		var now = 0L
 
 		// Created after the stubs: its init loads the state for the current user in the background
-		val repository by lazy { EnhancedRepository(api, users) { now } }
+		val repository by lazy { EnhancedRepository(api, users, processLifecycle = null) { now } }
 
 		fun configFails(err: Throwable) {
-			coEvery { api.get("public-config", any()) } throws err
+			coEvery { api.publicConfig(any()) } throws err
 		}
 
-		fun configLoads() {
-			coEvery { api.get("public-config", any()) } returns json.parseToJsonElement("""{"SpoilerBlurEnabled":true}""")
+		fun configLoads(body: String = """{"SpoilerBlurEnabled":true}""") {
+			coEvery { api.publicConfig(any()) } returns json.parseToJsonElement(body)
+		}
+
+		/** Signals each `public-config` fetch after the first, for background refreshes. */
+		fun configLoadsSignalling(body: String, fetched: CompletableDeferred<Unit>) {
+			coEvery { api.publicConfig(any()) } answers {
+				fetched.complete(Unit)
+				json.parseToJsonElement(body)
+			}
+		}
+
+		fun configFailsSignalling(err: Throwable, fetched: CompletableDeferred<Unit>) {
+			coEvery { api.publicConfig(any()) } answers {
+				fetched.complete(Unit)
+				throw err
+			}
 		}
 	}
 
@@ -69,7 +87,7 @@ class EnhancedRepositoryTest : FunSpec({
 		fixture.configFails(EnhancedApi.EnhancedApiException(503, "unavailable"))
 		fixture.repository.ensureLoaded().configUnavailable shouldBe true
 
-		coEvery { fixture.api.get("public-config", any()) } returns json.parseToJsonElement("[]")
+		coEvery { fixture.api.publicConfig(any()) } returns json.parseToJsonElement("[]")
 		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS
 		fixture.repository.ensureLoaded().configUnavailable shouldBe true
 	}
@@ -83,10 +101,11 @@ class EnhancedRepositoryTest : FunSpec({
 		fixture.configLoads()
 		fixture.now += EnhancedRepository.RETRY_BACKOFF_MS - 1
 		fixture.repository.ensureLoaded().configUnavailable shouldBe true
-		coVerify(exactly = 0) { fixture.api.get("public-config", any()) }
+		coVerify(exactly = 0) { fixture.api.publicConfig(any()) }
 
 		fixture.repository.ensureLoaded(force = true).available shouldBe true
-		coVerify(exactly = 1) { fixture.api.get("public-config", any()) }
+		// An explicit retry bypasses the shared public-config cache
+		coVerify(exactly = 1) { fixture.api.publicConfig(true) }
 	}
 
 	test("the backoff ends after its interval and is never cached as a missing plugin") {
@@ -127,5 +146,83 @@ class EnhancedRepositoryTest : FunSpec({
 
 		fixture.configLoads()
 		fixture.repository.ensureLoaded().available shouldBe true
+	}
+
+	test("a stale state is returned at once and refreshed in the background") {
+		val fixture = Fixture()
+		fixture.configLoads()
+		fixture.repository.ensureLoaded().config.hiddenContentEnabled shouldBe false
+
+		fixture.configLoads("""{"SpoilerBlurEnabled":true,"HiddenContentEnabled":true}""")
+		// Not stale yet: nothing is fetched
+		fixture.now += EnhancedRepository.STALE_AFTER_MS - 1
+		fixture.repository.ensureLoaded().config.hiddenContentEnabled shouldBe false
+		coVerify(exactly = 1) { fixture.api.publicConfig(any()) }
+
+		fixture.now += 1
+		fixture.repository.ensureLoaded().config.hiddenContentEnabled shouldBe false
+		withTimeout(5_000) { fixture.repository.state.first { it.config.hiddenContentEnabled } }
+		coVerify(exactly = 1) { fixture.api.publicConfig(true) }
+	}
+
+	test("returning to the foreground refreshes only a stale state") {
+		val fixture = Fixture()
+		fixture.configLoads()
+		fixture.repository.ensureLoaded().available shouldBe true
+
+		val fetched = CompletableDeferred<Unit>()
+		fixture.configLoadsSignalling("""{"SpoilerBlurEnabled":true,"JellyseerrEnabled":true}""", fetched)
+		fixture.repository.refreshIfStale()
+		// Wait for the check to run (it takes the same lock)
+		fixture.repository.ensureLoaded()
+		fetched.isCompleted shouldBe false
+
+		fixture.now += EnhancedRepository.STALE_AFTER_MS
+		fixture.repository.refreshIfStale()
+		withTimeout(5_000) { fixture.repository.state.first { it.config.jellyseerrEnabled } }
+	}
+
+	test("a failed background refresh keeps the good state, even for a 404") {
+		for (err in listOf(EnhancedApi.EnhancedApiException(0, "offline"), EnhancedApi.EnhancedApiException(404, "not found"))) {
+			val fixture = Fixture()
+			fixture.configLoads()
+			fixture.repository.ensureLoaded().available shouldBe true
+
+			val fetched = CompletableDeferred<Unit>()
+			fixture.configFailsSignalling(err, fetched)
+			fixture.now += EnhancedRepository.STALE_AFTER_MS
+			fixture.repository.refreshIfStale()
+			withTimeout(5_000) { fetched.await() }
+			// Waits for the refresh to finish; the state is fresh again, so this doesn't fetch
+			val after = fixture.repository.ensureLoaded()
+			after.available shouldBe true
+			after.spoilerGuard shouldBe true
+			fixture.repository.current.available shouldBe true
+			// And the failure isn't retried on every screen until the next interval
+			coVerify(exactly = 2) { fixture.api.publicConfig(any()) }
+		}
+	}
+
+	test("settings saved while a refresh is loading are not overwritten by it") {
+		val fixture = Fixture()
+		fixture.configLoads()
+		fixture.repository.ensureLoaded().userSettings.showFileSizes shouldBe null
+
+		val saved = EnhancedUserSettings(showFileSizes = true)
+		val fetchStarted = CompletableDeferred<Unit>()
+		val fetchMayFinish = CompletableDeferred<Unit>()
+		coEvery { fixture.api.publicConfig(any()) } coAnswers {
+			fetchStarted.complete(Unit)
+			fetchMayFinish.await()
+			json.parseToJsonElement("""{"SpoilerBlurEnabled":true,"JellyseerrEnabled":true}""")
+		}
+		fixture.now += EnhancedRepository.STALE_AFTER_MS
+		fixture.repository.refreshIfStale()
+		withTimeout(5_000) { fetchStarted.await() }
+		fixture.repository.updateUserSettings(saved)
+		fetchMayFinish.complete(Unit)
+
+		val refreshed = withTimeout(5_000) { fixture.repository.state.first { it.config.jellyseerrEnabled } }
+		refreshed.userSettings shouldBe saved
 	}
 })
