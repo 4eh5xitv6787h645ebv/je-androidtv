@@ -6,6 +6,8 @@ import io.kotest.matchers.shouldBe
 import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.SpoilerPolicy
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 
 class ActivityLogicTest : FunSpec({
 	val json = """
@@ -45,18 +47,46 @@ class ActivityLogicTest : FunSpec({
 	}
 
 	test("guarded episodes lose their name; unknown guard state withholds") {
+		val policy = SpoilerPolicy.STRICT
+		fun snapshot(state: SpoilerGuardState?, members: Set<String>? = emptySet()) =
+			SpoilerSnapshot(enabled = true, state = state, policy = policy, collectionMovieIds = members)
 		val state = SpoilerGuardState(series = mapOf("326d7084-0827-00b2-20b6-83fc0dc0ae78" to JsonPrimitive(true)))
 		val item = watch.item!!
-		ActivityLogic.isGuarded(item.id, item.seriesId, true, state) shouldBe true
-		ActivityLogic.isGuarded(review.item!!.id, null, true, state) shouldBe false
-		ActivityLogic.isGuarded(review.item!!.id, null, true, null) shouldBe true
-		ActivityLogic.isGuarded(review.item!!.id, null, false, null) shouldBe false
-		ActivityLogic.isGuarded(review.item!!.id, null, true, SpoilerGuardState(movies = mapOf("C33CF33FFBEDC5E5F200B1E7D619D512" to JsonPrimitive(true)))) shouldBe true
+		val movie = review.item!!
+		ActivityLogic.protection(snapshot(state), item.type, item.id, item.seriesId).hideTitles shouldBe true
+		ActivityLogic.protection(snapshot(state), movie.type, movie.id, null).guarded shouldBe false
+		ActivityLogic.protection(snapshot(null), movie.type, movie.id, null).hideReviews shouldBe true
+		ActivityLogic.protection(SpoilerSnapshot.DISABLED, movie.type, movie.id, null).guarded shouldBe false
+		val movies = SpoilerGuardState(movies = mapOf("C33CF33FFBEDC5E5F200B1E7D619D512" to JsonPrimitive(true)))
+		ActivityLogic.protection(snapshot(movies), movie.type, movie.id, null).hideReviews shouldBe true
+		// An episode without its series can't be checked
+		ActivityLogic.protection(snapshot(state), "Episode", "e1", null).hideTitles shouldBe true
 
-		ActivityLogic.displayName(item.name, item.seriesName, item.seasonNumber, item.episodeNumber, guarded = true) shouldBe "Scrubs (2026) · S2:E1"
-		ActivityLogic.displayName(item.name, item.seriesName, item.seasonNumber, item.episodeNumber, guarded = false) shouldBe
+		ActivityLogic.displayName(item.name, item.seriesName, item.seasonNumber, item.episodeNumber, hideTitle = true) shouldBe "Scrubs (2026) · S2:E1"
+		ActivityLogic.displayName(item.name, item.seriesName, item.seasonNumber, item.episodeNumber, hideTitle = false) shouldBe
 			"Scrubs (2026) · S2:E1 · My First Time in a While"
-		ActivityLogic.displayName("Michael", null, null, null, guarded = true) shouldBe "Michael"
+		ActivityLogic.displayName("Michael", null, null, null, hideTitle = true) shouldBe "Michael"
+	}
+
+	test("movies inherit protection from a guarded collection; unknown membership withholds") {
+		val movie = review.item!!
+		val collections = SpoilerGuardState(collections = mapOf("b0x" to JsonPrimitive(true)))
+		fun snapshot(members: Set<String>?) =
+			SpoilerSnapshot(enabled = true, state = collections, policy = SpoilerPolicy.STRICT, collectionMovieIds = members)
+		ActivityLogic.protection(snapshot(setOf("c33cf33ffbedc5e5f200b1e7d619d512")), movie.type, movie.id, null).hideReviews shouldBe true
+		ActivityLogic.protection(snapshot(emptySet()), movie.type, movie.id, null).guarded shouldBe false
+		ActivityLogic.protection(snapshot(null), movie.type, movie.id, null).hideReviews shouldBe true
+	}
+
+	test("reviews follow the user's effective review policy") {
+		val movie = review.item!!
+		val movies = SpoilerGuardState(movies = mapOf(movie.id to JsonPrimitive(true)))
+		val optedOut = SpoilerPolicy.STRICT.copy(hideReviews = false)
+		val protection = ActivityLogic.protection(
+			SpoilerSnapshot(enabled = true, state = movies, policy = optedOut, collectionMovieIds = emptySet()), movie.type, movie.id, null,
+		)
+		protection.guarded shouldBe true
+		protection.hideReviews shouldBe false
 	}
 
 	test("ages are compact and timestamps are milliseconds") {

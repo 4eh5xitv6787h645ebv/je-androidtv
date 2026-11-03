@@ -51,8 +51,9 @@ import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.canOpen
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.Protection
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadStateContent
@@ -74,7 +75,7 @@ import kotlin.time.Duration.Companion.seconds
 class ActivityFragment : Fragment() {
 	private val activityRepository by inject<ActivityRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
-	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
+	private val spoilerProtection by inject<SpoilerProtection>()
 	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
 
@@ -86,10 +87,8 @@ class ActivityFragment : Fragment() {
 		/** Null when the feed is turned off (the page then only shows active streams). */
 		val entries: List<ActivityEntry>?,
 		val config: ActivityConfig,
-		val spoilerGuard: Boolean,
-		/** Null with [spoilerGuard] on: the guard list failed to load, so names and reviews are withheld. */
-		val spoilerState: SpoilerGuardState?,
-		val stripReviews: Boolean,
+		/** The user's Spoiler Guard lists and policy; unresolvable parts fail closed (names and reviews withheld). */
+		val spoilers: SpoilerSnapshot,
 	)
 
 	private sealed interface Streams {
@@ -125,13 +124,11 @@ class ActivityFragment : Fragment() {
 				coroutineScope {
 					val configCall = async { activityRepository.config() }
 					val feedCall = async { if (state.activity) activityRepository.feed().items else null }
-					val spoilerCall = async { if (state.spoilerGuardMayApply) attempt { spoilerGuardRepository.getState() }.getOrNull() else null }
+					val spoilerCall = async { spoilerProtection.snapshot() }
 					Feed(
 						entries = feedCall.await(),
 						config = configCall.await(),
-						spoilerGuard = state.spoilerGuardMayApply,
-						spoilerState = spoilerCall.await(),
-						stripReviews = state.config.spoilerStripReviews,
+						spoilers = spoilerCall.await(),
 					)
 				}
 			}.onSuccess { feed ->
@@ -282,10 +279,10 @@ class ActivityFragment : Fragment() {
 	@Composable
 	private fun EntryRow(feed: Feed, entry: ActivityEntry, nowMs: Long, modifier: Modifier) {
 		val item = entry.item
-		val guarded = ActivityLogic.isGuarded(item?.id, item?.seriesId, feed.spoilerGuard, feed.spoilerState)
-		val name = item?.let { ActivityLogic.displayName(it.name, it.seriesName, it.seasonNumber, it.episodeNumber, guarded) }.orEmpty()
+		val protection = item?.let { ActivityLogic.protection(feed.spoilers, it.type, it.id, it.seriesId) } ?: Protection.NONE
+		val name = item?.let { ActivityLogic.displayName(it.name, it.seriesName, it.seasonNumber, it.episodeNumber, protection.hideTitles) }.orEmpty()
 		// Review text and stars can give the story away; the plugin strips reviews of protected titles elsewhere
-		val hideReview = guarded && feed.stripReviews
+		val hideReview = protection.hideReviews
 		val rating = entry.rating?.takeIf { it > 0 && !hideReview }
 		val line = when {
 			entry.type == ActivityType.REVIEWED && rating != null ->
@@ -325,8 +322,10 @@ class ActivityFragment : Fragment() {
 	@Composable
 	private fun SessionRow(feed: Feed, session: ActiveSession, modifier: Modifier) {
 		val item = session.nowPlaying
-		val guarded = item != null && ActivityLogic.isGuarded(item.id, item.seriesId, feed.spoilerGuard, feed.spoilerState)
-		val title = item?.let { ActivityLogic.displayName(it.name, it.seriesName, it.parentIndexNumber, it.indexNumber, guarded) }.orEmpty()
+		val title = item?.let {
+			val protection = ActivityLogic.protection(feed.spoilers, it.type, it.id, it.seriesId)
+			ActivityLogic.displayName(it.name, it.seriesName, it.parentIndexNumber, it.indexNumber, protection.hideTitles)
+		}.orEmpty()
 		val who = listOfNotNull(
 			session.userName.takeIf { it.isNotBlank() },
 			listOfNotNull(session.deviceName, session.client?.let { "($it)" }).joinToString(" ").ifBlank { null },

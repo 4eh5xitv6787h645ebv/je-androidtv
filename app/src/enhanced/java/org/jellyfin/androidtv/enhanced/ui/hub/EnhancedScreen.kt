@@ -25,6 +25,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.ui.LocalOnEnhancedHub
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
@@ -47,7 +48,8 @@ sealed interface LoadState<out T> {
 /**
  * Page scaffold for Jellyfin Enhanced screens: the main toolbar (with the Enhanced button active), a title row and
  * the page content, all inside the app theme. Use it for Compose pages; leanback-grid pages can use
- * [EnhancedScreenHeader] alone.
+ * [EnhancedScreenHeader] alone. [hub] is only set by the hub itself: on every other page the Enhanced button leads
+ * back to it.
  */
 @Composable
 fun EnhancedScreen(
@@ -55,12 +57,15 @@ fun EnhancedScreen(
 	modifier: Modifier = Modifier,
 	subtitle: String? = null,
 	headerActions: (@Composable () -> Unit)? = null,
+	hub: Boolean = false,
 	content: @Composable () -> Unit,
 ) {
 	val pageFocused = remember { mutableStateOf(false) }
 	JellyfinTheme {
 		Column(modifier = modifier.fillMaxSize()) {
-			MainToolbar(MainToolbarActiveButton.Enhanced)
+			CompositionLocalProvider(LocalOnEnhancedHub provides hub) {
+				MainToolbar(MainToolbarActiveButton.Enhanced)
+			}
 			// Everything under the toolbar: whether the page itself (header actions included) holds the focus
 			Column(modifier = Modifier.fillMaxSize().onFocusChanged { pageFocused.value = it.hasFocus }) {
 				EnhancedScreenHeader(title = title, subtitle = subtitle, actions = headerActions)

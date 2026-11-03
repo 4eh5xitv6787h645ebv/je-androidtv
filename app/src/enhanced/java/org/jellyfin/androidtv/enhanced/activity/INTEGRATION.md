@@ -7,3 +7,5 @@
 - Settings: none. Upstream hooks: none.
 - Gates not in `EnhancedConfig.kt`: `ActivityFeedShowWatched/Favorited/Reviewed/ActiveStreams`, decoded by the page
   itself (`ActivityConfig`).
+- Needs `SpoilerProtection` (bound in `enhancedModule`): names and reviews follow the shared Spoiler Guard snapshot,
+  including movies protected through a guarded collection and the user's review policy.

@@ -29,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.nativeKeyCode
@@ -53,7 +54,9 @@ import org.jellyfin.androidtv.enhanced.calendar.PageNotice
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
@@ -89,6 +92,7 @@ class BookmarksFragment : Fragment() {
 	private val playbackHelper by inject<PlaybackHelper>()
 	private val spoilerProtection by inject<SpoilerProtection>()
 	private val enhancedRepository by inject<EnhancedRepository>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 
 	private class BookmarkRow(
 		val entry: BookmarkEntry,
@@ -102,51 +106,125 @@ class BookmarksFragment : Fragment() {
 		val key get() = entry.bookmarkId
 
 		fun withBookmark(bookmark: Bookmark) = BookmarkRow(BookmarkEntry(entry.bookmarkId, bookmark), itemId, item, stale, name)
+
+		/** After the item lookup: [found] is the item, or null when the server answered without it. */
+		fun resolved(found: BookmarkedItem?, spoiler: SpoilerSnapshot) =
+			BookmarkRow(entry, itemId, found, stale = found == null, name = BookmarkLogic.name(entry.bookmark, found, spoiler))
+
+		/**
+		 * Everything that may have changed with the user's protection withheld at once, before the list is read again:
+		 * episode names become neutral and artwork, whose image tags predate the change, goes away.
+		 */
+		fun neutralized() = BookmarkRow(
+			entry,
+			itemId,
+			item?.copy(posterUrl = null),
+			stale,
+			BookmarkLogic.name(entry.bookmark, item, SpoilerSnapshot.UNKNOWN),
+		)
 	}
 
-	/** [generation] counts full loads, so local edits (which keep it) don't re-run the initial focus. */
-	private class Loaded(val rows: List<BookmarkRow>, val resolveFailed: Boolean, val generation: Int)
+	/**
+	 * [generation] counts full loads, so local edits and background refreshes (which keep it) don't re-run the initial
+	 * focus.
+	 */
+	private data class Loaded(val rows: List<BookmarkRow>, val resolveFailed: Boolean, val generation: Int)
 
 	private val loadState = MutableStateFlow<LoadState<Loaded>>(LoadState.Loading)
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
 	private val listFocus = ListFocus()
 	private var loadJob: Job? = null
 	private var generation = 0
+	/** [SpoilerGuardRepository.generation] when the shown list was loaded. */
+	private var spoilerGeneration = -1L
+	/** Whether the page has been started before: later starts are returns (from playback, details, or to the app). */
+	private var started = false
+	/** The bookmark that last had the focus, so returning to the page (or restoring it) lands on it again. */
+	private var selectedKey: String? = null
 
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
+		selectedKey = savedInstanceState?.getString(STATE_SELECTED)
 		reload()
 	}
 
-	private fun reload(retry: Boolean = false) {
+	override fun onStart() {
+		super.onStart()
+		if (!started) {
+			started = true
+			return
+		}
+		// Back from playback or details: a bookmark may have been added there, or its title guarded
+		val protectionChanged = spoilerGuardRepository.generation != spoilerGeneration
+		when (loadState.value) {
+			is LoadState.Ready -> {
+				if (protectionChanged) updateRows { rows -> rows.map { it.neutralized() } }
+				reload(refresh = true, reuseItems = !protectionChanged)
+			}
+			LoadState.Loading -> if (protectionChanged) reload()
+			else -> Unit
+		}
+	}
+
+	override fun onSaveInstanceState(outState: Bundle) {
+		super.onSaveInstanceState(outState)
+		outState.putString(STATE_SELECTED, selectedKey)
+	}
+
+	/**
+	 * Lists the bookmarks, shows them, then looks their items up in batches from the top so the first rows fill in
+	 * first ([BookmarkLogic.lookupBatches]).
+	 *
+	 * [refresh] keeps the current list on screen (and the focus where it is) until the new one is ready; with
+	 * [reuseItems] its rows keep their looked-up items meanwhile, which is only safe while Spoiler Guard hasn't changed.
+	 */
+	private fun reload(retry: Boolean = false, refresh: Boolean = false, reuseItems: Boolean = false) {
 		loadJob?.cancel()
-		loadState.value = LoadState.Loading
+		val current = (loadState.value as? LoadState.Ready)?.value
+		if (!refresh || current == null) loadState.value = LoadState.Loading
+		spoilerGeneration = spoilerGuardRepository.generation
+		val previous = if (reuseItems) current?.rows.orEmpty().associateBy { it.key } else emptyMap()
 		loadJob = lifecycleScope.launch {
-			attempt {
+			val listed = attempt {
 				// Retry must not wait out the unknown-config backoff
 				if (retry && enhancedRepository.current.configUnavailable) enhancedRepository.ensureLoaded(force = true)
 				val entries = bookmarksRepository.list()
-				val ids = entries.mapNotNull { it.bookmark.itemId.toUUIDOrNull() }.distinct()
-				val resolved = attempt { bookmarksRepository.resolve(ids) }
-					.onFailure { Timber.w(it, "Failed to look up bookmarked items") }
-					.getOrNull()
 				val spoiler = spoilerProtection.snapshot()
 				// Every name would be withheld: offer a retry instead of a list of neutral labels
 				if (spoiler.configUnavailable) error("Jellyfin Enhanced configuration unavailable")
-				Loaded(
-					rows = entries.map { entry ->
-						val itemId = entry.bookmark.itemId.toUUIDOrNull()
-						val item = itemId?.let { resolved?.get(it) }
-						BookmarkRow(entry, itemId, item, stale = resolved != null && item == null, name = BookmarkLogic.name(entry.bookmark, item, spoiler))
-					},
-					resolveFailed = resolved == null,
-					generation = ++generation,
-				)
-			}.onSuccess {
-				loadState.value = LoadState.Ready(it)
-			}.onFailure { err ->
+				entries to spoiler
+			}
+			val (entries, spoiler) = listed.getOrElse { err ->
 				Timber.w(err, "Failed to load bookmarks")
 				loadState.value = LoadState.Error(err.serverMessage) { reload(retry = true) }
+				return@launch
+			}
+			val rows = entries.map { entry ->
+				val itemId = entry.bookmark.itemId.toUUIDOrNull()
+				val known = previous[entry.bookmarkId]?.takeIf { it.itemId == itemId }
+				BookmarkRow(entry, itemId, known?.item, stale = known?.stale == true, name = BookmarkLogic.name(entry.bookmark, known?.item, spoiler))
+			}
+			val shownGeneration = if (refresh && current != null) current.generation else ++generation
+			loadState.value = LoadState.Ready(Loaded(rows, resolveFailed = false, generation = shownGeneration))
+
+			for (batch in BookmarkLogic.lookupBatches(entries, BookmarksRepository.LOOKUP_CHUNK)) {
+				val resolved = attempt { bookmarksRepository.resolve(batch) }
+					.onFailure { Timber.w(it, "Failed to look up bookmarked items") }
+					.getOrNull()
+				val ids = batch.toSet()
+				loadState.update { state ->
+					if (state !is LoadState.Ready) return@update state
+					val loaded = state.value
+					LoadState.Ready(
+						loaded.copy(
+							// Rows renamed or deleted meanwhile keep those changes: only the looked-up fields are replaced
+							rows = if (resolved == null) loaded.rows else loaded.rows.map { row ->
+								if (row.itemId in ids) row.resolved(resolved[row.itemId], spoiler) else row
+							},
+							resolveFailed = loaded.resolveFailed || resolved == null,
+						)
+					)
+				}
 			}
 		}
 	}
@@ -178,7 +256,8 @@ class BookmarksFragment : Fragment() {
 				}
 				listFocus.Effect()
 				LaunchedEffect(loaded.generation) {
-					loaded.rows.firstOrNull()?.let { listFocus.moveTo(it.key) }
+					val selected = selectedKey?.takeIf { key -> loaded.rows.any { it.key == key } }
+					listFocus.moveTo(selected ?: loaded.rows.firstOrNull()?.key)
 				}
 			}
 		}
@@ -212,6 +291,7 @@ class BookmarksFragment : Fragment() {
 				modifier = Modifier
 					.weight(1f)
 					.focusRequester(listFocus.requester(row.key))
+					.onFocusChanged { if (it.isFocused) selectedKey = row.key }
 					.then(menuKey),
 			) {
 				PageImage(url = row.item?.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
@@ -255,7 +335,7 @@ class BookmarksFragment : Fragment() {
 	private fun play(row: BookmarkRow) {
 		val context = context ?: return
 		val itemId = row.itemId ?: return
-		// The item was loaded as this user when the list was built, so it's accessible
+		// Rows still being looked up play too: the server refuses an item the user can no longer access
 		playbackHelper.retrieveAndPlay(listOf(itemId), false, BookmarkLogic.ticks(row.entry.bookmark.timestampSeconds), 0, context)
 	}
 
@@ -386,6 +466,10 @@ class BookmarksFragment : Fragment() {
 
 	private fun updateRows(change: (List<BookmarkRow>) -> List<BookmarkRow>) = loadState.update { current ->
 		if (current !is LoadState.Ready) current
-		else LoadState.Ready(Loaded(change(current.value.rows), current.value.resolveFailed, current.value.generation))
+		else LoadState.Ready(current.value.copy(rows = change(current.value.rows)))
+	}
+
+	private companion object {
+		const val STATE_SELECTED = "je_bookmarks_selected"
 	}
 }

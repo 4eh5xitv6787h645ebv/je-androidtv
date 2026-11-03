@@ -1,5 +1,7 @@
 package org.jellyfin.androidtv.enhanced.calendar
 
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,17 +11,46 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import java.time.LocalDate
 import java.time.ZoneId
 
+/** The signed-in user's requested-title keys (`movie:<tmdbId>` / `tv:<tmdbId>`). */
+data class RequestedKeys(
+	val keys: Set<String>,
+	/** The server had more requests than were read ([CalendarRepository.MAX_REQUEST_PAGES]), so some may be missing. */
+	val truncated: Boolean,
+)
+
 /** Calendar data from the plugin: `arr/calendar` events and the user's own requests for highlighting. */
 class CalendarRepository(
 	private val enhancedApi: EnhancedApi,
+	private val clock: () -> Long = System::currentTimeMillis,
 ) {
-	private companion object {
+	companion object {
 		const val REQUEST_PAGE_SIZE = 200
 		/** The web pages through all requests; stop somewhere sane on a huge server. */
 		const val MAX_REQUEST_PAGES = 10
-		const val POSTER_WIDTH = 240
-		const val LOOKUP_CHUNK = 50
+		/** How long the request keys are reused, e.g. while paging through weeks. */
+		const val REQUESTED_TTL_MS = 5 * 60_000L
+		private const val POSTER_WIDTH = 240
+		private const val LOOKUP_CHUNK = 50
+
+		/** Reads request pages from page 1 until the last one or [maxPages], whichever comes first. */
+		suspend fun collectRequestedKeys(maxPages: Int, fetch: suspend (page: Int) -> CalendarRequestsPage): RequestedKeys {
+			val keys = mutableSetOf<String>()
+			var page = 1
+			var totalPages = 1
+			while (page <= totalPages && page <= maxPages) {
+				val response = fetch(page)
+				response.requests.mapNotNullTo(keys) { it.key }
+				totalPages = response.totalPages.coerceAtLeast(1)
+				page++
+			}
+			return RequestedKeys(keys, truncated = totalPages > maxPages)
+		}
 	}
+
+	private class CachedKeys(val token: String?, val at: Long, val value: RequestedKeys)
+
+	private val requestedMutex = Mutex()
+	private var requestedCache: CachedKeys? = null
 
 	suspend fun events(start: LocalDate, zone: ZoneId): CalendarResponse {
 		val (from, to) = CalendarLogic.queryRange(start, zone)
@@ -57,23 +88,27 @@ class CalendarRepository(
 
 	suspend fun config(): CalendarConfig = EnhancedApi.json.decodeFromJsonElement(enhancedApi.get("public-config"))
 
-	/** `movie:<tmdbId>` / `tv:<tmdbId>` keys of everything the signed-in user requested. */
-	suspend fun requestedKeys(): Set<String> {
+	/** `movie:<tmdbId>` / `tv:<tmdbId>` keys of everything the signed-in user requested (see [requested]). */
+	suspend fun requestedKeys(): Set<String> = requested().keys
+
+	/**
+	 * Everything the signed-in user requested. Paging through all requests takes up to [MAX_REQUEST_PAGES] calls, so
+	 * the result is reused for [REQUESTED_TTL_MS] for the same user unless [refresh] asks for a fresh read (after
+	 * returning from a page where the user may have requested something).
+	 */
+	suspend fun requested(refresh: Boolean = false): RequestedKeys = requestedMutex.withLock {
+		val token = enhancedApi.accessToken
+		requestedCache
+			?.takeIf { !refresh && it.token == token && clock() - it.at in 0 until REQUESTED_TTL_MS }
+			?.let { return@withLock it.value }
 		val api = enhancedApi.pinned()
-		val keys = mutableSetOf<String>()
-		var page = 1
-		var totalPages = 1
-		while (page <= totalPages && page <= MAX_REQUEST_PAGES) {
-			val response = EnhancedApi.json.decodeFromJsonElement<CalendarRequestsPage>(
+		collectRequestedKeys(MAX_REQUEST_PAGES) { page ->
+			EnhancedApi.json.decodeFromJsonElement<CalendarRequestsPage>(
 				api.get(
 					"arr/requests",
 					mapOf("take" to REQUEST_PAGE_SIZE, "skip" to (page - 1) * REQUEST_PAGE_SIZE, "userOnly" to "true"),
 				)
 			)
-			response.requests.mapNotNullTo(keys) { it.key }
-			totalPages = response.totalPages.coerceAtLeast(1)
-			page++
-		}
-		return keys
+		}.also { requestedCache = CachedKeys(token, clock(), it) }
 	}
 }

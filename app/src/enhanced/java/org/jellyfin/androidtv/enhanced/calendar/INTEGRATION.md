@@ -9,4 +9,6 @@
   another feature wants them.
 - `PageSupport.kt` in this package holds small helpers (`attempt`, `canOpen`, `PageChip`, `PageListRow`, `PageImage`,
   `PageNotice`) that the bookmarks, activity and about packages also use.
-- Needs `SpoilerProtection` (bound in `enhancedModule`) and `HiddenContentRepository` (shared module).
+- Needs `SpoilerProtection`, `SpoilerGuardRepository` (both bound in `enhancedModule`) and `HiddenContentRepository`
+  (shared module). The page revalidates when it is shown again (from details) and drops its data at once when Spoiler
+  Guard changed in this client meanwhile.

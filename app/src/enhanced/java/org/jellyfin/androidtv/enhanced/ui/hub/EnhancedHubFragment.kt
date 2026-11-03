@@ -84,6 +84,7 @@ class EnhancedHubFragment : Fragment() {
 		EnhancedScreen(
 			title = stringResource(R.string.je_hub_title),
 			subtitle = state.pluginVersion?.let { stringResource(R.string.je_hub_version, it) },
+			hub = true,
 		) {
 			if (!state.available) {
 				Text(

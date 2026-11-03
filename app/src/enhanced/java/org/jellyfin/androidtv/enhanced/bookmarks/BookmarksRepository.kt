@@ -31,8 +31,9 @@ class BookmarksRepository(
 	private val enhancedApi: EnhancedApi,
 	private val settingsRepository: EnhancedSettingsRepository,
 ) {
-	private companion object {
-		const val POSTER_WIDTH = 240
+	companion object {
+		private const val POSTER_WIDTH = 240
+		/** Items looked up per `/Items` call; the list resolves this many bookmarks at a time. */
 		const val LOOKUP_CHUNK = 50
 	}
 

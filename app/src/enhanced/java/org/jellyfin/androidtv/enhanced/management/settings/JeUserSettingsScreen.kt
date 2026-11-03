@@ -27,6 +27,8 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
+import org.jellyfin.androidtv.ui.navigation.LocalRouter
+import org.jellyfin.androidtv.ui.settings.Routes
 import org.jellyfin.androidtv.ui.settings.composable.SettingsColumn
 import org.koin.compose.koinInject
 import timber.log.Timber
@@ -52,6 +54,7 @@ private fun JeUserSettingsScreen(@StringRes title: Int, sections: List<Pair<Int,
 	val enhancedApi = koinInject<EnhancedApi>()
 	val enhanced by enhancedRepository.state.collectAsState()
 	val context = LocalContext.current
+	val router = LocalRouter.current
 	val scope = rememberCoroutineScope()
 
 	var reload by remember { mutableIntStateOf(0) }
@@ -145,6 +148,15 @@ private fun JeUserSettingsScreen(@StringRes title: Int, sections: List<Pair<Int,
 						}
 					}
 				}
+			}
+			// The web's auto-skip fields don't drive this app's player: lead to the setting that does
+			if (section == R.string.je_management_set_section_skip) item(key = "media_segments") {
+				EnhancedChoiceRow(
+					key = "media_segments",
+					title = stringResource(R.string.je_management_set_media_segments),
+					value = stringResource(R.string.je_management_set_media_segments_desc),
+					saving = false,
+				) { router.push(Routes.PLAYBACK_MEDIA_SEGMENTS) }
 			}
 		}
 	}

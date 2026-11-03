@@ -8,7 +8,8 @@
 - Settings: none. Upstream hooks: none. Playback goes through upstream's `PlaybackHelper.retrieveAndPlay(ids, false,
   positionTicks, 0, context)`.
 - Capturing a bookmark from inside the player lives in `playback/` (the Bookmark action of the player overlay).
-- Needs `SpoilerProtection` (bound in `enhancedModule`) for the bookmark list's episode names.
+- Needs `SpoilerProtection` and `SpoilerGuardRepository` (both bound in `enhancedModule`) for the bookmark list's
+  episode names; the list is re-read when the page is shown again (bookmarks added in the player appear).
 
 ## Editing (stream T, branch `je/polish`)
 
