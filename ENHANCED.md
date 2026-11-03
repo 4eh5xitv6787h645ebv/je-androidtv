@@ -1,4 +1,4 @@
-# Jellyfin Enhanced for Android TV
+# JE AndroidTV
 
 This is the official [Jellyfin Android TV client](https://github.com/jellyfin/jellyfin-androidtv) with a native
 [Jellyfin Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) (JE) layer on top. Everything upstream does still
@@ -263,7 +263,7 @@ server isn't hit by every screen.
 ## Install
 
 Sideload the APK onto your TV, for example with `adb install jellyfin-enhanced.apk` or the Downloader app.
-The local build delivered in `../artifacts/jellyfin-enhanced-androidtv.apk` is optimized with R8 and signed with
+The local build delivered in `../artifacts/je-androidtv-release.apk` is optimized with R8 and signed with
 this machine's Android debug key for testing. Use your own persistent release key for distribution.
 
 ## Build

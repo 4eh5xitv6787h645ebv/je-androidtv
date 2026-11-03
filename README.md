@@ -1,8 +1,8 @@
-<h1 align="center">Jellyfin Enhanced for Android TV</h1>
+<h1 align="center">JE AndroidTV</h1>
 <p align="center">The official <a href="https://github.com/jellyfin/jellyfin-androidtv">Jellyfin Android TV client</a> with a native <a href="https://github.com/n00bcodr/Jellyfin-Enhanced">Jellyfin Enhanced</a> layer on top.</p>
 
 <p align="center">
-<a href="https://github.com/4eh5xitv6787h645ebv/jellyfin-enhanced-androidtv/releases"><img alt="Release" src="https://img.shields.io/github/v/release/4eh5xitv6787h645ebv/jellyfin-enhanced-androidtv?label=download"/></a>
+<a href="https://github.com/4eh5xitv6787h645ebv/je-androidtv/releases"><img alt="Release" src="https://img.shields.io/github/v/release/4eh5xitv6787h645ebv/je-androidtv?label=download"/></a>
 <a href="LICENSE"><img alt="GPL 2.0 License" src="https://img.shields.io/github/license/jellyfin/jellyfin-androidtv.svg"/></a>
 </p>
 
@@ -19,8 +19,8 @@ on there. On a server without the plugin the app looks and behaves like stock. I
 
 ## Install
 
-1. Download `jellyfin-enhanced-androidtv-release.apk` from the [latest release](https://github.com/4eh5xitv6787h645ebv/jellyfin-enhanced-androidtv/releases).
-2. Sideload it onto your TV: `adb install jellyfin-enhanced-androidtv-release.apk`, or use the Downloader app.
+1. Download `je-androidtv-release.apk` from the [latest release](https://github.com/4eh5xitv6787h645ebv/je-androidtv/releases).
+2. Sideload it onto your TV: `adb install je-androidtv-release.apk`, or use the Downloader app.
 3. Sign in to your Jellyfin server as usual. Nothing else to set up: the app finds the plugin on its own.
 
 Needs Jellyfin 10.11 or 12 with Jellyfin Enhanced 12.13 or newer. Seerr features need the plugin's Jellyseerr/Overseerr
