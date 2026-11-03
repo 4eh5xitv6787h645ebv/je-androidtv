@@ -1,6 +1,10 @@
 package org.jellyfin.androidtv.enhanced.about
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -62,8 +66,18 @@ class AboutRepository(
 
 	suspend fun hostCompat(): HostCompat = EnhancedApi.json.decodeFromJsonElement(enhancedApi.get("host-compat"))
 
-	/** Read only: never dismisses, that's server-wide state the admin clears from the plugin's settings page. */
+	/** Bumped after a dismissal so every screen showing [whatsNew] loads it again. */
+	private val _whatsNewRevision = MutableStateFlow(0)
+	val whatsNewRevision: StateFlow<Int> = _whatsNewRevision.asStateFlow()
+
+	/** Read only: opening a screen never dismisses; that's server-wide state, cleared only by [dismissWhatsNew]. */
 	suspend fun whatsNew(): WhatsNew = EnhancedApi.json.decodeFromJsonElement(enhancedApi.get("whats-new"))
+
+	/** Marks the new settings as seen for every admin of the server. Only call it from an explicit user action. */
+	suspend fun dismissWhatsNew() {
+		enhancedApi.post("whats-new/dismiss")
+		_whatsNewRevision.update { it + 1 }
+	}
 
 	/** The cached release, if [latestRelease] already fetched it. */
 	val cachedRelease: PluginRelease? get() = release
@@ -87,6 +101,35 @@ class AboutRepository(
 			.getOrNull()
 			?.also { release = it }
 	}
+}
+
+/** Presentation of the `whats-new` setting list. */
+object WhatsNewSettings {
+	private val wordBoundary = Regex("""(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])|_+""")
+
+	/** A plugin setting key (`qualityTagsPreferredAudioLanguage`, `mmSchedAction_accounts`) as a readable label. */
+	fun label(key: String): String {
+		val words = key.split(wordBoundary).filter { it.isNotBlank() }
+		if (words.isEmpty()) return key
+		return words.mapIndexed { index, word ->
+			val lower = if (word.length > 1 && word.all { it.isUpperCase() || it.isDigit() }) word else word.lowercase()
+			if (index == 0) lower.replaceFirstChar { it.uppercase() } else lower
+		}.joinToString(" ")
+	}
+
+	/** Compares dotted versions numerically (`12.13.0.0` > `12.8.0.0`); non-numeric parts count as 0. */
+	val versionOrder: Comparator<String> = Comparator { a, b ->
+		val left = a.split('.').map { it.toIntOrNull() ?: 0 }
+		val right = b.split('.').map { it.toIntOrNull() ?: 0 }
+		(0 until maxOf(left.size, right.size))
+			.map { (left.getOrElse(it) { 0 }).compareTo(right.getOrElse(it) { 0 }) }
+			.firstOrNull { it != 0 } ?: 0
+	}
+
+	/** The new settings, newest version first, then by label. */
+	fun sorted(newSettings: Map<String, String>): List<Pair<String, String>> = newSettings.entries
+		.sortedWith(compareBy<Map.Entry<String, String>, String>(versionOrder.reversed()) { it.value }.thenBy { label(it.key).lowercase() })
+		.map { it.key to it.value }
 }
 
 object ReleaseNotes {

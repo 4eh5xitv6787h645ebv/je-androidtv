@@ -24,4 +24,5 @@ val aboutSettingsEntry = SettingsEntry(
 val aboutSettingsRoutes: Map<String, RouteComposable> = mapOf(
 	EnhancedSettingsRoutes.ABOUT to { AboutSettingsScreen() },
 	AboutRoutes.RELEASE_NOTES to { ReleaseNotesSettingsScreen() },
+	AboutRoutes.WHATS_NEW to { WhatsNewSettingsScreen() },
 )
