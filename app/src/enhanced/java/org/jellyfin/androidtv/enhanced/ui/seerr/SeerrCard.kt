@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.leanback.widget.DiffCallback
 import androidx.leanback.widget.Presenter
 import androidx.lifecycle.findViewTreeLifecycleOwner
 import androidx.lifecycle.setViewTreeLifecycleOwner
@@ -129,6 +130,12 @@ fun SeerrCard(
 			}
 		},
 	)
+}
+
+/** Seerr cards are the same card when they're the same title, so adapter updates keep the position and focus. */
+object SeerrResultDiff : DiffCallback<SeerrResult>() {
+	override fun areItemsTheSame(oldItem: SeerrResult, newItem: SeerrResult) = oldItem.dedupeKey == newItem.dedupeKey
+	override fun areContentsTheSame(oldItem: SeerrResult, newItem: SeerrResult) = oldItem == newItem
 }
 
 /** Card at the end of a Seerr row that opens the full discovery grid. */

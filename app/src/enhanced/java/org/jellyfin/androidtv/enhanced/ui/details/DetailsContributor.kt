@@ -57,6 +57,9 @@ interface DetailsContributor {
 	/** Action buttons for the button row, or empty. Called once per details visit. */
 	suspend fun actions(context: DetailsContext): List<DetailsAction> = emptyList()
 
-	/** Rows appended below the item's own rows ([EnhancedComposeRow] or leanback `ListRow`s), or empty. */
+	/**
+	 * Rows appended below the item's own rows ([EnhancedComposeRow] or leanback `ListRow`s), or empty. An
+	 * [EnhancedComposeRow] with [DetailsRowPlacement.TOP] goes directly under the overview instead.
+	 */
 	suspend fun rows(context: DetailsContext): List<Row> = emptyList()
 }

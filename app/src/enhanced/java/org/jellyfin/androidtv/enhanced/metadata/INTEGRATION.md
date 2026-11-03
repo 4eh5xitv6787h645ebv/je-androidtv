@@ -47,9 +47,10 @@ None.
 
 ## Upstream hooks
 
-None. The info rows are appended after upstream's rows because `EnhancedDetails.addRows` appends contributor rows.
-If you want the "Enhanced info" row directly under the overview, a positional hint on `DetailsContributor` (e.g.
-`rowsAtTop`) would be needed in the shared seam; the feature works without it.
+None. The "Enhanced info" row (chips, ratings, "Streaming in …") is an `EnhancedComposeRow` with
+`placement = DetailsRowPlacement.TOP`, which `EnhancedDetails.addRows` inserts directly under the overview row,
+above upstream's rows. "Cast ages" stays below upstream's rows. `EnhancedComposeRowPresenter` renders every compose
+row with upstream's `CustomRowHeaderPresenter` header and leanback's browse padding as its left/right inset.
 
 ## Gates read outside `EnhancedConfig.kt`
 

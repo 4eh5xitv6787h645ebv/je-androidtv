@@ -11,7 +11,9 @@ import android.widget.LinearLayout
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -40,10 +42,12 @@ import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
+import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrResultDiff
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
 import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
@@ -73,13 +77,21 @@ class SeerrSearchGridFragment : Fragment() {
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val searchRepository by inject<SeerrSearchRepository>()
 	private val navigationRepository by inject<NavigationRepository>()
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
 
 	/** Search mode: the box's text, "Title (YYYY)" included. Null in collection mode. */
 	private var query: SeerrSearchQuery? = null
 	private var tmdbCollectionId: Int = 0
 	private lateinit var title: String
 
-	private val adapter: ArrayObjectAdapter = ArrayObjectAdapter(SeerrCardPresenter { removed -> adapter.remove(removed) })
+	private val adapter: ArrayObjectAdapter = ArrayObjectAdapter(SeerrCardPresenter { removed ->
+		adapter.remove(removed)
+		// The last card hidden: the grid is empty for good when nothing more can load
+		if (adapter.size() == 0 && !hasMore) {
+			empty.value = true
+			status.value = context?.getString(R.string.je_nothing_found)
+		}
+	})
 	private val seen = HashSet<String>()
 	private var filter: SeerrSearchFilter? = null
 	private var nextPage = 1
@@ -91,6 +103,10 @@ class SeerrSearchGridFragment : Fragment() {
 	private val status = MutableStateFlow<String?>(null)
 	private val failed = MutableStateFlow(false)
 	private val paused = MutableStateFlow(false)
+	/** Loaded to the end with no card to show. */
+	private val empty = MutableStateFlow(false)
+	/** [SpoilerGuardRepository.generation] when the cards' artwork was last resolved. */
+	private var artworkGeneration = -1L
 
 	private val hasMore get() = if (query != null) nextPage <= totalPages else !loadedOnce
 
@@ -152,14 +168,18 @@ class SeerrSearchGridFragment : Fragment() {
 		if (userTriggered) emptyPages = 0
 		failed.value = false
 		paused.value = false
+		// Strings through the application context: results can land after the screen was left
+		val appContext = context?.applicationContext ?: return
 		loadJob = lifecycleScope.launch {
-			if (adapter.size() == 0) status.value = getString(R.string.je_loading)
+			if (adapter.size() == 0) status.value = appContext.getString(R.string.je_loading)
 			try {
 				val state = enhancedRepository.ensureLoaded()
 				if (!SeerrSearchRepository.enabled(state)) {
-					status.value = getString(R.string.je_seerr_unavailable)
+					status.value = appContext.getString(R.string.je_seerr_unavailable)
+					empty.value = adapter.size() == 0
 					return@launch
 				}
+				val generation = spoilerGuardRepository.generation
 				val filter = filter ?: searchRepository.filter(state, query?.year).let { filter ->
 					// A collection is a fixed set: its library parts stay, marked Available
 					if (query == null) filter.copy(excludeLibraryItems = false) else filter
@@ -177,6 +197,7 @@ class SeerrSearchGridFragment : Fragment() {
 				val visible = searchRepository.withLibraryArtwork(
 					results.filter { (it.isMovie || it.isTv) && filter.accepts(it) && seen.add(it.dedupeKey) }
 				)
+				if (adapter.size() == 0) artworkGeneration = generation
 				adapter.addAll(adapter.size(), visible)
 
 				// A page that was entirely filtered out adds no cards to scroll onto, so nothing would trigger the next
@@ -190,15 +211,16 @@ class SeerrSearchGridFragment : Fragment() {
 				paused.value = hasMore && emptyPages >= MAX_EMPTY_PAGES
 				status.value = when {
 					adapter.size() > 0 -> null
-					hasMore -> getString(R.string.je_nothing_yet)
-					else -> getString(R.string.je_nothing_found)
+					hasMore -> appContext.getString(R.string.je_nothing_yet)
+					else -> appContext.getString(R.string.je_nothing_found)
 				}
+				empty.value = adapter.size() == 0 && !hasMore
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr search grid failed")
 				// Nothing advanced, so Retry loads the same page again
-				status.value = (err as? EnhancedApi.EnhancedApiException)?.serverMessage ?: getString(R.string.je_error_generic)
+				status.value = (err as? EnhancedApi.EnhancedApiException)?.serverMessage ?: appContext.getString(R.string.je_error_generic)
 				failed.value = true
 			}
 		}
@@ -206,13 +228,18 @@ class SeerrSearchGridFragment : Fragment() {
 
 	/**
 	 * Coming back to this screen: Spoiler Guard may have changed meanwhile, so library posters are withheld at once
-	 * and re-resolved with the server's current image tags before they show again.
+	 * (every poster, when a Spoiler Guard write happened since they were resolved: a pending opt-in protects titles
+	 * that aren't in the library) and re-resolved before they show again.
 	 */
 	private fun showAgain() {
 		val items = (0 until adapter.size()).mapNotNull { adapter.get(it) as? SeerrResult }
-		if (items.none { SeerrSearchFilter.libraryId(it) != null }) return
-		val withheld = items.map { if (SeerrSearchFilter.libraryId(it) != null) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it }
-		adapter.setItems(withheld, null)
+		if (items.isEmpty()) return
+		val generation = spoilerGuardRepository.generation
+		val protectionChanged = generation != artworkGeneration
+		val withheld = items.map {
+			if (SeerrSearchFilter.libraryId(it) != null || protectionChanged) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it
+		}
+		adapter.setItems(withheld, SeerrResultDiff)
 		lifecycleScope.launch {
 			val refreshed = try {
 				searchRepository.withLibraryArtwork(withheld)
@@ -222,7 +249,8 @@ class SeerrSearchGridFragment : Fragment() {
 				Timber.w(err, "Failed to refresh library artwork")
 				return@launch
 			}
-			adapter.setItems(refreshed, null)
+			artworkGeneration = generation
+			adapter.setItems(refreshed, SeerrResultDiff)
 		}
 	}
 
@@ -231,6 +259,7 @@ class SeerrSearchGridFragment : Fragment() {
 		val currentStatus by status.collectAsState()
 		val currentFailed by failed.collectAsState()
 		val currentPaused by paused.collectAsState()
+		val currentEmpty by empty.collectAsState()
 
 		Column(
 			modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 27.dp),
@@ -240,6 +269,7 @@ class SeerrSearchGridFragment : Fragment() {
 			Row(
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 				verticalAlignment = Alignment.CenterVertically,
+				modifier = Modifier.horizontalScroll(rememberScrollState()),
 			) {
 				currentStatus?.let { Text(text = it, color = secondaryTextColor()) }
 				if (currentFailed) {
@@ -249,6 +279,13 @@ class SeerrSearchGridFragment : Fragment() {
 					Button(onClick = { loadMore() }, modifier = Modifier.focusRequester(retryFocus)) { Text(stringResource(R.string.je_retry)) }
 				} else if (currentPaused) {
 					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_load_more)) }
+				} else if (currentEmpty) {
+					// Nothing to show and nothing more to load: the grid has no card to focus, so offer a way out
+					val backFocus = remember { FocusRequester() }
+					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(backFocus)) {
+						Text(stringResource(R.string.je_seerr_back))
+					}
+					LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
 				}
 			}
 		}

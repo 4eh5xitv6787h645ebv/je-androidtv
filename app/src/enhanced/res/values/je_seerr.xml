@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Seerr details: a request or Spoiler Guard opt-in in flight (shown on the button that started it) -->
+    <string name="je_seerr_requesting">Requesting…</string>
+    <string name="je_seerr_saving">Saving…</string>
+    <!-- Seerr grids: terminal empty state -->
+    <string name="je_seerr_back">Back</string>
+</resources>

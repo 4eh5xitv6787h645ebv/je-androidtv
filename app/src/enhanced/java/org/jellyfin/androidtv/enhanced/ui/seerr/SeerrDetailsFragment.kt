@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.fragment.compose.content
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
@@ -58,6 +59,7 @@ import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.seerr.SeerrDetails
 import org.jellyfin.androidtv.enhanced.seerr.SeerrErrors
 import org.jellyfin.androidtv.enhanced.seerr.SeerrImages
@@ -102,6 +104,7 @@ class SeerrDetailsFragment : Fragment() {
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val seerrLinkManager by inject<SeerrLinkManager>()
 	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
+	private val spoilerProtection by inject<SpoilerProtection>()
 	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
 
@@ -125,8 +128,11 @@ class SeerrDetailsFragment : Fragment() {
 		/** Feature contributions (see [SeerrDetailsContributor]). */
 		val extraActions: List<SeerrDetailsAction> = emptyList(),
 		val sections: List<@Composable () -> Unit> = emptyList(),
-		val busy: Boolean = false,
+		/** A request or Spoiler Guard write in flight; its button says so and the others ignore clicks meanwhile. */
+		val busy: Busy? = null,
 	)
+
+	private enum class Busy { REQUEST, PENDING }
 
 	private val contributors: List<SeerrDetailsContributor>
 		get() = org.koin.java.KoinJavaComponent.getKoin().getAll()
@@ -147,6 +153,9 @@ class SeerrDetailsFragment : Fragment() {
 	)
 
 	private val state = MutableStateFlow(UiState())
+
+	/** [SpoilerGuardRepository.generation] when the shown protection was resolved; a change means it may be stale. */
+	private var spoilerGeneration = -1L
 	private val mediaType by lazy { requireArguments().getString(ARG_MEDIA_TYPE) ?: SeerrRepository.MEDIA_MOVIE }
 	private val tmdbId by lazy { requireArguments().getInt(ARG_TMDB_ID) }
 	private val isTv get() = mediaType == SeerrRepository.MEDIA_TV
@@ -158,18 +167,21 @@ class SeerrDetailsFragment : Fragment() {
 
 	override fun onStart() {
 		super.onStart()
-		// Coming back from the back stack: Spoiler Guard may have changed (e.g. via "Open in library"), so withhold
-		// the library copy's fields and artwork until they're fetched again
+		// Coming back from the back stack: Spoiler Guard may have changed (e.g. via "Open in library", or a pending
+		// opt-in made elsewhere), so withhold the story fields and artwork until protection is resolved again
 		val current = state.value
 		val media = current.details?.mediaInfo
-		if (current.details != null && (media?.jellyfinMediaId != null || media?.jellyfinMediaId4k != null)) {
-			state.value = current.copy(libraryStory = withheldStory())
-			reload()
+		if (current.details == null || !current.enhanced.spoilerGuardMayApply) return
+		val inLibrary = media?.jellyfinMediaId != null || media?.jellyfinMediaId4k != null
+		if (inLibrary || current.libraryStory != null || spoilerGeneration != spoilerGuardRepository.generation) {
+			state.value = current.copy(libraryStory = withheldStory(requireContext()))
 		}
+		reload()
 	}
 
-	private fun withheldStory() = LibraryStory(
-		overview = getString(R.string.je_spoiler_overview_placeholder),
+	/** Everything story-related withheld: protection applies but the server's filtered copy isn't (yet) known. */
+	private fun withheldStory(context: Context) = LibraryStory(
+		overview = context.getString(R.string.je_spoiler_overview_placeholder),
 		tagline = null,
 		rating = null,
 		year = null,
@@ -181,25 +193,33 @@ class SeerrDetailsFragment : Fragment() {
 	private fun reload() {
 		Timber.d("Refreshing Seerr details (%s/%d)", mediaType, tmdbId)
 		state.value = state.value.copy(loading = true, error = null)
+		// Strings for results that arrive after the screen is gone (it stays loaded on the back stack)
+		val appContext = requireContext().applicationContext
 		lifecycleScope.launch {
 			try {
 				// coroutineScope so a failed call surfaces here instead of cancelling (and crashing) lifecycleScope
 				val loaded = coroutineScope {
 					val enhanced = enhancedRepository.ensureLoaded()
+					val generation = spoilerGuardRepository.generation
 					val detailsCall = async { SeerrDetailsLoader.load(enhancedApi, mediaType, tmdbId) }
 					val partialCall = async { if (isTv) seerrRepository.partialRequestSettings() else null }
 					val quotaCall = async { if (enhanced.config.jellyseerrShowQuotaInfo) seerrRepository.quota() else null }
-					val spoilerCall = async {
-						if (enhanced.spoilerGuard) runCatching { spoilerGuardRepository.getState() }.getOrNull() else null
-					}
+					// Never throws: lists that can't be read give a snapshot that protects everything
+					val spoilerCall = async { if (enhanced.spoilerGuardMayApply) spoilerProtection.snapshot() else null }
 					val bundle = detailsCall.await()
 					val details = bundle.details
-					val spoilerState = spoilerCall.await()
+					val snapshot = spoilerCall.await()
 					// Seerr's JSON doesn't go through the plugin's Spoiler Guard filter. For titles in the library, show the
-					// story fields from the server's own (filtered) copy instead
+					// story fields from the server's own (filtered) copy instead. Titles that aren't there yet are protected
+					// by a pending opt-in, and withheld when the user's lists couldn't be read
 					val libraryId = (details.mediaInfo?.jellyfinMediaId ?: details.mediaInfo?.jellyfinMediaId4k)?.let(::parseUuid)
 					val librarySeasonsCall = async { if (isTv && libraryId != null) librarySeasons(libraryId) else null }
-					val libraryStory = if (enhanced.spoilerGuardMayApply && libraryId != null) libraryStory(libraryId) else null
+					val libraryStory = when {
+						snapshot == null -> null
+						libraryId != null -> libraryStory(libraryId)
+						snapshot.forTitle(isMovie = !isTv, libraryId = null, tmdbId = tmdbId).guarded -> withheldStory(appContext)
+						else -> null
+					}
 					val contributionContext = SeerrDetailsContext(
 						fragment = this@SeerrDetailsFragment,
 						mediaType = mediaType,
@@ -228,19 +248,19 @@ class SeerrDetailsFragment : Fragment() {
 						enhanced = enhanced,
 						partial = partialCall.await(),
 						quota = quotaCall.await(),
-						spoilerPending = spoilerState?.let { spoilerGuardRepository.isPending(it, mediaType, tmdbId) },
+						// The opt-in button needs the lists themselves (not a fail-closed guess)
+						spoilerPending = snapshot?.state?.takeIf { enhanced.spoilerGuard }?.let { snapshot.isPending(mediaType, tmdbId) },
 						libraryStory = libraryStory,
 						extraActions = extraActions,
 						sections = sections,
-					)
+					).also { spoilerGeneration = generation }
 				}
 				state.value = loaded
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Failed to load Seerr details")
-				val context = context ?: return@launch
-				state.value = state.value.copy(loading = false, busy = false, error = seerrError(context, err) ?: getString(R.string.je_error_generic))
+				state.value = state.value.copy(loading = false, busy = null, error = seerrError(appContext, err) ?: appContext.getString(R.string.je_error_generic))
 			}
 		}
 	}
@@ -375,8 +395,9 @@ class SeerrDetailsFragment : Fragment() {
 
 					if (ui.enhanced.seerrUsable) {
 						requestLabel(ui, details)?.let { label ->
-							Button(onClick = { startRequest(details) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
-								Text(stringResource(label))
+							// Stays enabled while busy so focus doesn't jump away; the label says what's happening
+							Button(onClick = { if (ui.busy == null) startRequest(details) }, modifier = Modifier.firstFocus()) {
+								Text(stringResource(if (ui.busy == Busy.REQUEST) R.string.je_seerr_requesting else label))
 							}
 						}
 					}
@@ -390,13 +411,17 @@ class SeerrDetailsFragment : Fragment() {
 
 					// Pre-acquisition Spoiler Guard opt-in, promoted by the plugin when the title arrives
 					if (ui.spoilerPending != null && jellyfinId == null) {
-						Button(onClick = { toggleSpoilerPending(details, !ui.spoilerPending) }, enabled = !ui.busy, modifier = Modifier.firstFocus()) {
-							Text(stringResource(if (ui.spoilerPending) R.string.je_spoiler_pending else R.string.je_spoiler_enable_pending))
+						Button(onClick = { if (ui.busy == null) toggleSpoilerPending(details, !ui.spoilerPending) }, modifier = Modifier.firstFocus()) {
+							Text(stringResource(when {
+								ui.busy == Busy.PENDING -> R.string.je_seerr_saving
+								ui.spoilerPending -> R.string.je_spoiler_pending
+								else -> R.string.je_spoiler_enable_pending
+							}))
 						}
 					}
 
 					for (action in ui.extraActions) {
-						Button(onClick = action.onClick, enabled = !ui.busy, modifier = Modifier.firstFocus()) { Text(action.label) }
+						Button(onClick = { if (ui.busy == null) action.onClick() }, modifier = Modifier.firstFocus()) { Text(action.label) }
 					}
 				}
 
@@ -435,7 +460,7 @@ class SeerrDetailsFragment : Fragment() {
 
 				if (isTv) {
 					SeerrDetailsSeasonsRow(seasonEntries(ui, details)) { season ->
-						if (season.requestable && ui.enhanced.seerrUsable && !ui.busy && requestLabel(ui, details) != null) startRequest(details)
+						if (season.requestable && ui.enhanced.seerrUsable && ui.busy == null && requestLabel(ui, details) != null) startRequest(details)
 					}
 				}
 
@@ -519,17 +544,18 @@ class SeerrDetailsFragment : Fragment() {
 				val status = SeerrSeasonAvailability.seasonStatus(details, ui.extras.requests, ui.librarySeasons, season.seasonNumber)
 				SeerrDetailsSeasonEntry(
 					seasonNumber = season.seasonNumber,
-					label = when {
-						season.seasonNumber == 0 -> getString(R.string.je_specials)
-						guarded || season.name.isNullOrBlank() -> getString(R.string.je_season_number, season.seasonNumber)
-						else -> season.name
-					},
+					label = seasonLabel(season, guarded),
 					episodeCount = season.episodeCount,
 					status = status,
 					requestable = season.episodeCount > 0 && SeerrMediaStatus.isRequestable(status),
 				)
 			}
 	}
+
+	/** A season's name; Seerr's own names (which can give the story away) only for titles that aren't protected. */
+	private fun seasonLabel(season: SeerrSeason, guarded: Boolean): String =
+		SeerrSeasonLabels.customName(season, guarded)
+			?: if (season.seasonNumber == 0) getString(R.string.je_specials) else getString(R.string.je_season_number, season.seasonNumber)
 
 	/**
 	 * The cast row: Seerr's credits for titles that aren't in the library, the server's own (Spoiler Guard filtered)
@@ -565,6 +591,8 @@ class SeerrDetailsFragment : Fragment() {
 				pickSeasons(details, stored)
 				return
 			}
+			val appContext = requireContext().applicationContext
+			state.value = state.value.copy(busy = Busy.REQUEST)
 			lifecycleScope.launch {
 				val candidates = try {
 					seerrRepository.tvdbCandidates(details.id)
@@ -573,12 +601,15 @@ class SeerrDetailsFragment : Fragment() {
 				} catch (err: Exception) {
 					Timber.w(err, "Sonarr lookup failed")
 					emptyList()
+				} finally {
+					state.value = state.value.copy(busy = null)
 				}
-				val context = context ?: return@launch
 				if (candidates.isEmpty()) {
-					toast(getString(R.string.je_tvdb_no_match), long = true)
+					toast(appContext, appContext.getString(R.string.je_tvdb_no_match), long = true)
 					return@launch
 				}
+				// Only offer the choice while the screen is showing; the user has moved on otherwise
+				val context = context?.takeIf { lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) } ?: return@launch
 				val labels = candidates.map { c -> listOfNotNull(c.title, c.year?.toString(), "TVDB ${c.tvdbId}").joinToString(" · ") }.toTypedArray()
 				AlertDialog.Builder(context)
 					.setTitle(R.string.je_tvdb_pick_title)
@@ -594,8 +625,9 @@ class SeerrDetailsFragment : Fragment() {
 
 	/** Choose seasons and submit. [tvdbId] is the manual TVDB match, only when TMDB doesn't provide one. */
 	private fun pickSeasons(details: SeerrDetails, tvdbId: Int?) {
-
-		val partial = state.value.partial
+		val context = context ?: return
+		val ui = state.value
+		val partial = ui.partial
 		// Without partial requests Seerr wants the whole show: every regular season regardless of status, like the web
 		if (partial?.partialRequestsEnabled == false) {
 			val all = details.seasons.map { it.seasonNumber }.filter { it > 0 }.distinct().sorted()
@@ -605,17 +637,18 @@ class SeerrDetailsFragment : Fragment() {
 
 		val requestable = requestableSeasons(details)
 		if (requestable.isEmpty()) {
-			toast(getString(R.string.je_nothing_found))
+			toast(context, getString(R.string.je_nothing_found))
 			return
 		}
 
+		// The same labels as the season cards, so a protected title's season names stay withheld here too
+		val guarded = ui.libraryStory != null
 		val labels = requestable.map { season ->
-			val name = if (season.seasonNumber == 0) getString(R.string.je_specials) else season.name ?: getString(R.string.je_season_number, season.seasonNumber)
-			"$name  (${getString(R.string.je_episodes_count, season.episodeCount)})"
+			"${seasonLabel(season, guarded)}  (${getString(R.string.je_episodes_count, season.episodeCount)})"
 		}.toTypedArray()
 
-		if (state.value.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
-			AlertDialog.Builder(context ?: return)
+		if (ui.enhanced.config.jellyseerrSingleSeasonRequestOnly) {
+			AlertDialog.Builder(context)
 				.setTitle(R.string.je_request_seasons)
 				.setItems(labels) { _, which -> submitRequest(details, listOf(requestable[which].seasonNumber), tvdbId) }
 				.setNegativeButton(android.R.string.cancel, null)
@@ -624,7 +657,7 @@ class SeerrDetailsFragment : Fragment() {
 		}
 
 		val checked = BooleanArray(requestable.size) { true }
-		AlertDialog.Builder(context ?: return)
+		AlertDialog.Builder(context)
 			.setTitle(R.string.je_request_seasons)
 			.setMultiChoiceItems(labels, checked) { _, which, isChecked -> checked[which] = isChecked }
 			.setPositiveButton(R.string.je_request) { _, _ ->
@@ -696,46 +729,53 @@ class SeerrDetailsFragment : Fragment() {
 		return SeerrLinkTexts.error(context, err, enhancedRepository.current.isAdmin)
 	}
 
-	private fun toast(text: String, long: Boolean = false) {
-		val context = context ?: return
-		Toast.makeText(context, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
+	/** Feedback that may outlive the screen: always through the application context, never the fragment's. */
+	private fun toast(context: Context, text: String, long: Boolean = false) {
+		Toast.makeText(context.applicationContext, text, if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT).show()
 	}
 
 	private fun submitRequest(details: SeerrDetails, seasons: List<Int>?, tvdbId: Int? = null) {
-		state.value = state.value.copy(busy = true)
+		// Captured now: the response can arrive after the user has left (the fragment is then detached)
+		val appContext = context?.applicationContext ?: return
+		state.value = state.value.copy(busy = Busy.REQUEST)
 		lifecycleScope.launch {
 			try {
 				seerrRepository.request(mediaType, details.id, seasons, tvdbId)
-				toast(getString(R.string.je_request_sent, details.displayTitle), long = true)
+				toast(appContext, appContext.getString(R.string.je_request_sent, details.displayTitle), long = true)
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: EnhancedApi.EnhancedApiException) {
 				Timber.w(err, "Seerr request failed")
-				val context = context ?: return@launch
-				toast(getString(R.string.je_request_failed, seerrError(context, err) ?: "HTTP ${err.status}"), long = true)
+				toast(appContext, appContext.getString(R.string.je_request_failed, seerrError(appContext, err) ?: "HTTP ${err.status}"), long = true)
 			} catch (err: Exception) {
 				Timber.w(err, "Seerr request failed")
-				toast(getString(R.string.je_request_failed, err.message ?: ""), long = true)
+				toast(appContext, appContext.getString(R.string.je_request_failed, err.message ?: ""), long = true)
 			}
 			// Never retry blindly: reload to see what actually happened
-			reload()
+			reloadIfAttached()
 		}
 	}
 
 	private fun toggleSpoilerPending(details: SeerrDetails, enable: Boolean) {
-		state.value = state.value.copy(busy = true)
+		val appContext = context?.applicationContext ?: return
+		state.value = state.value.copy(busy = Busy.PENDING)
 		lifecycleScope.launch {
 			try {
 				spoilerGuardRepository.setPending(mediaType, details.id, details.displayTitle, enable)
-				toast(getString(if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off))
+				toast(appContext, appContext.getString(if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off))
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Spoiler Guard pending toggle failed")
-				toast(getString(R.string.je_error_generic))
+				toast(appContext, appContext.getString(R.string.je_error_generic))
 			}
-			reload()
+			reloadIfAttached()
 		}
+	}
+
+	/** Reload now, or (detached on the back stack) leave it to [onStart], which reloads on return anyway. */
+	private fun reloadIfAttached() {
+		if (context != null) reload() else state.value = state.value.copy(busy = null)
 	}
 
 	private fun parseUuid(id: String): UUID? = runCatching {
