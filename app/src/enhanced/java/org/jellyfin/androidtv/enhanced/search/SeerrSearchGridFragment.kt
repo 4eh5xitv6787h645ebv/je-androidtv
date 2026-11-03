@@ -1,6 +1,5 @@
 package org.jellyfin.androidtv.enhanced.search
 
-import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -8,26 +7,14 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.fragment.app.Fragment
 import androidx.leanback.widget.ArrayObjectAdapter
 import androidx.leanback.widget.FocusHighlight
@@ -46,14 +33,14 @@ import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.jellyfin.androidtv.enhanced.seerr.SeerrResult
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
+import org.jellyfin.androidtv.enhanced.ui.design.PageHeader
+import org.jellyfin.androidtv.enhanced.ui.seerr.GridStatus
+import org.jellyfin.androidtv.enhanced.ui.seerr.HeaderTop
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardPresenter
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrResultDiff
 import org.jellyfin.androidtv.ui.base.JellyfinTheme
-import org.jellyfin.androidtv.ui.base.Text
-import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.dp
-import org.jellyfin.design.Tokens
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 
@@ -261,33 +248,11 @@ class SeerrSearchGridFragment : Fragment() {
 		val currentPaused by paused.collectAsState()
 		val currentEmpty by empty.collectAsState()
 
-		Column(
-			modifier = Modifier.padding(start = 48.dp, end = 48.dp, top = 27.dp),
-			verticalArrangement = Arrangement.spacedBy(12.dp),
-		) {
-			Text(text = title, fontSize = 28.sp, color = Tokens.Color.colorWhite)
-			Row(
-				horizontalArrangement = Arrangement.spacedBy(8.dp),
-				verticalAlignment = Alignment.CenterVertically,
-				modifier = Modifier.horizontalScroll(rememberScrollState()),
-			) {
-				currentStatus?.let { Text(text = it, color = secondaryTextColor()) }
-				if (currentFailed) {
-					val retryFocus = remember { FocusRequester() }
-					// With no cards to land on, the remote needs somewhere to go
-					LaunchedEffect(Unit) { if (adapter.size() == 0) retryFocus.requestFocus() }
-					Button(onClick = { loadMore() }, modifier = Modifier.focusRequester(retryFocus)) { Text(stringResource(R.string.je_retry)) }
-				} else if (currentPaused) {
-					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_load_more)) }
-				} else if (currentEmpty) {
-					// Nothing to show and nothing more to load: the grid has no card to focus, so offer a way out
-					val backFocus = remember { FocusRequester() }
-					Button(onClick = { navigationRepository.goBack() }, modifier = Modifier.focusRequester(backFocus)) {
-						Text(stringResource(R.string.je_seerr_back))
-					}
-					LaunchedEffect(Unit) { runCatching { backFocus.requestFocus() } }
-				}
-			}
-		}
+		PageHeader(
+			title = title,
+			modifier = Modifier.padding(top = HeaderTop),
+			// With no cards to land on after a failure, the remote needs somewhere to go
+			actions = { GridStatus(currentStatus, currentFailed, currentPaused, currentEmpty, retryFocus = adapter.size() == 0, onLoadMore = { loadMore() }) },
+		)
 	}
 }
