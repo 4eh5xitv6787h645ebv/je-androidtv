@@ -280,7 +280,7 @@ does, it will be in one of those spots: keep upstream's version and re-add the h
 
 ## Verification
 
-- Unit tests: the last full run (3 November 2026, with every feature above merged) passed all 460 app unit tests, 368
+- Unit tests: the last full run (3 November 2026, with every feature above merged) passed all 477 app unit tests, 385
   of them in the fork's packages (decoders, id and casing conversions, gates, filters, Spoiler Guard policy and the
   fail-closed config load, season availability, Catch Up deck and season selection, pause-screen timer, rating
   colours, bookmarks, home rows, subtitle style mapping and sync rules, AniList decoding and review translation,
@@ -293,7 +293,7 @@ does, it will be in one of those spots: keep upstream's version and re-add the h
   checked on the device: the four home rows, the Bookmarks ⋯ menu (rename, delete), the Subtitle style and Home rows
   pages, About with the Seerr link and import rows, and native poster tags. AniList reviews and review translation
   were only unit-tested (no lab item has an AniList id, and the lab's JE 12.13 has no translation routes); the
-  maintenance notice and the Discover/Requests link notices were checked by unit tests of their rules.
+  maintenance notice was checked on the emulator as an administrator (banner on the hub); the Discover/Requests link notices were checked by unit tests of their rules.
 - Stock behaviour: on a plain Jellyfin 12.1 server without the plugin there is no Enhanced button and no JE settings
   entry, and search and details work as upstream.
 - The merged code went through independent review rounds; their must-fix findings (Spoiler Guard in metadata,
