@@ -2,6 +2,8 @@ package org.jellyfin.androidtv.enhanced.ui.settings
 
 import org.jellyfin.androidtv.enhanced.about.aboutSettingsEntry
 import org.jellyfin.androidtv.enhanced.about.aboutSettingsRoutes
+import org.jellyfin.androidtv.enhanced.home.homeSettingsEntry
+import org.jellyfin.androidtv.enhanced.home.homeSettingsRoutes
 import org.jellyfin.androidtv.enhanced.management.ManagementEntries
 import org.jellyfin.androidtv.enhanced.metadata.metadataSettingsEntries
 import org.jellyfin.androidtv.enhanced.metadata.metadataSettingsRoutes
@@ -15,11 +17,11 @@ import org.jellyfin.androidtv.ui.navigation.RouteComposable
  * own file.
  */
 val featureSettingsRoutes: Map<String, RouteComposable> =
-	ManagementEntries.settingsRoutes + metadataSettingsRoutes + subtitlesSettingsRoutes + aboutSettingsRoutes
+	ManagementEntries.settingsRoutes + metadataSettingsRoutes + homeSettingsRoutes + subtitlesSettingsRoutes + aboutSettingsRoutes
 
 /**
  * Entries shown on the Jellyfin Enhanced settings screen, in order. Each feature contributes a [SettingsEntry]
  * (title/caption/route/gate) from its own file; the integration owner lists them here.
  */
 val featureSettingsEntries: List<SettingsEntry> =
-	ManagementEntries.settingsEntries + metadataSettingsEntries + listOf(subtitlesSettingsEntry, aboutSettingsEntry)
+	ManagementEntries.settingsEntries + metadataSettingsEntries + listOf(homeSettingsEntry, subtitlesSettingsEntry, aboutSettingsEntry)

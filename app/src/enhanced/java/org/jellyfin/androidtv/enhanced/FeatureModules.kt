@@ -11,6 +11,8 @@ import org.jellyfin.androidtv.enhanced.catchup.catchUpHubEntry
 import org.jellyfin.androidtv.enhanced.catchup.catchUpModule
 import org.jellyfin.androidtv.enhanced.discover.DiscoverHubEntries
 import org.jellyfin.androidtv.enhanced.discover.discoverModule
+import org.jellyfin.androidtv.enhanced.home.homeModule
+import org.jellyfin.androidtv.enhanced.maintenance.maintenanceModule
 import org.jellyfin.androidtv.enhanced.management.ManagementEntries
 import org.jellyfin.androidtv.enhanced.management.managementModule
 import org.jellyfin.androidtv.enhanced.metadata.metadataModule
@@ -42,8 +44,10 @@ val featureModules: List<Module> = listOf(
 	playbackModule,
 	activityModule,
 	catchUpModule,
+	homeModule,
 	subtitlesModule,
 	aboutModule,
+	maintenanceModule,
 ).also {
 	EnhancedHub.register(
 		*DiscoverHubEntries.all,
