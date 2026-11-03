@@ -31,8 +31,17 @@
     <string name="je_about_compat_mismatch">Wrong build for this server: install %1$s</string>
     <string name="je_about_compat_stale">A server restart is needed to finish updating the plugin</string>
     <string name="je_about_whats_new">New plugin settings</string>
-    <string name="je_about_whats_new_none">Nothing new since you last checked the plugin settings</string>
-    <string name="je_about_whats_new_count">%1$d new since you last checked: %2$s</string>
+    <string name="je_about_whats_new_section">New in this plugin version</string>
+    <plurals name="je_about_whats_new_section_caption">
+        <item quantity="one">%1$d setting added since an administrator last checked</item>
+        <item quantity="other">%1$d settings added since an administrator last checked</item>
+    </plurals>
+    <string name="je_about_whats_new_since">Since %1$s · %2$s</string>
+    <string name="je_about_whats_new_show_all">Show all %1$d new settings</string>
+    <string name="je_about_whats_new_dismiss">Dismiss</string>
+    <string name="je_about_whats_new_dismiss_caption">Marks these settings as seen for every administrator of this server</string>
+    <string name="je_about_whats_new_dismissing">Dismissing…</string>
+    <string name="je_about_whats_new_dismiss_failed">Couldn\'t dismiss: %1$s. Select to try again.</string>
     <string name="je_about_release_notes">Latest release notes</string>
     <string name="je_about_release_unavailable">Couldn\'t reach GitHub</string>
     <string name="je_about_loading">Loading…</string>

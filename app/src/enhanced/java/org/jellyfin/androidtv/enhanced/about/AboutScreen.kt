@@ -1,6 +1,7 @@
 package org.jellyfin.androidtv.enhanced.about
 
 import android.content.ClipData
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -9,11 +10,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.calendar.attempt
 import org.jellyfin.androidtv.enhanced.calendar.serverMessage
@@ -33,6 +37,10 @@ import org.koin.compose.koinInject
 /** Settings routes of the About screen that aren't in [org.jellyfin.androidtv.enhanced.ui.settings.EnhancedSettingsRoutes]. */
 object AboutRoutes {
 	const val RELEASE_NOTES = "/enhanced/about/release-notes"
+	const val WHATS_NEW = "/enhanced/about/whats-new"
+
+	/** New settings listed on the About screen itself; the rest are behind "Show all". */
+	const val WHATS_NEW_PREVIEW = 5
 }
 
 /**
@@ -88,7 +96,8 @@ fun AboutSettingsScreen() {
 	val serverVersion = rememberLoad { aboutRepository.serverVersion() }
 	val release = rememberLoad { aboutRepository.latestRelease() }
 	val hostCompat = rememberLoad(state.isAdmin) { if (state.isAdmin) aboutRepository.hostCompat() else null }
-	val whatsNew = rememberLoad(state.isAdmin) { if (state.isAdmin) aboutRepository.whatsNew() else null }
+	val whatsNewRevision by aboutRepository.whatsNewRevision.collectAsState()
+	val whatsNew = rememberLoad(state.isAdmin, whatsNewRevision) { if (state.isAdmin) aboutRepository.whatsNew() else null }
 
 	val unknown = stringResource(R.string.je_about_unknown)
 	val pluginVersion = state.pluginVersion ?: unknown
@@ -109,10 +118,6 @@ fun AboutSettingsScreen() {
 			compat.stale -> compat.message ?: stringResource(R.string.je_about_compat_stale)
 			else -> stringResource(R.string.je_about_compat_ok, compat.builtFor ?: unknown, compat.hostVersion ?: unknown)
 		}
-	} ?: unknown
-	val whatsNewCaption = loadCaption(whatsNew) ?: (whatsNew as LoadState.Ready).value?.let { news ->
-		if (news.newSettings.isEmpty()) stringResource(R.string.je_about_whats_new_none)
-		else stringResource(R.string.je_about_whats_new_count, news.newSettings.size, news.newSettings.keys.sorted().joinToString(", ", limit = 6))
 	} ?: unknown
 
 	SettingsColumn {
@@ -151,8 +156,117 @@ fun AboutSettingsScreen() {
 
 			infoItem("host_compat", R.string.je_about_compat, compatCaption, onClick = (hostCompat as? LoadState.Error)?.retry)
 
-			infoItem("whats_new", R.string.je_about_whats_new, whatsNewCaption, onClick = (whatsNew as? LoadState.Error)?.retry)
+			// Only when there is something new; loading and errors show nothing (it's a marker, not diagnostics)
+			val newSettings = (whatsNew as? LoadState.Ready)?.value?.newSettings.orEmpty()
+			if (newSettings.isNotEmpty()) {
+				whatsNewItems(newSettings, preview = AboutRoutes.WHATS_NEW_PREVIEW, onShowAll = { router.push(AboutRoutes.WHATS_NEW) })
+			}
 		}
+	}
+}
+
+/**
+ * The "New in this plugin version" section: a heading, the new settings (the first [preview] of them, with a
+ * "Show all" row, when given) and a Dismiss row. Dismissing is server-wide, so it's only ever done from that row.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.whatsNewItems(
+	newSettings: Map<String, String>,
+	preview: Int? = null,
+	onShowAll: () -> Unit = {},
+) {
+	val sorted = WhatsNewSettings.sorted(newSettings)
+	val shown = if (preview != null) sorted.take(preview) else sorted
+
+	item(key = "whats_new_section") {
+		ListSection(
+			headingContent = { Text(stringResource(R.string.je_about_whats_new_section)) },
+			captionContent = { Text(pluralStringResource(R.plurals.je_about_whats_new_section_caption, sorted.size, sorted.size)) },
+		)
+	}
+	if (preview == null) item(key = "whats_new_dismiss") { WhatsNewDismissButton() }
+	items(shown, key = { "whats_new_${it.first}" }) { (key, version) ->
+		ListButton(
+			headingContent = { Text(WhatsNewSettings.label(key)) },
+			captionContent = { Text(stringResource(R.string.je_about_whats_new_since, version, key)) },
+			onClick = copyAction(ClipData.newPlainText(key, key)),
+			modifier = Modifier.focusKey("je_about_whats_new_$key"),
+		)
+	}
+	if (preview != null) {
+		if (sorted.size > shown.size) {
+			item(key = "whats_new_all") {
+				ListButton(
+					headingContent = { Text(stringResource(R.string.je_about_whats_new_show_all, sorted.size)) },
+					onClick = onShowAll,
+					modifier = Modifier.focusKey("je_about_whats_new_all"),
+				)
+			}
+		}
+		item(key = "whats_new_dismiss") { WhatsNewDismissButton() }
+	}
+}
+
+/** Calls `whats-new/dismiss`; on success every screen showing the list reloads (and the section disappears). */
+@Composable
+private fun WhatsNewDismissButton() {
+	val aboutRepository = koinInject<AboutRepository>()
+	val scope = rememberCoroutineScope()
+	var running by remember { mutableStateOf(false) }
+	var failure by remember { mutableStateOf<String?>(null) }
+	val generic = stringResource(R.string.je_error_generic)
+
+	ListButton(
+		leadingContent = { Icon(painterResource(R.drawable.je_ic_catchup_check), contentDescription = null) },
+		headingContent = { Text(stringResource(R.string.je_about_whats_new_dismiss)) },
+		captionContent = {
+			val failed = failure
+			Text(
+				when {
+					running -> stringResource(R.string.je_about_whats_new_dismissing)
+					failed != null -> stringResource(R.string.je_about_whats_new_dismiss_failed, failed)
+					else -> stringResource(R.string.je_about_whats_new_dismiss_caption)
+				}
+			)
+		},
+		onClick = {
+			if (running) return@ListButton
+			running = true
+			failure = null
+			scope.launch {
+				attempt { aboutRepository.dismissWhatsNew() }
+					.onFailure { failure = it.serverMessage ?: it.message ?: generic }
+				running = false
+			}
+		},
+		modifier = Modifier.focusKey("je_about_whats_new_dismiss"),
+	)
+}
+
+/** All new plugin settings, with the Dismiss row first so it's reachable without scrolling the whole list. */
+@Composable
+fun WhatsNewSettingsScreen() {
+	val enhancedRepository = koinInject<EnhancedRepository>()
+	val aboutRepository = koinInject<AboutRepository>()
+	val state by enhancedRepository.state.collectAsState()
+	val revision by aboutRepository.whatsNewRevision.collectAsState()
+	val router = LocalRouter.current
+	val whatsNew = rememberLoad(state.isAdmin, revision) { if (state.isAdmin) aboutRepository.whatsNew() else null }
+	val newSettings = (whatsNew as? LoadState.Ready)?.value?.newSettings.orEmpty()
+
+	// Dismissed (here or elsewhere): nothing left to list
+	LaunchedEffect(whatsNew) {
+		if (whatsNew is LoadState.Ready && newSettings.isEmpty()) router.back()
+	}
+
+	SettingsColumn {
+		item {
+			ListSection(
+				overlineContent = { Text(stringResource(R.string.je_about_title).uppercase()) },
+				headingContent = { Text(stringResource(R.string.je_about_whats_new)) },
+				captionContent = loadCaption(whatsNew)?.let { { Text(it) } },
+			)
+		}
+		if (newSettings.isNotEmpty()) whatsNewItems(newSettings)
 	}
 }
 
