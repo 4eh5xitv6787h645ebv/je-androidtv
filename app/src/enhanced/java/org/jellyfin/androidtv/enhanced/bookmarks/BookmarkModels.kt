@@ -2,6 +2,7 @@ package org.jellyfin.androidtv.enhanced.bookmarks
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import java.time.Instant
 import kotlin.math.roundToLong
 
@@ -37,13 +38,31 @@ data class BookmarkEntry(val bookmarkId: String, val bookmark: Bookmark)
 
 /**
  * The library item a bookmark points at, as the server returns it for this user (so already filtered by Spoiler
- * Guard and Hidden Content). [posterUrl] is a server image route.
+ * Guard and Hidden Content). [posterUrl] is a server image route. The episode fields are set for episodes only.
  */
 data class BookmarkedItem(
 	val id: java.util.UUID,
 	val displayName: String,
 	val posterUrl: String?,
+	val isEpisode: Boolean = false,
+	val seriesId: String? = null,
+	val seriesName: String? = null,
+	val seasonNumber: Int? = null,
+	val episodeNumber: Int? = null,
+	val played: Boolean = false,
 )
+
+/**
+ * What a bookmark row may call its item: [text] as is, or, when an episode's title must be withheld, [neutral]
+ * (series name when known, plus season and episode numbers).
+ */
+data class BookmarkName(
+	val text: String?,
+	val neutral: NeutralEpisode? = null,
+)
+
+/** An episode named only by its series and numbers, like the plugin's "Season 2, Episode 1" titles. */
+data class NeutralEpisode(val seriesName: String?, val seasonNumber: Int?, val episodeNumber: Int?)
 
 object BookmarkLogic {
 	const val TICKS_PER_SECOND = 10_000_000L
@@ -69,6 +88,30 @@ object BookmarkLogic {
 		val minutes = (total % 3600) / 60
 		val secs = total % 60
 		return if (hours > 0) "%d:%02d:%02d".format(hours, minutes, secs) else "%d:%02d".format(minutes, secs)
+	}
+
+	/** Whether the bookmark points at an episode, from what it saved. */
+	fun isEpisode(bookmark: Bookmark): Boolean =
+		bookmark.mediaType.equals("tv", ignoreCase = true) || bookmark.seasonNumber != null || bookmark.episodeNumber != null
+
+	/**
+	 * The name to show for a bookmark. The saved name is the episode title at the time it was saved, so it's only
+	 * shown when Spoiler Guard is off: once protection is on and the item can't be looked up (failed, deleted, no
+	 * longer accessible), nothing tells us its series isn't guarded. A resolved episode of a series whose episode
+	 * titles are protected gets the neutral label even if the server's name looks real (fail closed). Movie and series
+	 * names are never hidden by the plugin.
+	 */
+	fun name(bookmark: Bookmark, item: BookmarkedItem?, spoiler: SpoilerSnapshot): BookmarkName {
+		if (item != null) {
+			if (item.isEpisode && spoiler.forSeries(item.seriesId, played = item.played).hideTitles) {
+				return BookmarkName(null, NeutralEpisode(item.seriesName?.takeIf { it.isNotBlank() }, item.seasonNumber, item.episodeNumber))
+			}
+			return BookmarkName(item.displayName.takeIf { it.isNotBlank() })
+		}
+		if (isEpisode(bookmark) && spoiler.enabled) {
+			return BookmarkName(null, NeutralEpisode(null, bookmark.seasonNumber, bookmark.episodeNumber))
+		}
+		return BookmarkName(bookmark.name?.takeIf { it.isNotBlank() })
 	}
 
 	/** `Series · S2E1 · Name` for episodes, the plain name otherwise. */

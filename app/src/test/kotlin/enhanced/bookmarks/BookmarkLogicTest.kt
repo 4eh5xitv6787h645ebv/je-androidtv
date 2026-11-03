@@ -3,7 +3,14 @@ package org.jellyfin.androidtv.enhanced.bookmarks
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.shouldBe
+import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
+import org.jellyfin.androidtv.enhanced.data.EnhancedPublicConfig
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardPrefs
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.SpoilerPolicy
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
+import java.util.UUID
 
 class BookmarkLogicTest : FunSpec({
 	// As saved by the plugin's bookmark.json/add route
@@ -49,5 +56,43 @@ class BookmarkLogicTest : FunSpec({
 	test("episode names include show and episode numbers") {
 		BookmarkLogic.displayName("My First Time in a While", "Scrubs (2026)", 2, 1) shouldBe "Scrubs (2026) · S2E1 · My First Time in a While"
 		BookmarkLogic.displayName("Backrooms", null, null, null) shouldBe "Backrooms"
+	}
+
+	test("saved episode names are never shown once protection can't be established") {
+		val episode = Bookmark(itemId = "fd8067ea9ef35106714e66075a2df7ae", mediaType = "tv", name = "My First Time in a While", seasonNumber = 2, episodeNumber = 1)
+		val movie = Bookmark(itemId = "00000000000000000000000000000001", mediaType = "movie", name = "Gone movie")
+		val seriesId = "326d7084082700b220b683fc0dc0ae78"
+		fun snapshot(state: SpoilerGuardState?, prefs: SpoilerGuardPrefs = SpoilerGuardPrefs()) = SpoilerSnapshot(
+			enabled = true,
+			state = state,
+			policy = SpoilerPolicy.of(EnhancedPublicConfig(spoilerBlurEnabled = true), prefs),
+			collectionMovieIds = emptySet(),
+		)
+		val none = snapshot(SpoilerGuardState())
+		val guarded = snapshot(SpoilerGuardState(series = mapOf(seriesId to JsonPrimitive(true))))
+
+		// Lookup failed or item gone: neutral numbers while Spoiler Guard is on, even if this series isn't guarded
+		BookmarkLogic.name(episode, null, none) shouldBe BookmarkName(null, NeutralEpisode(null, 2, 1))
+		BookmarkLogic.name(episode, null, snapshot(null)) shouldBe BookmarkName(null, NeutralEpisode(null, 2, 1))
+		BookmarkLogic.name(episode, null, SpoilerSnapshot.DISABLED) shouldBe BookmarkName("My First Time in a While")
+		// Movie names are never hidden
+		BookmarkLogic.name(movie, null, guarded) shouldBe BookmarkName("Gone movie")
+
+		val resolved = BookmarkedItem(
+			id = UUID.randomUUID(),
+			displayName = "Scrubs · S2E1 · My First Time in a While",
+			posterUrl = null,
+			isEpisode = true,
+			seriesId = seriesId,
+			seriesName = "Scrubs",
+			seasonNumber = 2,
+			episodeNumber = 1,
+		)
+		BookmarkLogic.name(episode, resolved, none) shouldBe BookmarkName(resolved.displayName)
+		BookmarkLogic.name(episode, resolved, guarded) shouldBe BookmarkName(null, NeutralEpisode("Scrubs", 2, 1))
+		// Watched, or the user keeps real titles
+		BookmarkLogic.name(episode, resolved.copy(played = true), guarded) shouldBe BookmarkName(resolved.displayName)
+		val titlesKept = snapshot(guarded.state, SpoilerGuardPrefs(replaceEpisodeTitles = false))
+		BookmarkLogic.name(episode, resolved, titlesKept) shouldBe BookmarkName(resolved.displayName)
 	}
 })

@@ -1,6 +1,7 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
 import org.jellyfin.androidtv.R
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContributor
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrDetailsContributor
 import org.jellyfin.androidtv.enhanced.ui.settings.SettingsEntry
@@ -11,7 +12,9 @@ import org.koin.dsl.module
 /** Koin bindings of the details metadata feature (info row, cast ages, content warnings, Seerr details section). */
 val metadataModule = module {
 	single { MetadataRepository(get(), get(), get(), get()) }
-	single { MetadataDetailsContributor(get(), get(), get()) } bind DetailsContributor::class
+	// Shared by the metadata, reviews, calendar and bookmarks features (see INTEGRATION.md)
+	single { SpoilerProtection(get(), get(), get()) }
+	single { MetadataDetailsContributor(get(), get(), get(), get()) } bind DetailsContributor::class
 	single { MetadataSeerrContributor(get()) } bind SeerrDetailsContributor::class
 }
 

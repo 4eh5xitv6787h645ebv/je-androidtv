@@ -39,8 +39,9 @@ import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import org.jellyfin.androidtv.enhanced.ui.EnhancedDestinations
 import org.jellyfin.androidtv.enhanced.ui.hub.EnhancedScreen
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
@@ -62,11 +63,16 @@ import java.util.Locale
 /**
  * The JE calendar as a two-week agenda: releases from Sonarr, Radarr and Shoko grouped by day, with week navigation
  * and filters. Selecting a release opens it in the library when the user can see it there, otherwise on Seerr.
+ *
+ * The plugin passes Sonarr/Radarr data through unfiltered, so this page applies Hidden Content's calendar filter and
+ * Spoiler Guard itself: guarded titles get library artwork (or none), no finale marker, episode titles only when
+ * the user's policy allows them, and, when air dates are protected, no date or time at all (see [CalendarAgenda]).
  */
 class CalendarFragment : Fragment() {
 	private val calendarRepository by inject<CalendarRepository>()
 	private val enhancedRepository by inject<EnhancedRepository>()
-	private val spoilerGuardRepository by inject<SpoilerGuardRepository>()
+	private val spoilerProtection by inject<SpoilerProtection>()
+	private val hiddenContentRepository by inject<HiddenContentRepository>()
 	private val enhancedApi by inject<EnhancedApi>()
 	private val navigationRepository by inject<NavigationRepository>()
 
@@ -77,9 +83,10 @@ class CalendarFragment : Fragment() {
 		/** Request keys; null when they couldn't be loaded (the highlight is optional unless it's enforced). */
 		val requested: Set<String>?,
 		val seerrEnabled: Boolean,
-		val spoilerGuard: Boolean,
-		/** Null with [spoilerGuard] on means the guard list failed to load: every episode is withheld. */
-		val spoilerState: SpoilerGuardState?,
+		/** The user's Spoiler Guard lists and policy; incomplete ones fail closed. */
+		val spoiler: SpoilerSnapshot,
+		/** Library posters of guarded titles by dash-less id; guarded titles without one show no artwork. */
+		val posters: Map<String, String>,
 		val firstDayOfWeek: java.time.DayOfWeek,
 		val use12Hour: Boolean,
 	)
@@ -112,21 +119,34 @@ class CalendarFragment : Fragment() {
 					val requestedCall = async {
 						if (state.config.jellyseerrEnabled) attempt { calendarRepository.requestedKeys() }.getOrNull() else emptySet()
 					}
-					val spoilerCall = async {
-						if (state.spoilerGuard) attempt { spoilerGuardRepository.getState() }.getOrNull() else null
-					}
+					val spoilerCall = async { spoilerProtection.snapshot() }
+					// A failed read is reported rather than showing titles the user hid
+					val hiddenCall = async { if (state.hiddenContent) CalendarHiddenFilter.of(hiddenContentRepository.get()) else null }
 					val config = configCall.await()
 					val requested = requestedCall.await()
 					// Enforced "only requested" with no request list would show everything: report the failure instead
 					if (config.forceOnlyRequested && requested == null) error("Requests unavailable")
+					val hidden = hiddenCall.await()
+					val response = eventsCall.await().let { response ->
+						if (hidden == null) response else response.copy(events = response.events.filterNot(hidden::isHidden))
+					}
+					val spoiler = spoilerCall.await()
+					val guardedIds = response.events
+						.filter { CalendarLogic.protection(it, spoiler).hideArtwork }
+						.mapNotNull { it.libraryItemId?.takeIf(String::isNotBlank) }
+					val posters = if (guardedIds.isEmpty()) emptyMap() else {
+						attempt { calendarRepository.libraryPosters(guardedIds) }
+							.onFailure { Timber.w(it, "Failed to load library posters; withholding artwork of guarded titles") }
+							.getOrDefault(emptyMap())
+					}
 					Loaded(
 						start = windowStart,
-						response = eventsCall.await(),
+						response = response,
 						config = config,
 						requested = requested,
 						seerrEnabled = state.config.jellyseerrEnabled,
-						spoilerGuard = state.spoilerGuard,
-						spoilerState = spoilerCall.await(),
+						spoiler = spoiler,
+						posters = posters,
 						firstDayOfWeek = CalendarLogic.firstDayOfWeek(state.config.calendarFirstDayOfWeek),
 						use12Hour = CalendarLogic.uses12HourClock(state.config.calendarTimeFormat),
 					)
@@ -198,7 +218,7 @@ class CalendarFragment : Fragment() {
 	@Composable
 	private fun Agenda(loaded: Loaded, currentFilter: CalendarFilter, fallbackFocus: FocusRequester) {
 		val requested = loaded.requested.orEmpty()
-		val days = remember(loaded, currentFilter) {
+		val agenda = remember(loaded, currentFilter) {
 			CalendarLogic.agenda(
 				events = loaded.response.events,
 				start = loaded.start,
@@ -206,6 +226,7 @@ class CalendarFragment : Fragment() {
 				filter = currentFilter,
 				requested = requested,
 				forceOnlyRequested = loaded.config.forceOnlyRequested,
+				hideDate = { CalendarLogic.protection(it, loaded.spoiler).hideAirDate },
 			)
 		}
 		val firstEventFocus = remember { FocusRequester() }
@@ -218,9 +239,10 @@ class CalendarFragment : Fragment() {
 					PageNotice(stringResource(R.string.je_calendar_source_failed, error.instanceName ?: error.source.orEmpty(), error.reason.orEmpty()))
 				}
 				if (loaded.seerrEnabled && loaded.requested == null) PageNotice(stringResource(R.string.je_calendar_requests_failed))
+				if (!loaded.spoiler.complete) PageNotice(stringResource(R.string.je_calendar_spoiler_unavailable))
 			}
 
-			if (days.isEmpty()) {
+			if (agenda.isEmpty) {
 				val filtered = currentFilter != CalendarFilter() || loaded.config.forceOnlyRequested
 				Text(
 					text = stringResource(if (filtered) R.string.je_calendar_empty_filtered else R.string.je_calendar_empty),
@@ -236,10 +258,16 @@ class CalendarFragment : Fragment() {
 				contentPadding = PaddingValues(start = 48.dp, end = 48.dp, top = 8.dp, bottom = 48.dp),
 				verticalArrangement = Arrangement.spacedBy(8.dp),
 			) {
-				val firstEvent = days.first().second.first()
-				for ((day, events) in days) {
+				val firstEvent = agenda.days.firstOrNull()?.second?.first() ?: agenda.undated.first()
+				for ((day, events) in agenda.days) {
 					item(key = "day-$day") { DayHeader(day) }
 					items(events, key = { "${it.source}-${it.instanceName}-${it.eventId}" }) { event ->
+						EventRow(loaded, event, requested, if (event === firstEvent) Modifier.focusRequester(firstEventFocus) else Modifier)
+					}
+				}
+				if (agenda.undated.isNotEmpty()) {
+					item(key = "undated") { GroupHeader(stringResource(R.string.je_calendar_undated)) }
+					items(agenda.undated, key = { "${it.source}-${it.instanceName}-${it.eventId}" }) { event ->
 						EventRow(loaded, event, requested, if (event === firstEvent) Modifier.focusRequester(firstEventFocus) else Modifier)
 					}
 				}
@@ -298,6 +326,11 @@ class CalendarFragment : Fragment() {
 			today.plusDays(1) -> stringResource(R.string.je_calendar_day_tomorrow, day.format(format))
 			else -> day.format(format)
 		}
+		GroupHeader(label)
+	}
+
+	@Composable
+	private fun GroupHeader(label: String) {
 		Text(
 			text = label,
 			fontSize = 20.sp,
@@ -308,21 +341,25 @@ class CalendarFragment : Fragment() {
 
 	@Composable
 	private fun EventRow(loaded: Loaded, event: CalendarEvent, requested: Set<String>, modifier: Modifier) {
-		val guarded = CalendarLogic.isSpoilerGuarded(event, loaded.spoilerGuard, loaded.spoilerState)
-		val subtitle = CalendarLogic.subtitle(event, guarded)
-		val time = if (event.isMovie) null else event.instant?.atZone(zone)?.toLocalTime()?.format(
+		val protection = CalendarLogic.protection(event, loaded.spoiler)
+		val subtitle = CalendarLogic.subtitle(event, protection)
+		val time = if (event.isMovie || protection.hideAirDate) null else event.instant?.atZone(zone)?.toLocalTime()?.format(
 			DateTimeFormatter.ofPattern(if (loaded.use12Hour) "h:mm a" else "HH:mm", Locale.getDefault())
 		)
+		val poster = if (protection.hideArtwork) {
+			event.libraryItemId?.let { loaded.posters[it.replace("-", "").lowercase()] }
+		} else event.posterUrl
 		val meta = listOfNotNull(
 			time,
 			releaseTypeLabel(event.releaseType),
-			finaleLabel(event.finaleType),
+			// "Series finale" is a plot fact: never for a guarded title
+			if (protection.guarded) null else finaleLabel(event.finaleType),
 			event.instanceName?.takeIf { it.isNotBlank() } ?: event.source.takeIf { it.isNotBlank() },
 		).joinToString("  ·  ")
 		val isRequested = event.requestKey?.let { it in requested } == true
 
 		PageListRow(onClick = { open(event) }, modifier = modifier) {
-			PageImage(url = event.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
+			PageImage(url = poster, modifier = Modifier.size(56.dp, 84.dp))
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 				Text(text = event.title, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 				subtitle?.let { Text(text = it, fontSize = 15.sp, color = Tokens.Color.colorGrey300, maxLines = 1, overflow = TextOverflow.Ellipsis) }

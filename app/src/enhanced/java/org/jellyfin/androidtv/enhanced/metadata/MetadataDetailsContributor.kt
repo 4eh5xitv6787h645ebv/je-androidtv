@@ -22,6 +22,7 @@ import kotlinx.coroutines.withTimeout
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedState
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsAction
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContext
 import org.jellyfin.androidtv.enhanced.ui.details.DetailsContributor
@@ -38,12 +39,14 @@ import java.util.UUID
 /**
  * Details-screen enrichments: one "Enhanced info" row (size, watched progress, audio languages, release dates,
  * ratings, awards, where to watch, a person's birth facts), a "Cast ages" row, and a "Content warnings" button.
- * Every source loads independently: one failing never hides the others, and each needs its own gate.
+ * Every source loads independently: one failing never hides the others, and each needs its own gate. External data
+ * follows the item's Spoiler Guard protection category by category ([SpoilerProtection]).
  */
 class MetadataDetailsContributor(
 	private val repository: MetadataRepository,
 	private val settingsRepository: EnhancedSettingsRepository,
 	private val navigationRepository: NavigationRepository,
+	private val spoilerProtection: SpoilerProtection,
 ) : DetailsContributor {
 	companion object {
 		private const val SOURCE_TIMEOUT_MS = 15_000L
@@ -54,6 +57,9 @@ class MetadataDetailsContributor(
 		private val TV_TYPES = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES, BaseItemKind.SEASON, BaseItemKind.EPISODE)
 		private val TITLE_TYPES = setOf(BaseItemKind.MOVIE, BaseItemKind.SERIES)
 		private val CAST_KINDS = setOf(PersonKind.ACTOR, PersonKind.GUEST_STAR)
+
+		/** Guest stars give away who turns up; the plugin's default cast strip drops only them. */
+		private val PROTECTED_CAST_KINDS = setOf(PersonKind.ACTOR)
 	}
 
 	/** Run one optional source; a failure is logged and recorded under [label] instead of failing the row. */
@@ -75,6 +81,8 @@ class MetadataDetailsContributor(
 		val state = context.state
 		val item = context.item
 		if (!state.available || !state.config.doesTheDogDieEnabled || item.type !in TV_TYPES) return emptyList()
+		// Content warnings are spoiler phrases ("a main character dies"), the same kind of data as stripped tags
+		if (spoilerProtection.effectiveFor(item).hideTags) return emptyList()
 		val target = runCatching { repository.tmdbTarget(item) }.getOrNull() ?: return emptyList()
 
 		val (entry, triggers) = coroutineScope {
@@ -156,7 +164,7 @@ class MetadataDetailsContributor(
 		val failures = mutableListOf<Int>()
 		val settings = state.userSettings
 		val publicConfig = state.config
-		val guarded = isSpoilerGuarded(state, item)
+		val protection = spoilerProtection.effectiveFor(item)
 		val target = if (item.type in TV_TYPES || item.type == BaseItemKind.PERSON) {
 			attempt(failures, R.string.je_metadata_source_releases) { repository.tmdbTarget(item) }
 		} else null
@@ -186,19 +194,19 @@ class MetadataDetailsContributor(
 				null
 			}
 		} else null
-		val releases = if (target != null && tmdb && publicConfig.showReleaseDates && item.type in TV_TYPES && !guarded) async {
+		val releases = if (target != null && tmdb && publicConfig.showReleaseDates && item.type in TV_TYPES && !protection.hideAirDate) async {
 			attempt(failures, R.string.je_metadata_source_releases) {
 				repository.releaseInfo(target, releaseRegions(elsewhere?.await()?.region, config.defaultRegion))
 			}
 		} else null
 
 		val titleTarget = target?.takeIf { item.type in TITLE_TYPES }
-		val mdblist = if (titleTarget != null && publicConfig.mdblistRatingsEnabled && publicConfig.mdblistRatingsShowOnItemDetails && !guarded) async {
+		val mdblist = if (titleTarget != null && publicConfig.mdblistRatingsEnabled && publicConfig.mdblistRatingsShowOnItemDetails && !protection.hideRatings) async {
 			attempt(failures, R.string.je_metadata_source_ratings) {
 				mdblistChips(repository.mdblistRatings(titleTarget), config.mdblistRatingsSources, publicConfig.mdblistRatingsShowPercentSymbol)
 			}
 		} else null
-		val seerr = if (titleTarget != null && state.seerrUsable && !guarded) async {
+		val seerr = if (titleTarget != null && state.seerrUsable && !protection.hideRatings) async {
 			attempt(failures, R.string.je_metadata_source_ratings) { repository.seerrRatings(titleTarget) }
 		} else null
 
@@ -251,13 +259,17 @@ class MetadataDetailsContributor(
 		val item = context.item
 		if (item.type !in TITLE_TYPES && item.type != BaseItemKind.EPISODE) return null
 		if (!(state.userSettings.peopleTagsEnabled ?: config.peopleTagsEnabled)) return null
-		val cast = item.people.orEmpty().filter { it.type in CAST_KINDS }.distinctBy { it.id }.take(MetadataRepository.MAX_PEOPLE)
+		val protection = spoilerProtection.effectiveFor(item)
+		val kinds = if (protection.hideCast) PROTECTED_CAST_KINDS else CAST_KINDS
+		val cast = item.people.orEmpty().filter { it.type in kinds }.distinctBy { it.id }.take(MetadataRepository.MAX_PEOPLE)
 		if (cast.isEmpty()) return null
 
 		val info = runCatching { repository.peopleInfo(cast.map { it.id }, item.id) }
 			.onFailure { Timber.w(it, "Failed to load cast ages") }
 			.getOrNull() ?: return null
 		val entries = cast.mapNotNull { person -> info[key(person.id)]?.let { person to it } }
+			// The age at release gives the air date away
+			.map { (person, facts) -> person to if (protection.hideAirDate) facts.copy(ageAtItemRelease = null) else facts }
 			.filter { (_, facts) -> facts.ageAtItemRelease != null || facts.currentAge != null || facts.ageAtDeath != null }
 		if (entries.isEmpty()) return null
 

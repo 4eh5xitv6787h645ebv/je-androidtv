@@ -3,6 +3,7 @@ package org.jellyfin.androidtv.enhanced.bookmarks
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
@@ -80,7 +81,8 @@ class BookmarksRepository(
 		val items = itemIds.chunked(LOOKUP_CHUNK).flatMap { chunk ->
 			val response = api.get(
 				"/Items",
-				mapOf("ids" to chunk.joinToString(",") { key(it) }, "userId" to userId, "enableUserData" to false),
+				// User data tells watched episodes (which Spoiler Guard passes through) from unwatched ones
+				mapOf("ids" to chunk.joinToString(",") { key(it) }, "userId" to userId, "enableUserData" to true),
 			).jsonObject
 			response["Items"] as? JsonArray ?: emptyList()
 		}
@@ -106,7 +108,18 @@ class BookmarksRepository(
 				season = if (isEpisode) int("ParentIndexNumber") else null,
 				episode = if (isEpisode) int("IndexNumber") else null,
 			)
-			id to BookmarkedItem(id, displayName, posterUrl)
+			val played = ((item["UserData"] as? JsonObject)?.get("Played") as? JsonPrimitive)?.booleanOrNull == true
+			id to BookmarkedItem(
+				id = id,
+				displayName = displayName,
+				posterUrl = posterUrl,
+				isEpisode = isEpisode,
+				seriesId = if (isEpisode) seriesId else null,
+				seriesName = if (isEpisode) string("SeriesName") else null,
+				seasonNumber = if (isEpisode) int("ParentIndexNumber") else null,
+				episodeNumber = if (isEpisode) int("IndexNumber") else null,
+				played = isEpisode && played,
+			)
 		}.toMap()
 	}
 

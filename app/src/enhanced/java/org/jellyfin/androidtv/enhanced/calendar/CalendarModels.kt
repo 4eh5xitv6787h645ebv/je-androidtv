@@ -2,12 +2,18 @@ package org.jellyfin.androidtv.enhanced.calendar
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import org.jellyfin.androidtv.enhanced.data.SpoilerGuardState
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
+import org.jellyfin.androidtv.enhanced.data.Protection
+import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.Locale
 import java.time.temporal.TemporalAdjusters
 
 /**
@@ -121,6 +127,63 @@ data class CalendarFilter(
 	}
 }
 
+/**
+ * The agenda: dated [days], plus the releases of Spoiler Guarded titles whose air dates are hidden for this user
+ * ([undated]). Those are shown under one neutral heading with no date or time, ordered by title and episode, so
+ * neither their grouping nor their order gives the date away.
+ */
+data class CalendarAgenda(
+	val days: List<Pair<LocalDate, List<CalendarEvent>>>,
+	val undated: List<CalendarEvent> = emptyList(),
+) {
+	val isEmpty get() = days.isEmpty() && undated.isEmpty()
+}
+
+/**
+ * Hidden Content's calendar filter, as the web's `filterCalendarEvents` applies it: an event is dropped when its
+ * TMDB id or library id is hidden everywhere (scope `global`), or when its title matches the name of any hidden entry
+ * (any scope, case-insensitive; a trailing `(…)` qualifier on the entry's name is optional). The episode's own library
+ * id is matched too, so a hidden episode drops its release.
+ */
+class CalendarHiddenFilter(
+	private val itemIds: Set<String>,
+	private val tmdbIds: Set<String>,
+	private val names: Set<String>,
+) {
+	fun isHidden(event: CalendarEvent): Boolean {
+		val tmdbId = event.validTmdbId
+		if (tmdbId != null && tmdbId.toString() in tmdbIds) return true
+		if (listOfNotNull(event.libraryItemId, event.libraryEpisodeId).any { normalize(it) in itemIds }) return true
+		return event.title.isNotEmpty() && event.title.lowercase(Locale.ROOT) in names
+	}
+
+	companion object {
+		private val TRAILING_QUALIFIER = Regex("""\s*\([^)]*\)\s*$""")
+
+		private fun normalize(id: String) = id.replace("-", "").lowercase(Locale.ROOT)
+
+		/** The filter for [snapshot], or null when the user's settings don't filter the calendar. */
+		fun of(snapshot: HiddenContentRepository.Snapshot): CalendarHiddenFilter? {
+			if (!snapshot.settings.enabled || !snapshot.settings.filterCalendar) return null
+			return fromEntries(snapshot.entries)
+		}
+
+		fun fromEntries(entries: List<JsonObject>): CalendarHiddenFilter {
+			fun JsonObject.string(key: String) = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+			val global = entries.filter { it.string("HideScope").ifEmpty { "global" } == "global" }
+			val names = entries.map { it.string("Name") }.filter { it.isNotEmpty() }.flatMap { name ->
+				val lower = name.lowercase(Locale.ROOT)
+				listOf(lower, lower.replace(TRAILING_QUALIFIER, ""))
+			}
+			return CalendarHiddenFilter(
+				itemIds = global.map { normalize(it.string("ItemId")) }.filter { it.isNotEmpty() }.toSet(),
+				tmdbIds = global.map { it.string("TmdbId") }.filter { it.isNotEmpty() }.toSet(),
+				names = names.toSet(),
+			)
+		}
+	}
+}
+
 /** Pure calendar logic, kept apart from the UI so it can be tested. */
 object CalendarLogic {
 	/** How many days the agenda shows from its start date. */
@@ -151,7 +214,8 @@ object CalendarLogic {
 
 	/**
 	 * Monitored events of the window, filtered and grouped by day in date order, each day sorted by release time.
-	 * Unmonitored events are left out like the web calendar does by default.
+	 * Unmonitored events are left out like the web calendar does by default. Events for which [hideDate] is true go
+	 * to [CalendarAgenda.undated] instead.
 	 */
 	fun agenda(
 		events: List<CalendarEvent>,
@@ -160,41 +224,46 @@ object CalendarLogic {
 		filter: CalendarFilter,
 		requested: Set<String>,
 		forceOnlyRequested: Boolean,
-	): List<Pair<LocalDate, List<CalendarEvent>>> = events
-		.asSequence()
-		.filter { it.monitored }
-		.filter { !forceOnlyRequested || it.requestKey in requested }
-		.filter { filter.matches(it, requested) }
-		.mapNotNull { event -> event.day(zone)?.takeIf { inWindow(it, start) }?.let { it to event } }
-		.groupBy({ it.first }, { it.second })
-		.toSortedMap()
-		.map { (day, dayEvents) -> day to dayEvents.sortedWith(compareBy({ it.instant }, { it.title })) }
-
-	/**
-	 * Whether the event's episode details must be withheld. Calendar data comes straight from Sonarr, so it isn't
-	 * filtered by the plugin. Fail closed: when Spoiler Guard is on but the user's guard list couldn't be read
-	 * ([spoilerState] null), every episode is treated as guarded.
-	 */
-	fun isSpoilerGuarded(event: CalendarEvent, spoilerGuardEnabled: Boolean, spoilerState: SpoilerGuardState?): Boolean {
-		if (!spoilerGuardEnabled || event.isMovie) return false
-		if (spoilerState == null) return true
-		val seriesKey = event.libraryItemId?.replace("-", "")?.lowercase()
-		if (seriesKey != null && spoilerState.series.keys.any { it.replace("-", "").equals(seriesKey, ignoreCase = true) }) return true
-		// Opted in before the show reached the library
-		val tmdbId = event.validTmdbId
-		return tmdbId != null && spoilerState.pendingTmdb.containsKey("tv:$tmdbId")
+		hideDate: (CalendarEvent) -> Boolean = { false },
+	): CalendarAgenda {
+		val inWindow = events
+			.asSequence()
+			.filter { it.monitored }
+			.filter { !forceOnlyRequested || it.requestKey in requested }
+			.filter { filter.matches(it, requested) }
+			.mapNotNull { event -> event.day(zone)?.takeIf { inWindow(it, start) }?.let { it to event } }
+			.toList()
+		val (undated, dated) = inWindow.partition { (_, event) -> hideDate(event) }
+		return CalendarAgenda(
+			days = dated
+				.groupBy({ it.first }, { it.second })
+				.toSortedMap()
+				.map { (day, dayEvents) -> day to dayEvents.sortedWith(compareBy({ it.instant }, { it.title })) },
+			undated = undated.map { it.second }.sortedWith(
+				compareBy({ it.title.lowercase(Locale.ROOT) }, { it.seasonNumber }, { it.episodeNumber }, { it.eventId })
+			),
+		)
 	}
 
 	/**
-	 * The line under the title: `S02E01 · Episode title` for episodes (just `S02E01` when guarded), the source's
-	 * subtitle (the year) for movies.
+	 * What to withhold for the event. Calendar data comes straight from Sonarr/Radarr (artwork, dates, titles), so
+	 * the plugin doesn't filter it: series by the show's library id, movies by theirs (or a guarded collection), and
+	 * titles opted in before they reached the library by TMDB id. Fails closed when the guard lists couldn't be read.
 	 */
-	fun subtitle(event: CalendarEvent, guarded: Boolean): String? {
+	fun protection(event: CalendarEvent, spoiler: SpoilerSnapshot): Protection =
+		spoiler.forTitle(event.isMovie, event.libraryItemId, event.validTmdbId)
+
+	/**
+	 * The line under the title: `S02E01 · Episode title` for episodes (just `S02E01` when episode titles are
+	 * protected), the source's subtitle (the year) for movies.
+	 */
+	fun subtitle(event: CalendarEvent, protection: Protection): String? {
 		if (event.isMovie) return event.subtitle?.takeIf { it.isNotBlank() }
 		val season = event.seasonNumber
 		val episode = event.episodeNumber
 		val code = if (season != null && episode != null) "S%02dE%02d".format(season, episode) else null
-		if (guarded) return code
+		// The source's subtitle carries the episode title too, so it can't stand in for the code
+		if (protection.hideTitles) return code
 		val episodeTitle = event.episodeTitle?.takeIf { it.isNotBlank() && !it.equals("TBA", ignoreCase = true) }
 		return when {
 			code != null && episodeTitle != null -> "$code · $episodeTitle"
