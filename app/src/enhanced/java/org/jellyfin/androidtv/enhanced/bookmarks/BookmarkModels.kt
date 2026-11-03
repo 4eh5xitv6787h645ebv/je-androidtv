@@ -2,6 +2,9 @@ package org.jellyfin.androidtv.enhanced.bookmarks
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
 import java.time.Instant
 import kotlin.math.roundToLong
@@ -67,6 +70,9 @@ data class NeutralEpisode(val seriesName: String?, val seasonNumber: Int?, val e
 object BookmarkLogic {
 	const val TICKS_PER_SECOND = 10_000_000L
 
+	/** The web's label input is limited to this many characters. */
+	const val MAX_LABEL_LENGTH = 100
+
 	/** Newest first by `UpdatedAt` (falling back to `CreatedAt`); undated ones last. */
 	fun sorted(document: BookmarkDocument): List<BookmarkEntry> = document.bookmarks
 		.map { (id, bookmark) -> BookmarkEntry(id, bookmark) }
@@ -120,4 +126,31 @@ object BookmarkLogic {
 		if (season != null && episode != null) "S${season}E$episode" else null,
 		name?.takeIf { it.isNotBlank() },
 	).joinToString(" · ")
+
+	/**
+	 * The label to save from the rename dialog: the trimmed input (at most [MAX_LABEL_LENGTH] characters), or the
+	 * bookmark's time ("12:34") when left empty, the label the player gives a quick bookmark.
+	 */
+	fun labelForSave(input: String?, seconds: Double): String =
+		input?.trim()?.take(MAX_LABEL_LENGTH)?.trim()?.ifEmpty { null } ?: formatTimestamp(seconds)
+
+	/**
+	 * Sets the label of [bookmarkId] in the fields of a whole `bookmark.json` document and stamps `UpdatedAt` with
+	 * [now], like the web's edit. Every other bookmark and field is left as it is; keys are matched ignoring case
+	 * (the plugin writes PascalCase but accepts any). Returns false, changing nothing, when the bookmark isn't there
+	 * (deleted elsewhere).
+	 */
+	fun rename(fields: MutableMap<String, JsonElement>, bookmarkId: String, label: String, now: Instant): Boolean {
+		val listKey = fields.keyIgnoringCase("Bookmarks") ?: return false
+		val list = fields[listKey] as? JsonObject ?: return false
+		val bookmark = list[bookmarkId] as? JsonObject ?: return false
+		val updated = bookmark.toMutableMap().apply {
+			this[keyIgnoringCase("Label") ?: "Label"] = JsonPrimitive(label)
+			this[keyIgnoringCase("UpdatedAt") ?: "UpdatedAt"] = JsonPrimitive(now.toString())
+		}
+		fields[listKey] = JsonObject(list.toMutableMap().apply { this[bookmarkId] = JsonObject(updated) })
+		return true
+	}
+
+	private fun Map<String, *>.keyIgnoringCase(name: String) = keys.firstOrNull { it.equals(name, ignoreCase = true) }
 }

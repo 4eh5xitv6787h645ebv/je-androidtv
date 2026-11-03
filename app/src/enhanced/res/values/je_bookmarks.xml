@@ -25,4 +25,14 @@
     <string name="je_bookmarks_episode_numbered">Season %1$d, Episode %2$d</string>
     <string name="je_bookmarks_episode_number">Episode %1$d</string>
     <string name="je_bookmarks_episode">Episode</string>
+    <string name="je_bookmarks_more">More options</string>
+    <string name="je_bookmarks_saving">Saving…</string>
+    <string name="je_bookmarks_rename">Rename</string>
+    <string name="je_bookmarks_rename_title">Rename bookmark at %1$s</string>
+    <string name="je_bookmarks_rename_message">Leave it empty to label the bookmark with its time.</string>
+    <string name="je_bookmarks_renamed">Bookmark renamed</string>
+    <string name="je_bookmarks_rename_failed">Couldn\'t rename the bookmark: %1$s</string>
+    <string name="je_bookmarks_gone">This bookmark was already deleted.</string>
+    <string name="je_bookmarks_delete_title">Delete this bookmark?</string>
+    <string name="je_bookmarks_delete_message">\"%1$s\" at %2$s will be removed from all your devices.</string>
 </resources>
