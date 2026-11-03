@@ -7,6 +7,8 @@ import org.jellyfin.androidtv.enhanced.bookmarks.bookmarksHubEntry
 import org.jellyfin.androidtv.enhanced.bookmarks.bookmarksModule
 import org.jellyfin.androidtv.enhanced.calendar.calendarHubEntry
 import org.jellyfin.androidtv.enhanced.calendar.calendarModule
+import org.jellyfin.androidtv.enhanced.catchup.catchUpHubEntry
+import org.jellyfin.androidtv.enhanced.catchup.catchUpModule
 import org.jellyfin.androidtv.enhanced.discover.DiscoverHubEntries
 import org.jellyfin.androidtv.enhanced.discover.discoverModule
 import org.jellyfin.androidtv.enhanced.management.ManagementEntries
@@ -36,6 +38,7 @@ val featureModules: List<Module> = listOf(
 	calendarModule,
 	bookmarksModule,
 	activityModule,
+	catchUpModule,
 	aboutModule,
 ).also {
 	EnhancedHub.register(
@@ -44,6 +47,7 @@ val featureModules: List<Module> = listOf(
 		calendarHubEntry,
 		bookmarksHubEntry,
 		activityHubEntry,
+		catchUpHubEntry,
 		*ManagementEntries.hubEntries.toTypedArray(),
 	)
 }
