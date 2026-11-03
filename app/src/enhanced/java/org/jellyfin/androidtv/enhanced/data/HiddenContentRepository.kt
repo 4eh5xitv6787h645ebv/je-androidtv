@@ -34,6 +34,15 @@ data class HiddenContentSettings(
 	@SerialName("ShowHideConfirmation") val showHideConfirmation: Boolean = true,
 	@SerialName("ShowButtonDetails") val showButtonDetails: Boolean = true,
 	@SerialName("ShowButtonCast") val showButtonCast: Boolean = false,
+	@SerialName("FilterLibrary") val filterLibrary: Boolean = true,
+	@SerialName("FilterUpcoming") val filterUpcoming: Boolean = true,
+	@SerialName("FilterCalendar") val filterCalendar: Boolean = true,
+	@SerialName("FilterSearch") val filterSearch: Boolean = false,
+	@SerialName("FilterRequests") val filterRequests: Boolean = true,
+	/** Hide buttons on Seerr cards and the Seerr details screen. */
+	@SerialName("ShowButtonJellyseerr") val showButtonJellyseerr: Boolean = true,
+	@SerialName("ShowButtonLibrary") val showButtonLibrary: Boolean = false,
+	@SerialName("ExperimentalHideCollections") val experimentalHideCollections: Boolean = false,
 )
 
 /** Where a "remove from home" action applies; maps to the plugin's scoped hide routes. */
@@ -73,6 +82,13 @@ class HiddenContentRepository(
 		val hiddenItemIds: Set<String> by lazy {
 			entries.filter { it.scope() == "global" }.map { normalize(it.string("ItemId")) }.filter { it.isNotEmpty() }.toSet()
 		}
+
+		/**
+		 * Whether a Seerr title is hidden everywhere: by its TMDB id (TMDB-only records and library records that kept
+		 * the id) or, when it's in the library, by its Jellyfin id.
+		 */
+		fun isHiddenTmdb(tmdbId: Int, jellyfinId: String? = null): Boolean =
+			tmdbId.toString() in hiddenTmdbIds || (jellyfinId != null && normalize(jellyfinId) in hiddenItemIds)
 
 		/** TMDB ids hidden everywhere, for filtering Seerr rows. */
 		val hiddenTmdbIds: Set<String> by lazy {
@@ -159,6 +175,58 @@ class HiddenContentRepository(
 			}
 			.map { it.key }
 			.forEach { items.remove(it) }
+	}
+
+	/**
+	 * Hide a Seerr title everywhere, as the web's Hide button on Seerr cards does: keyed by its Jellyfin id when it's
+	 * in the library ([jellyfinId]), otherwise by `tmdb-<id>` with an empty `ItemId`.
+	 */
+	suspend fun hideTmdb(tmdbId: Int, mediaType: String, name: String, posterPath: String?, jellyfinId: String?) = edit(session()) { items ->
+		val itemId = jellyfinId?.let(::normalize).orEmpty()
+		val key = itemId.ifEmpty { "tmdb-$tmdbId" }
+		val entry = buildJsonObject {
+			put("ItemId", itemId)
+			put("Name", name)
+			put("Type", if (mediaType == "tv") "Series" else "Movie")
+			put("TmdbId", tmdbId.toString())
+			put("HiddenAt", Instant.now().toString())
+			put("PosterPath", posterPath.orEmpty())
+			put("SeriesId", "")
+			put("SeriesName", "")
+			put("SeasonNumber", JsonNull)
+			put("EpisodeNumber", JsonNull)
+			put("HideScope", "global")
+		}
+		// Replace narrower (home-row) entries for the same library item so the global hide wins
+		if (itemId.isNotEmpty()) items.keys.filter { normalize(it) == itemId }.forEach { items.remove(it) }
+		items[key] = entry
+	}
+
+	/** Remove every global entry that hides this Seerr title (by TMDB id or, when given, by Jellyfin id). */
+	suspend fun unhideTmdb(tmdbId: Int, jellyfinId: String?) = edit(session()) { items ->
+		val wantedItem = jellyfinId?.let(::normalize)?.takeIf { it.isNotEmpty() }
+		items.entries
+			.filter { (key, value) ->
+				val obj = value as? JsonObject
+				val scope = (obj?.get("HideScope") as? JsonPrimitive)?.contentOrNull.orEmpty().ifEmpty { "global" }
+				val entryTmdb = (obj?.get("TmdbId") as? JsonPrimitive)?.contentOrNull
+				val entryItem = (obj?.get("ItemId") as? JsonPrimitive)?.contentOrNull?.let(::normalize)
+				scope == "global" && (key == "tmdb-$tmdbId" || entryTmdb == tmdbId.toString() || (wantedItem != null && entryItem == wantedItem))
+			}
+			.map { it.key }
+			.forEach { items.remove(it) }
+	}
+
+	/**
+	 * Remove entries by their exact document keys (as listed in [Snapshot.document]), whatever their scope. Keys that
+	 * are already gone are ignored. Returns how many entries were removed.
+	 */
+	suspend fun removeEntries(keys: Collection<String>): Int {
+		var removed = 0
+		edit(session()) { items ->
+			for (key in keys) if (items.remove(key) != null) removed++
+		}
+		return removed
 	}
 
 	/** Hide [id] from Continue Watching or Next Up only (the plugin's "Remove from …" action). */
