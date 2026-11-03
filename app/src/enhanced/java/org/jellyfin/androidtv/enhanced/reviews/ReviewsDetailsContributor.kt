@@ -25,7 +25,7 @@ import timber.log.Timber
 import java.util.WeakHashMap
 
 /**
- * JE user reviews and TMDB reviews on the details screen: a "Rate" button (half-star picker plus optional text) and
+ * JE user reviews, TMDB reviews and AniList reviews on the details screen: a "Rate" button (half-star picker plus optional text) and
  * a "Reviews" row whose cards open [ReviewsReaderFragment]. The row is withheld when the title (or, for seasons and
  * episodes, its series) is Spoiler Guarded and reviews are hidden for this user, or when that can't be ruled out.
  */
@@ -51,19 +51,36 @@ class ReviewsDetailsContributor(
 		val config = state.config
 		val item = context.item
 		if (!state.available || item.type !in REVIEW_TYPES) return null
-		val includeUser = config.showUserReviews
-		val includeTmdb = config.showReviews && config.tmdbEnabled && item.type in TMDB_REVIEW_TYPES
-		if (!includeUser && !includeTmdb) return null
-		val tmdb = runCatching { metadataRepository.tmdbTarget(item) }
-			.onFailure { Timber.w(it, "Failed to resolve the TMDB id for reviews") }
-			.getOrNull() ?: return null
-		if (tmdb.mediaType == TmdbTarget.PERSON) return null
+		val wantUser = config.showUserReviews
+		val wantTmdb = config.showReviews && config.tmdbEnabled && item.type in TMDB_REVIEW_TYPES
+		val anilistId = if (config.showAnilistReviews) {
+			runCatching { repository.anilistId(item) }
+				.onFailure { Timber.w(it, "Failed to resolve the AniList id for reviews") }
+				.getOrNull()
+		} else null
+		if (!wantUser && !wantTmdb && anilistId == null) return null
+		val tmdb = if (wantUser || wantTmdb) {
+			runCatching { metadataRepository.tmdbTarget(item) }
+				.onFailure { Timber.w(it, "Failed to resolve the TMDB id for reviews") }
+				.getOrNull()
+				?.takeIf { it.mediaType != TmdbTarget.PERSON }
+		} else null
+		// An anime with only an AniList id still gets its AniList reviews, but nothing keyed by TMDB id
+		if (tmdb == null && anilistId == null) return null
 
 		val title = when (item.type) {
 			BaseItemKind.SEASON, BaseItemKind.EPISODE -> listOfNotNull(item.seriesName, item.name).joinToString(" · ")
 			else -> item.name.orEmpty()
 		}
-		return ReviewTarget(tmdb.mediaType, tmdb.reviewKey, tmdb.tmdbId, title, includeUser, includeTmdb)
+		return ReviewTarget(
+			mediaType = tmdb?.mediaType.orEmpty(),
+			key = tmdb?.reviewKey.orEmpty(),
+			tmdbId = tmdb?.tmdbId ?: 0,
+			title = title,
+			includeUser = wantUser && tmdb != null,
+			includeTmdb = wantTmdb && tmdb != null,
+			anilistId = anilistId,
+		)
 	}
 
 	override suspend fun actions(context: DetailsContext): List<DetailsAction> {
@@ -101,8 +118,7 @@ class ReviewsDetailsContributor(
 		if (spoilerProtection.effectiveFor(context.item).hideReviews) return emptyList()
 		val target = target(context) ?: return emptyList()
 		val initial = repository.load(target)
-		val hasContent = initial.entries.isNotEmpty() || (initial.summary?.count ?: 0) > 0 ||
-			initial.userError != null || initial.tmdbError != null
+		val hasContent = initial.entries.isNotEmpty() || (initial.summary?.count ?: 0) > 0 || initial.firstError != null
 		if (!hasContent) return emptyList()
 
 		val fragment = context.fragment
