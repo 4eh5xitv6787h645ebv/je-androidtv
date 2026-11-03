@@ -53,6 +53,7 @@ import org.jellyfin.androidtv.enhanced.ui.design.StatusBadgeSpec
 import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.koin.android.ext.android.inject
 import timber.log.Timber
 import java.util.UUID
@@ -240,7 +241,7 @@ class HiddenContentFragment : Fragment() {
 			}
 
 			val restoring by restoreAllPending.collectAsState()
-			val restoreCount = restoring?.size ?: 0
+			val restoreCount = rememberLastNonNull(restoring)?.size ?: 0
 			JeConfirmDialog(
 				visible = restoring != null,
 				title = pluralStringResource(R.plurals.je_management_hc_restore_all_title, restoreCount, restoreCount),

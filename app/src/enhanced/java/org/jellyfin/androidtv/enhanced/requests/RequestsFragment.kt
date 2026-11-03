@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -79,6 +80,7 @@ import org.jellyfin.androidtv.enhanced.ui.design.TabSpec
 import org.jellyfin.androidtv.enhanced.ui.design.WarningLine
 import org.jellyfin.androidtv.enhanced.ui.hub.EmptyAction
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrCardMenu
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkNotice
 import org.jellyfin.androidtv.enhanced.ui.seerr.SeerrLinkTexts
@@ -102,6 +104,8 @@ class RequestsFragment : Fragment() {
 		private const val PAGE_SIZE = 20
 		private const val ISSUE_PAGE_SIZE = 20
 		private const val HISTORY_PAGE_SIZE = 30
+
+		private const val FOCUS_RETRY_FRAMES = 10
 
 		private const val STATE_TAB = "tab"
 		private const val STATE_REQUEST_FILTER = "requestFilter"
@@ -229,7 +233,13 @@ class RequestsFragment : Fragment() {
 			// A restored tab the server no longer offers falls back to the first one
 			if (tab.value !in RequestsTab.available(loaded)) tab.value = RequestsTab.REQUESTS
 			open(tab.value)
-			if (!restoring) runCatching { firstFocus.requestFocus() }
+			// The tabs are composed once the state says the page is on, which may be a frame or two after loading
+			if (!restoring) {
+				for (frame in 1..FOCUS_RETRY_FRAMES) {
+					if (runCatching { firstFocus.requestFocus() }.getOrDefault(false)) break
+					withFrameNanos { }
+				}
+			}
 		}
 
 		val counts by requestCounts.collectAsState()
@@ -533,9 +543,10 @@ class RequestsFragment : Fragment() {
 	private fun RequestDialogs() {
 		val current by dialog.collectAsState()
 		val dismiss = { dialog.value = null }
-		val menu = current as? RequestDialog.Menu
+		val menuOpen = current is RequestDialog.Menu
+		val menu = rememberLastNonNull(current as? RequestDialog.Menu)
 		JeDialog(
-			visible = menu != null,
+			visible = menuOpen,
 			onDismissRequest = dismiss,
 			title = menu?.card?.request?.title ?: stringResource(R.string.je_requests_issue_unknown_title),
 			actions = { JeButton(text = stringResource(R.string.je_design_cancel), onClick = dismiss) },
@@ -561,10 +572,11 @@ class RequestsFragment : Fragment() {
 			}
 		}
 
-		val decline = (current as? RequestDialog.Decline)?.card
+		val declineOpen = current is RequestDialog.Decline
+		val decline = rememberLastNonNull((current as? RequestDialog.Decline)?.card)
 		val declineTitle = decline?.request?.title ?: stringResource(R.string.je_requests_issue_unknown_title)
 		JeConfirmDialog(
-			visible = decline != null,
+			visible = declineOpen,
 			title = stringResource(R.string.je_requests_decline_title, declineTitle),
 			body = stringResource(R.string.je_requests_decline_message, decline?.request?.requestedBy ?: stringResource(R.string.je_requests_chip_unknown)),
 			confirmLabel = stringResource(R.string.je_requests_decline),
