@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -326,7 +327,7 @@ class SeerrDetailsFragment : Fragment() {
 					rating?.takeIf { it > 0 }?.let { "★ %.1f".format(it) },
 					details.genres.joinToString(", ") { it.name }.ifEmpty { null },
 				).joinToString("   ·   ")
-				if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 16.sp)
+				if (meta.isNotEmpty()) Text(text = meta, color = secondaryTextColor(), fontSize = 16.sp)
 				// Age rating and original title come from Seerr/TMDB only, so not for protected library titles
 				if (story == null) SeerrDetailsMetaStrip(extraMeta(ui, details))
 
@@ -334,7 +335,7 @@ class SeerrDetailsFragment : Fragment() {
 					SeerrStatusBadge(status)
 				}
 
-				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = Tokens.Color.colorGrey300, fontSize = 16.sp) }
+				tagline?.takeIf { it.isNotBlank() }?.let { Text(text = it, color = secondaryTextColor(), fontSize = 16.sp) }
 				overview?.takeIf { it.isNotBlank() }?.let {
 					Text(text = it, color = Tokens.Color.colorGrey100, fontSize = 16.sp, maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(900.dp))
 				}
@@ -393,7 +394,7 @@ class SeerrDetailsFragment : Fragment() {
 				}
 
 				if (!ui.enhanced.seerrUsable) {
-					Text(stringResource(R.string.je_seerr_unavailable), color = Tokens.Color.colorGrey300)
+					Text(stringResource(R.string.je_seerr_unavailable), color = secondaryTextColor())
 				}
 
 				ui.quota?.let { quota ->
@@ -408,7 +409,7 @@ class SeerrDetailsFragment : Fragment() {
 								limit,
 								side.days ?: 0,
 							),
-							color = Tokens.Color.colorGrey300,
+							color = secondaryTextColor(),
 							fontSize = 14.sp,
 						)
 					}

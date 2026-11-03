@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -283,7 +284,7 @@ class SeerrDiscoveryFragment : Fragment() {
 				if (source.sortable) {
 					Text(
 						text = stringResource(R.string.je_discover_sort),
-						color = Tokens.Color.colorGrey300,
+						color = secondaryTextColor(),
 						modifier = Modifier.padding(start = if (singleMediaType) 0.dp else 16.dp),
 					)
 					listOf(
@@ -303,7 +304,7 @@ class SeerrDiscoveryFragment : Fragment() {
 						}
 					}
 				}
-				currentStatus?.let { Text(text = it, color = Tokens.Color.colorGrey300, modifier = Modifier.padding(start = 16.dp)) }
+				currentStatus?.let { Text(text = it, color = secondaryTextColor(), modifier = Modifier.padding(start = 16.dp)) }
 				if (currentFailed) {
 					Button(onClick = { loadMore() }) { Text(stringResource(R.string.je_retry)) }
 				} else if (currentPaused) {

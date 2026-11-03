@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.discover
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -312,14 +313,14 @@ class DiscoverFragment : Fragment() {
 			when (isAvailable) {
 				null -> Text(
 					text = stringResource(R.string.je_loading),
-					color = Tokens.Color.colorGrey300,
+					color = secondaryTextColor(),
 					fontSize = 18.sp,
 					modifier = Modifier.padding(horizontal = 48.dp),
 				)
 
 				false -> Text(
 					text = stringResource(R.string.je_discover_unavailable),
-					color = Tokens.Color.colorGrey300,
+					color = secondaryTextColor(),
 					fontSize = 18.sp,
 					modifier = Modifier.padding(horizontal = 48.dp),
 				)

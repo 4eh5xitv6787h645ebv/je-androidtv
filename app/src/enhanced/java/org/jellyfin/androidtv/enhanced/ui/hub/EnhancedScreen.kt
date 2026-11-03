@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.hub
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -75,7 +76,7 @@ fun EnhancedScreenHeader(
 			verticalAlignment = Alignment.CenterVertically,
 		) {
 			Text(text = title, fontSize = 28.sp, color = Tokens.Color.colorWhite)
-			if (subtitle != null) Text(text = subtitle, fontSize = 16.sp, color = Tokens.Color.colorGrey300)
+			if (subtitle != null) Text(text = subtitle, fontSize = 16.sp, color = secondaryTextColor())
 		}
 		if (actions != null) {
 			Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { actions() }
@@ -96,7 +97,7 @@ fun <T> LoadStateContent(
 		when (state) {
 			LoadState.Loading -> Text(
 				text = stringResource(R.string.je_loading),
-				color = Tokens.Color.colorGrey300,
+				color = secondaryTextColor(),
 				fontSize = 18.sp,
 				modifier = Modifier.align(Alignment.Center),
 			)
@@ -113,7 +114,7 @@ fun <T> LoadStateContent(
 			}
 
 			is LoadState.Ready -> if (empty != null && empty(state.value)) {
-				Text(text = emptyMessage, color = Tokens.Color.colorGrey300, fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
+				Text(text = emptyMessage, color = secondaryTextColor(), fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
 			} else content(state.value)
 		}
 	}

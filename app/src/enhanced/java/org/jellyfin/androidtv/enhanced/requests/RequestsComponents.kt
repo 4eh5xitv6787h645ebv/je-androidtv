@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.requests
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.view.KeyEvent
 import android.widget.ImageView
 import androidx.annotation.DrawableRes
@@ -190,12 +191,12 @@ internal fun CardTitle(text: String, trailing: String? = null) {
 			overflow = TextOverflow.Ellipsis,
 			modifier = Modifier.weight(1f, fill = false),
 		)
-		if (trailing != null) Text(text = trailing, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1)
+		if (trailing != null) Text(text = trailing, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
 	}
 }
 
 @Composable
-internal fun CardLine(text: String, color: Color = Tokens.Color.colorGrey300, maxLines: Int = 1) {
+internal fun CardLine(text: String, color: Color = secondaryTextColor(), maxLines: Int = 1) {
 	Text(text = text, fontSize = 13.sp, color = color, maxLines = maxLines, overflow = TextOverflow.Ellipsis)
 }
 
@@ -203,7 +204,7 @@ internal fun CardLine(text: String, color: Color = Tokens.Color.colorGrey300, ma
 @Composable
 internal fun PageMessage(text: String, modifier: Modifier = Modifier) {
 	Box(modifier = modifier.fillMaxSize()) {
-		Text(text = text, color = Tokens.Color.colorGrey300, fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
+		Text(text = text, color = secondaryTextColor(), fontSize = 18.sp, modifier = Modifier.align(Alignment.Center))
 	}
 }
 
@@ -257,7 +258,7 @@ internal fun <T> PagedGrid(
 								Text(text = state.error, color = Tokens.Color.colorGrey100, fontSize = 14.sp)
 								Button(onClick = { loader.loadMore() }) { Text(stringResource(R.string.je_retry)) }
 							} else {
-								Text(text = stringResource(R.string.je_loading), color = Tokens.Color.colorGrey300, fontSize = 14.sp)
+								Text(text = stringResource(R.string.je_loading), color = secondaryTextColor(), fontSize = 14.sp)
 							}
 						}
 					}

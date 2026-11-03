@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.management.hidden
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -188,7 +189,7 @@ class HiddenContentFragment : Fragment() {
 				if (visible.isEmpty()) {
 					Text(
 						text = stringResource(R.string.je_management_hc_filter_empty),
-						color = Tokens.Color.colorGrey300,
+						color = secondaryTextColor(),
 						modifier = Modifier.padding(horizontal = 48.dp, vertical = 16.dp),
 					)
 					return@LoadStateContent

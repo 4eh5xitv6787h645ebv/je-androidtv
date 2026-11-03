@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -103,7 +104,7 @@ fun MetadataDialogPanel(
 		verticalArrangement = Arrangement.spacedBy(12.dp),
 	) {
 		Text(text = title, fontSize = 22.sp, color = Tokens.Color.colorWhite)
-		if (subtitle != null) Text(text = subtitle, fontSize = 14.sp, color = Tokens.Color.colorGrey300)
+		if (subtitle != null) Text(text = subtitle, fontSize = 14.sp, color = secondaryTextColor())
 		content()
 	}
 }

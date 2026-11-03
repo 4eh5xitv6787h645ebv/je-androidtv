@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.reviews
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.view.KeyEvent
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -120,7 +121,7 @@ private fun ReviewCard(entry: ReviewEntry, expanded: Boolean, onClick: () -> Uni
 		stringResource(R.string.je_reviews_source_tmdb).takeIf { entry.source == ReviewEntry.Source.TMDB },
 		reviewDate(entry.date),
 	).joinToString(" · ")
-	if (meta.isNotEmpty()) Text(text = meta, color = Tokens.Color.colorGrey300, fontSize = 12.sp)
+	if (meta.isNotEmpty()) Text(text = meta, color = secondaryTextColor(), fontSize = 12.sp)
 	if (entry.content.isNotBlank()) {
 		Text(
 			text = entry.content,
@@ -166,9 +167,9 @@ fun ReviewsRowContent(
 				if (average != null) {
 					StarRow(average, 20.dp)
 					Text(stringResource(R.string.je_reviews_average, formatRating(Math.round(average * 10) / 10.0)), color = Tokens.Color.colorWhite, fontSize = 15.sp)
-					Text(pluralStringResource(R.plurals.je_reviews_ratings_count, summary.count, summary.count), color = Tokens.Color.colorGrey300, fontSize = 13.sp)
+					Text(pluralStringResource(R.plurals.je_reviews_ratings_count, summary.count, summary.count), color = secondaryTextColor(), fontSize = 13.sp)
 				} else {
-					Text(stringResource(R.string.je_reviews_none_yet), color = Tokens.Color.colorGrey300, fontSize = 15.sp)
+					Text(stringResource(R.string.je_reviews_none_yet), color = secondaryTextColor(), fontSize = 15.sp)
 				}
 				if (onWrite != null) {
 					Text(
@@ -185,7 +186,7 @@ fun ReviewsRowContent(
 		if (data.userError != null || data.tmdbError != null) item(key = "retry") {
 			ReviewCardSurface(onClick = onRetry) {
 				Text(stringResource(R.string.je_reviews_load_failed), color = Tokens.Color.colorWhite, fontSize = 15.sp)
-				(data.userError?.message ?: data.tmdbError?.message)?.let { Text(it, color = Tokens.Color.colorGrey300, fontSize = 13.sp) }
+				(data.userError?.message ?: data.tmdbError?.message)?.let { Text(it, color = secondaryTextColor(), fontSize = 13.sp) }
 			}
 		}
 	}
@@ -252,7 +253,7 @@ fun RateDialog(
 
 	MetadataDialogPanel(title = stringResource(R.string.je_reviews_dialog_title), subtitle = title) {
 		when (val state = existing) {
-			LoadState.Loading -> Text(stringResource(R.string.je_loading), color = Tokens.Color.colorGrey300)
+			LoadState.Loading -> Text(stringResource(R.string.je_loading), color = secondaryTextColor())
 			is LoadState.Error -> {
 				Text(state.message ?: stringResource(R.string.je_error_generic), color = Tokens.Color.colorGrey100)
 				Button(onClick = state.retry, modifier = Modifier.focusRequester(starsFocus)) { Text(stringResource(R.string.je_retry)) }
@@ -260,7 +261,7 @@ fun RateDialog(
 
 			is LoadState.Ready -> {
 				StarPicker(rating, { rating = it }, Modifier.focusRequester(starsFocus))
-				Text(stringResource(R.string.je_reviews_stars_hint), color = Tokens.Color.colorGrey300, fontSize = 13.sp)
+				Text(stringResource(R.string.je_reviews_stars_hint), color = secondaryTextColor(), fontSize = 13.sp)
 
 				Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
 					Button(onClick = {
@@ -283,7 +284,7 @@ fun RateDialog(
 				ReviewTextField(text, { text = it.take(ReviewsRepository.MAX_CONTENT_LENGTH) })
 				Text(
 					stringResource(R.string.je_reviews_text_count, text.length, ReviewsRepository.MAX_CONTENT_LENGTH),
-					color = Tokens.Color.colorGrey300,
+					color = secondaryTextColor(),
 					fontSize = 12.sp,
 				)
 			}

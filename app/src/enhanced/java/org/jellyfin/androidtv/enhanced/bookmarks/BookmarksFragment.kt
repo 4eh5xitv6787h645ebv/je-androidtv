@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.bookmarks
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.KeyEvent
@@ -173,8 +174,8 @@ class BookmarksFragment : Fragment() {
 			PageImage(url = row.item?.posterUrl, modifier = Modifier.size(56.dp, 84.dp))
 			Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
 				Text(text = label ?: name, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				if (label != null) Text(text = name, fontSize = 15.sp, color = Tokens.Color.colorGrey300, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				Text(text = details, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1)
+				if (label != null) Text(text = name, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+				Text(text = details, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
 				if (row.stale) Text(stringResource(R.string.je_bookmarks_stale), fontSize = 13.sp, color = Tokens.Color.colorRed300)
 			}
 		}

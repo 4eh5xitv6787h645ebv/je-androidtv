@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.activity
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -295,9 +296,9 @@ class ActivityFragment : Fragment() {
 			Avatar(entry.userId, entry.userName, entry.userHasPrimaryImage)
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 				Text(text = line, fontSize = 17.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-				Text(text = detail, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1)
+				Text(text = detail, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
 				entry.content?.takeIf { it.isNotBlank() && entry.type == ActivityType.REVIEWED && !hideReview }?.let {
-					Text(text = it, fontSize = 14.sp, color = Tokens.Color.colorGrey300, maxLines = 2, overflow = TextOverflow.Ellipsis)
+					Text(text = it, fontSize = 14.sp, color = secondaryTextColor(), maxLines = 2, overflow = TextOverflow.Ellipsis)
 				}
 			}
 			if (item != null) PageImage(url = posterUrl(item.id, item.seriesId, item.hasPrimaryImage, item.seriesHasPrimaryImage), modifier = Modifier.size(40.dp, 60.dp))
@@ -324,8 +325,8 @@ class ActivityFragment : Fragment() {
 			Avatar(session.userId, session.userName, session.userHasPrimaryImage)
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 				Text(text = title, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				Text(text = who, fontSize = 14.sp, color = Tokens.Color.colorGrey300, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				if (status.isNotEmpty()) Text(text = status, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1)
+				Text(text = who, fontSize = 14.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+				if (status.isNotEmpty()) Text(text = status, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
 			}
 			if (item != null) PageImage(url = posterUrl(item.id, item.seriesId, true, item.seriesId != null), modifier = Modifier.size(40.dp, 60.dp))
 		}

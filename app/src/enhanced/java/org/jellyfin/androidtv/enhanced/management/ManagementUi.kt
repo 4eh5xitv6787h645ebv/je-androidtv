@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.management
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.content.Context
 import android.widget.ImageView
 import androidx.annotation.DrawableRes
@@ -144,7 +145,7 @@ fun ManagementRow(
 				ManagementPoster(posterUrl, fallbackIcon)
 				Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
 					Text(text = title, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-					if (subtitle != null) Text(text = subtitle, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1, overflow = TextOverflow.Ellipsis)
+					if (subtitle != null) Text(text = subtitle, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis)
 				}
 				for (chip in chips) Chip(chip)
 			}

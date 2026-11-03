@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.calendar
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -246,7 +247,7 @@ class CalendarFragment : Fragment() {
 				val filtered = currentFilter != CalendarFilter() || loaded.config.forceOnlyRequested
 				Text(
 					text = stringResource(if (filtered) R.string.je_calendar_empty_filtered else R.string.je_calendar_empty),
-					color = Tokens.Color.colorGrey300,
+					color = secondaryTextColor(),
 					fontSize = 18.sp,
 					modifier = Modifier.padding(horizontal = 48.dp, vertical = 24.dp),
 				)
@@ -362,8 +363,8 @@ class CalendarFragment : Fragment() {
 			PageImage(url = poster, modifier = Modifier.size(56.dp, 84.dp))
 			Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
 				Text(text = event.title, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-				subtitle?.let { Text(text = it, fontSize = 15.sp, color = Tokens.Color.colorGrey300, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-				if (meta.isNotEmpty()) Text(text = meta, fontSize = 13.sp, color = Tokens.Color.colorGrey300, maxLines = 1)
+				subtitle?.let { Text(text = it, fontSize = 15.sp, color = secondaryTextColor(), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+				if (meta.isNotEmpty()) Text(text = meta, fontSize = 13.sp, color = secondaryTextColor(), maxLines = 1)
 			}
 			Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
 				if (event.hasFile) Text(stringResource(R.string.je_calendar_marker_downloaded), fontSize = 13.sp, color = Tokens.Color.colorGreen300)

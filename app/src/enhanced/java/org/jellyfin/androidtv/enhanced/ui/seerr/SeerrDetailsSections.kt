@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.seerr
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.widget.ImageView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -69,7 +70,7 @@ fun SeerrDetailsMetaStrip(items: List<String>) {
 	if (items.isEmpty()) return
 	Text(
 		text = items.joinToString("   ·   "),
-		color = Tokens.Color.colorGrey300,
+		color = secondaryTextColor(),
 		fontSize = 14.sp,
 		maxLines = 1,
 		overflow = TextOverflow.Ellipsis,
@@ -82,7 +83,7 @@ fun SeerrDetailsRequesters(lines: List<String>) {
 	if (lines.isEmpty()) return
 	Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
 		for (line in lines) {
-			Text(text = line, color = Tokens.Color.colorGrey300, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+			Text(text = line, color = secondaryTextColor(), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 		}
 	}
 }
@@ -149,7 +150,7 @@ fun SeerrDetailsCastRow(entries: List<SeerrDetailsCastEntry>, onClick: (SeerrDet
 						overflow = TextOverflow.Ellipsis,
 					)
 					entry.role?.takeIf { it.isNotBlank() }?.let { role ->
-						Text(text = role, color = Tokens.Color.colorGrey300, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+						Text(text = role, color = secondaryTextColor(), fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
 					}
 				}
 			}
@@ -189,14 +190,14 @@ fun SeerrDetailsSeasonsRow(entries: List<SeerrDetailsSeasonEntry>, onClick: (See
 						if (entry.episodeCount > 0) {
 							Text(
 								text = pluralStringResource(R.plurals.je_seerrdetails_episodes, entry.episodeCount, entry.episodeCount),
-								color = Tokens.Color.colorGrey300,
+								color = secondaryTextColor(),
 								fontSize = 12.sp,
 							)
 						}
 						if (seerrStatusLabel(entry.status) != null) {
 							SeerrStatusBadge(entry.status)
 						} else {
-							Text(text = stringResource(R.string.je_status_not_requested), color = Tokens.Color.colorGrey300, fontSize = 10.sp)
+							Text(text = stringResource(R.string.je_status_not_requested), color = secondaryTextColor(), fontSize = 10.sp)
 						}
 					}
 				}

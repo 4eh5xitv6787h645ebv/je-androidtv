@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.issues
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.content.Context
 import androidx.compose.foundation.layout.Arrangement
@@ -198,7 +199,7 @@ class IssueSeerrDetailsContributor(
 				horizontalArrangement = Arrangement.spacedBy(12.dp),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				Text(current.message ?: stringResource(R.string.je_issues_load_failed), color = Tokens.Color.colorGrey300, fontSize = 14.sp)
+				Text(current.message ?: stringResource(R.string.je_issues_load_failed), color = secondaryTextColor(), fontSize = 14.sp)
 				Button(onClick = current.retry) { Text(stringResource(R.string.je_retry)) }
 			}
 		}

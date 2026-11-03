@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.search
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.Gravity
 import android.view.LayoutInflater
@@ -240,7 +241,7 @@ class SeerrSearchGridFragment : Fragment() {
 				horizontalArrangement = Arrangement.spacedBy(8.dp),
 				verticalAlignment = Alignment.CenterVertically,
 			) {
-				currentStatus?.let { Text(text = it, color = Tokens.Color.colorGrey300) }
+				currentStatus?.let { Text(text = it, color = secondaryTextColor()) }
 				if (currentFailed) {
 					val retryFocus = remember { FocusRequester() }
 					// With no cards to land on, the remote needs somewhere to go

@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.calendar
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -111,7 +112,7 @@ internal fun PageImage(url: String?, modifier: Modifier = Modifier) {
 internal fun PageNotice(text: String, modifier: Modifier = Modifier) {
 	Text(
 		text = text,
-		color = Tokens.Color.colorGrey300,
+		color = secondaryTextColor(),
 		fontSize = 14.sp,
 		modifier = modifier.padding(vertical = 2.dp),
 	)

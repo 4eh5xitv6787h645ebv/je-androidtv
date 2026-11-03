@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.requests
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.app.AlertDialog
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -499,7 +500,7 @@ class RequestsFragment : Fragment() {
 							Icon(painterResource(R.drawable.je_ic_requests_sync), contentDescription = null, modifier = Modifier.size(18.dp))
 							Text(stringResource(if (isSyncing) R.string.je_requests_syncing else R.string.je_requests_sync_now), modifier = Modifier.padding(start = 6.dp))
 						}
-						Text(stringResource(R.string.je_requests_watchlist_hint), color = Tokens.Color.colorGrey300, fontSize = 13.sp)
+						Text(stringResource(R.string.je_requests_watchlist_hint), color = secondaryTextColor(), fontSize = 13.sp)
 					}
 				}
 			} else null,
@@ -577,7 +578,7 @@ class RequestsFragment : Fragment() {
 				modifier = Modifier.padding(start = 48.dp, end = 48.dp, bottom = 8.dp),
 			) {
 				Button(onClick = { refreshQueue(silent = true) }) { Text(stringResource(R.string.je_requests_refresh)) }
-				if (pollSeconds != null) Text(stringResource(R.string.je_requests_auto_refresh, pollSeconds), color = Tokens.Color.colorGrey300, fontSize = 13.sp)
+				if (pollSeconds != null) Text(stringResource(R.string.je_requests_auto_refresh, pollSeconds), color = secondaryTextColor(), fontSize = 13.sp)
 				refreshError?.let { Text(it, color = ColorAmber, fontSize = 13.sp) }
 			}
 			LoadStateContent(state) { result ->
@@ -599,7 +600,7 @@ class RequestsFragment : Fragment() {
 						)
 					}
 					if (result.entries.isEmpty()) {
-						item { Text(stringResource(R.string.je_requests_queue_empty), color = Tokens.Color.colorGrey300, fontSize = 18.sp, modifier = Modifier.padding(top = 24.dp)) }
+						item { Text(stringResource(R.string.je_requests_queue_empty), color = secondaryTextColor(), fontSize = 18.sp, modifier = Modifier.padding(top = 24.dp)) }
 					}
 					// No item keys: *arr ids aren't guaranteed unique across instances, and the list is replaced wholesale
 					items(result.entries) { entry -> QueueRow(entry) }

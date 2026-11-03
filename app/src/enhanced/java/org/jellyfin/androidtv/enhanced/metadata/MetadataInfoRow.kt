@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.metadata
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import androidx.annotation.StringRes
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -154,7 +155,7 @@ fun MetadataInfoContent(
 
 		if (info.providers.isNotEmpty()) ChipLine {
 			info.providerRegion?.let {
-				Text(text = stringResource(R.string.je_metadata_providers, it), color = Tokens.Color.colorGrey300, fontSize = 14.sp)
+				Text(text = stringResource(R.string.je_metadata_providers, it), color = secondaryTextColor(), fontSize = 14.sp)
 			}
 			for (provider in info.providers) {
 				MetadataChip(

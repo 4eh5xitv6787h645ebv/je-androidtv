@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.hub
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.ViewGroup
@@ -85,7 +86,7 @@ class EnhancedHubFragment : Fragment() {
 			if (!state.available) {
 				Text(
 					text = stringResource(R.string.je_hub_unavailable),
-					color = Tokens.Color.colorGrey300,
+					color = secondaryTextColor(),
 					fontSize = 18.sp,
 					modifier = Modifier.padding(horizontal = 48.dp),
 				)

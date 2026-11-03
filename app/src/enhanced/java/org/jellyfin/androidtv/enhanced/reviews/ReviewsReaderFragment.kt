@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.reviews
 
+import org.jellyfin.androidtv.enhanced.ui.secondaryTextColor
 import android.os.Bundle
 import android.view.KeyEvent
 import android.view.LayoutInflater
@@ -189,7 +190,7 @@ private fun ReviewPage(title: String, entry: ReviewEntry, position: String, onMo
 	) {
 		Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
 			Text(text = title, fontSize = 26.sp, color = Tokens.Color.colorWhite, modifier = Modifier.weight(1f))
-			Text(text = position, fontSize = 16.sp, color = Tokens.Color.colorGrey300)
+			Text(text = position, fontSize = 16.sp, color = secondaryTextColor())
 		}
 		Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
 			Text(
@@ -202,7 +203,7 @@ private fun ReviewPage(title: String, entry: ReviewEntry, position: String, onMo
 				stringResource(R.string.je_reviews_source_tmdb).takeIf { entry.source == ReviewEntry.Source.TMDB },
 				reviewDate(entry.date),
 			).joinToString(" · ")
-			if (meta.isNotEmpty()) Text(text = meta, fontSize = 16.sp, color = Tokens.Color.colorGrey300)
+			if (meta.isNotEmpty()) Text(text = meta, fontSize = 16.sp, color = secondaryTextColor())
 		}
 		Box(
 			modifier = Modifier
