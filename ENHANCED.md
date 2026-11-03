@@ -145,8 +145,8 @@ toggle; a page that is turned off on the server shows a focused Back.
 
 ## Screenshots
 
-Taken on the Android TV emulator against the lab server (Jellyfin 12.1, JE 12.13, Seerr) on 3 November 2026, except
-the four marked "22 Oct", which are from the first release and still match.
+Taken on the Android TV emulator against the lab server (Jellyfin 12.1, JE 12.13, Seerr). The screens of the Native+
+redesign were retaken on 4 November 2026; the four marked "22 Oct" are from the first release and still match.
 
 | | |
 |---|---|
@@ -157,6 +157,7 @@ the four marked "22 Oct", which are from the first release and still match.
 | ![Hide on a Seerr card](docs/enhanced/seerr-card-hide.jpg) Hide in a Seerr card's menu | ![Discovery grid](docs/enhanced/discovery-grid.jpg) Seerr discovery for an actor (22 Oct) |
 | ![Seerr movie details](docs/enhanced/seerr-details-movie.jpg) Seerr details: ratings, awards, where to watch, cast | ![Seerr show details](docs/enhanced/seerr-details-show.jpg) Seerr details of a show: Request more, Report a problem, requester, seasons |
 | ![Request more](docs/enhanced/request-more-seasons.jpg) Requesting the missing seasons | ![Details overflow](docs/enhanced/details-other-options.jpg) Hide, More from…, Rate, Add bookmark and Report a problem in "Other options" |
+| ![Enhanced info](docs/enhanced/details-enhanced-info.jpg) The Enhanced info row under the details buttons | ![Bookmark rename](docs/enhanced/bookmark-rename.jpg) Renaming a bookmark |
 | ![More from menu](docs/enhanced/more-from-menu.jpg) "More from…" lists cast, crew, genres, studios and tags (22 Oct) | ![Person row](docs/enhanced/person-more-from-row.jpg) "More from" row on a cast page (22 Oct) |
 | ![Rate](docs/enhanced/rate-dialog.jpg) Rating a title | ![Remove from Continue Watching](docs/enhanced/remove-from-continue-watching.jpg) Card menu on Continue Watching (22 Oct) |
 | ![Requests](docs/enhanced/requests.jpg) Requests with Approve/Decline | ![Calendar](docs/enhanced/calendar.jpg) Calendar |
@@ -170,6 +171,17 @@ the four marked "22 Oct", which are from the first release and still match.
 | ![Spoiler Guard settings](docs/enhanced/settings-spoiler-guard.jpg) Spoiler Guard categories | ![Details & tags settings](docs/enhanced/settings-details.jpg) Details & tags |
 | ![Playback settings](docs/enhanced/settings-playback.jpg) Playback settings | ![Subtitle style](docs/enhanced/settings-subtitle-style.jpg) Subtitle style sync |
 | ![About](docs/enhanced/settings-about.jpg) About as an admin: Seerr linked, "Import Jellyfin users into Seerr" | ![What's New](docs/enhanced/whats-new.jpg) What's New for admins |
+
+## Design system
+
+All Jellyfin Enhanced screens are built from one component set in
+`app/src/enhanced/java/org/jellyfin/androidtv/enhanced/ui/design/` ("Native+"), layered on upstream's `JellyfinTheme`
+and `org.jellyfin.design.Tokens` so the screens match the stock app without restyling it. It provides the colour,
+type and spacing tokens, a status palette for request, issue and season states, and one focus rule: buttons and
+chips invert on focus, rows and anything with artwork get a white ring. Components include page and hero scaffolds,
+list rows, media, hub and season cards, tab rows and filter chips with counts, status badges, buttons, empty, error
+and loading states, notices, dialogs (choice, confirm, text input), settings rows and player overlay styles. The
+catalogue, the focus rule and an old-helper-to-component map are in `ui/design/README.md`.
 
 ## Upstream hooks
 

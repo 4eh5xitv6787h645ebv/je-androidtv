@@ -8,6 +8,10 @@
 
 <p align="center"><img src="docs/enhanced/hub.jpg" alt="The Enhanced hub" width="800"/></p>
 
+Every Jellyfin Enhanced screen shares one design system built on the stock app's own theme: the same focus style
+everywhere, tabs and filter chips that show counts and make the selected one obvious, one status palette for
+requests and seasons, and backdrop-led pages for Seerr details and Catch Up.
+
 Everything the stock app does still works exactly the same. The extra screens, rows and buttons only appear when your
 server runs the [Jellyfin Enhanced](https://github.com/n00bcodr/Jellyfin-Enhanced) plugin and the feature is switched
 on there. On a server without the plugin the app looks and behaves like stock. It installs as its own app
@@ -60,10 +64,10 @@ Requests are standard quality only, by design.
 
 | | |
 |---|---|
-| ![Details overflow](docs/enhanced/details-other-options.jpg) Hide, More from…, Rate, Add bookmark and Report a problem join the details buttons | ![Rate](docs/enhanced/rate-dialog.jpg) Rate with half stars and write a review; reviews from Jellyfin Enhanced users, AniList and TMDB show in a reader with optional translation |
+| ![Enhanced info](docs/enhanced/details-enhanced-info.jpg) An **Enhanced info** row right under the buttons: watch progress, file size, audio languages, release dates, IMDb and Rotten Tomatoes, awards and where it streams | ![Details overflow](docs/enhanced/details-other-options.jpg) Hide, More from…, Rate, Add bookmark and Report a problem join the details buttons |
+| ![Rate](docs/enhanced/rate-dialog.jpg) Rate with half stars and write a review; reviews from Jellyfin Enhanced users, AniList and TMDB show in a reader with optional translation | ![Bookmark rename](docs/enhanced/bookmark-rename.jpg) Bookmarks can be renamed or deleted from their ⋯ menu |
 
-Details pages also gain an **Enhanced info** row (watch progress, file size, audio languages, release dates, IMDb,
-Rotten Tomatoes and other ratings, awards), cast ages, DoesTheDogDie content warnings and a "Streaming in…" row.
+Details pages also gain cast ages, DoesTheDogDie content warnings and a reviews row further down.
 
 ### Player
 
