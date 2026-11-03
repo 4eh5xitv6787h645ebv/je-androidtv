@@ -37,7 +37,6 @@ data class HiddenContentSettings(
 	@SerialName("FilterLibrary") val filterLibrary: Boolean = true,
 	@SerialName("FilterUpcoming") val filterUpcoming: Boolean = true,
 	@SerialName("FilterCalendar") val filterCalendar: Boolean = true,
-	@SerialName("FilterSearch") val filterSearch: Boolean = false,
 	@SerialName("FilterRequests") val filterRequests: Boolean = true,
 	/** Hide buttons on Seerr cards and the Seerr details screen. */
 	@SerialName("ShowButtonJellyseerr") val showButtonJellyseerr: Boolean = true,

@@ -99,6 +99,7 @@ data class EnhancedPublicConfig(
 	@SerialName("MaintenanceModeMessage") val maintenanceModeMessage: String? = null,
 	@SerialName("MaintenanceModeEndsAt") val maintenanceModeEndsAt: String? = null,
 	@SerialName("LetterboxdEnabled") val letterboxdEnabled: Boolean = false,
+	@SerialName("RandomButtonEnabled") val randomButtonEnabled: Boolean = false,
 )
 
 /**

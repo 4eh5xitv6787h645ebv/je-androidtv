@@ -21,7 +21,7 @@ object DiscoverDestinations {
  * Whether to offer "Pick something for me". The user's `RandomButtonEnabled`, else the plugin's default (on);
  * the server's own default isn't part of the shared config model yet.
  */
-fun randomPickEnabled(state: EnhancedState): Boolean = state.available && (state.userSettings.randomButtonEnabled ?: true)
+fun randomPickEnabled(state: EnhancedState): Boolean = state.available && (state.userSettings.randomButtonEnabled ?: state.config.randomButtonEnabled)
 
 /** Hub pages of the Discover feature. */
 object DiscoverHubEntries {
