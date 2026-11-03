@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Info row -->
+    <string name="je_metadata_size">Size %1$s</string>
+    <string name="je_metadata_progress">Watched %1$s</string>
+    <string name="je_metadata_audio">Audio: %1$s</string>
+    <string name="je_metadata_release_cinema">In cinemas %1$s</string>
+    <string name="je_metadata_release_digital">Digital %1$s</string>
+    <string name="je_metadata_release_physical">Physical %1$s</string>
+    <string name="je_metadata_next_episode">Next episode %1$s</string>
+    <string name="je_metadata_last_episode">Last episode %1$s</string>
+    <string name="je_metadata_airs">Airs %1$s</string>
+    <string name="je_metadata_aired">Aired %1$s</string>
+    <string name="je_metadata_providers">Streaming in %1$s</string>
+    <string name="je_metadata_load_failed">Couldn\'t load %1$s. Retry</string>
+    <string name="je_metadata_source_stats">size and progress</string>
+    <string name="je_metadata_source_audio">audio languages</string>
+    <string name="je_metadata_source_ratings">ratings</string>
+    <string name="je_metadata_source_awards">awards</string>
+    <string name="je_metadata_source_releases">release dates</string>
+    <string name="je_metadata_source_providers">streaming services</string>
+    <string name="je_metadata_source_person">birth details</string>
+
+    <!-- People -->
+    <string name="je_metadata_born">Born %1$s</string>
+    <string name="je_metadata_born_age">Born %1$s (age %2$d)</string>
+    <string name="je_metadata_died">Died %1$s</string>
+    <string name="je_metadata_died_age">Died %1$s (aged %2$d)</string>
+    <string name="je_metadata_cast_ages">Cast ages</string>
+    <string name="je_metadata_age_at_release">%1$d at release</string>
+    <string name="je_metadata_age_now">now %1$d</string>
+    <string name="je_metadata_age_died">† %1$d</string>
+
+    <!-- Awards -->
+    <string name="je_metadata_awards">Awards</string>
+    <plurals name="je_metadata_wins">
+        <item quantity="one">%1$d win</item>
+        <item quantity="other">%1$d wins</item>
+    </plurals>
+    <plurals name="je_metadata_nominations">
+        <item quantity="one">%1$d nomination</item>
+        <item quantity="other">%1$d nominations</item>
+    </plurals>
+    <string name="je_metadata_award_won">Won</string>
+    <string name="je_metadata_award_nominated">Nominated</string>
+
+    <!-- Content warnings -->
+    <string name="je_metadata_content_warnings">Content warnings</string>
+    <string name="je_metadata_content_warnings_count">Content warnings (%1$d)</string>
+    <string name="je_metadata_ddd_subtitle">Community votes from DoesTheDogDie</string>
+    <string name="je_metadata_ddd_triggered">Your triggers</string>
+    <string name="je_metadata_ddd_clear">Your triggers, not reported</string>
+    <string name="je_metadata_ddd_others">Reported</string>
+    <string name="je_metadata_ddd_votes">%1$d%% yes · %2$d votes</string>
+    <string name="je_metadata_ddd_none">Nothing reported for this title.</string>
+    <string name="je_metadata_ddd_choose">Choose triggers</string>
+    <string name="je_metadata_ddd_done">Done</string>
+    <string name="je_metadata_triggers_title">Content warning triggers</string>
+    <string name="je_metadata_triggers_caption">Topics to highlight in content warnings</string>
+    <string name="je_metadata_triggers_count">%1$d selected</string>
+    <string name="je_metadata_save_failed">Couldn\'t save: %1$s</string>
+
+    <!-- Where to watch settings -->
+    <string name="je_metadata_elsewhere_title">Where to watch</string>
+    <string name="je_metadata_elsewhere_caption">Region and streaming services</string>
+    <string name="je_metadata_elsewhere_region">Region</string>
+    <string name="je_metadata_elsewhere_region_default">Server default (%1$s)</string>
+    <string name="je_metadata_elsewhere_services">Streaming services</string>
+    <string name="je_metadata_elsewhere_services_all">All services</string>
+    <string name="je_metadata_elsewhere_services_caption">Only these services are shown. Select none to show all.</string>
+</resources>
