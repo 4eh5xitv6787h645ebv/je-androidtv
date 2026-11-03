@@ -153,8 +153,9 @@ fun HubTile(
 		modifier = modifier.heightIn(min = 93.dp),
 	) {
 		Row(
+			// Fills a taller tile (equal-height grid rows) and keeps the content centred in it
 			modifier = Modifier
-				.fillMaxWidth()
+				.fillMaxSize()
 				.padding(16.dp),
 			horizontalArrangement = Arrangement.spacedBy(16.dp),
 			verticalAlignment = Alignment.CenterVertically,
