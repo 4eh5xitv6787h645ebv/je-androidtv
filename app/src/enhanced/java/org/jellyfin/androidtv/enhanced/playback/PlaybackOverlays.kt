@@ -303,7 +303,12 @@ private fun RatingBox(model: RatingBadgeModel) {
 @Composable
 fun OsdRating(model: OsdRatingModel?) {
 	if (model == null || (model.communityRating == null && model.criticPercent == null)) return
-	Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+	// The info-row items fill their parent's height, so the row needs a fixed one or it grows to the OSD panel
+	Row(
+		horizontalArrangement = Arrangement.spacedBy(12.dp),
+		verticalAlignment = Alignment.CenterVertically,
+		modifier = Modifier.height(24.dp),
+	) {
 		model.criticPercent?.let { InfoRowCriticRating(it / 100f) }
 		model.communityRating?.let { InfoRowCommunityRating(it / 10f) }
 	}
