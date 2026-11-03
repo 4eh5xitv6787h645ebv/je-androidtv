@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Hub entry -->
+    <string name="je_requests_title">Requests</string>
+    <string name="je_requests_description">Your Seerr requests, watchlist and downloads</string>
+
+    <!-- Tabs -->
+    <string name="je_requests_tab_requests">Requests</string>
+    <string name="je_requests_tab_watchlist">Watchlist</string>
+    <string name="je_requests_tab_queue">Queue</string>
+    <string name="je_requests_tab_history">History</string>
+    <string name="je_requests_tab_issues">Issues</string>
+
+    <!-- Request filters -->
+    <string name="je_requests_filter_all">All</string>
+    <string name="je_requests_filter_pending">Pending</string>
+    <string name="je_requests_filter_approved">Approved</string>
+    <string name="je_requests_filter_processing">Processing</string>
+    <string name="je_requests_filter_coming_soon">Coming soon</string>
+    <string name="je_requests_filter_available">Available</string>
+    <string name="je_requests_mine_only">Only mine</string>
+    <string name="je_requests_mine_only_on">Only mine: on</string>
+    <string name="je_requests_count">%1$d requests</string>
+
+    <!-- Request chips -->
+    <string name="je_requests_chip_orphaned">Orphaned</string>
+    <string name="je_requests_chip_coming_soon">Coming soon</string>
+    <string name="je_requests_chip_available">Available</string>
+    <string name="je_requests_chip_partial">Partially available</string>
+    <string name="je_requests_chip_processing">Processing</string>
+    <string name="je_requests_chip_requested">Requested</string>
+    <string name="je_requests_chip_pending">Pending approval</string>
+    <string name="je_requests_chip_declined">Declined</string>
+    <string name="je_requests_chip_blocklisted">Blocklisted</string>
+    <string name="je_requests_chip_deleted">Deleted</string>
+    <string name="je_requests_chip_failed">Failed</string>
+    <string name="je_requests_chip_completed">Completed</string>
+    <string name="je_requests_chip_unknown">Unknown</string>
+    <string name="je_requests_orphaned_hint">Approved, but not in Radarr/Sonarr</string>
+
+    <!-- Request card -->
+    <string name="je_requests_requested_by">%1$s · %2$s</string>
+    <string name="je_requests_release_today">today</string>
+    <string name="je_requests_release_tomorrow">tomorrow</string>
+    <string name="je_requests_release_in_days">in %1$d days</string>
+    <string name="je_requests_release_on">on %1$s</string>
+    <string name="je_requests_next_episode">Next episode %1$s</string>
+    <string name="je_requests_digital_release">Digital release %1$s</string>
+    <string name="je_requests_theatrical_release">In cinemas %1$s</string>
+    <string name="je_requests_just_now">just now</string>
+    <string name="je_requests_minutes_ago">%1$dm ago</string>
+    <string name="je_requests_hours_ago">%1$dh ago</string>
+    <string name="je_requests_days_ago">%1$dd ago</string>
+
+    <!-- Approve / decline -->
+    <string name="je_requests_approve">Approve</string>
+    <string name="je_requests_decline">Decline</string>
+    <string name="je_requests_open_details">Show details</string>
+    <string name="je_requests_decline_title">Decline the request for %1$s?</string>
+    <string name="je_requests_decline_message">%1$s will be told the request was declined.</string>
+    <string name="je_requests_approved_toast">Approved %1$s</string>
+    <string name="je_requests_declined_toast">Declined %1$s</string>
+    <string name="je_requests_action_failed">Couldn\'t update the request: %1$s</string>
+
+    <!-- Watchlist -->
+    <string name="je_requests_watchlist_empty">Your Seerr watchlist is empty.</string>
+    <string name="je_requests_sync_now">Sync watchlists now</string>
+    <string name="je_requests_syncing">Syncing…</string>
+    <string name="je_requests_sync_result">Synced %1$d watchlist items, %2$d added to Jellyfin.</string>
+    <string name="je_requests_sync_result_errors">Synced %1$d watchlist items, %2$d added to Jellyfin. %3$d users failed.</string>
+    <string name="je_requests_sync_failed">Watchlist sync failed: %1$s</string>
+    <string name="je_requests_watchlist_hint">The server adds your Seerr watchlist to Jellyfin automatically.</string>
+
+    <!-- Queue -->
+    <string name="je_requests_queue_empty">Nothing is downloading.</string>
+    <string name="je_requests_queue_error">%1$s \"%2$s\" couldn\'t be reached: %3$s</string>
+    <string name="je_requests_progress">%1$d%%</string>
+    <string name="je_requests_eta">ETA %1$s</string>
+    <string name="je_requests_season_pack">Season %1$d · %2$d episodes</string>
+    <string name="je_requests_episode_range">E%1$02d–E%2$02d</string>
+    <string name="je_requests_status_downloading">Downloading</string>
+    <string name="je_requests_status_queued">Queued</string>
+    <string name="je_requests_status_paused">Paused</string>
+    <string name="je_requests_status_importing">Importing</string>
+    <string name="je_requests_status_completed">Completed</string>
+    <string name="je_requests_status_warning">Warning</string>
+    <string name="je_requests_status_failed">Failed</string>
+    <string name="je_requests_status_delay">Delayed</string>
+    <string name="je_requests_status_unknown">Unknown</string>
+    <string name="je_requests_auto_refresh">Updates every %1$d s</string>
+
+    <!-- History -->
+    <string name="je_requests_history_empty">No recent downloads.</string>
+    <string name="je_requests_history_hidden">Download history isn\'t shown for your account.</string>
+    <string name="je_requests_history_imported">Imported</string>
+    <string name="je_requests_history_partial">Partially imported</string>
+    <string name="je_requests_history_failed">Import failed</string>
+    <string name="je_requests_history_episodes">%1$d of %2$d episodes imported</string>
+
+    <!-- Issues -->
+    <string name="je_requests_issues_empty">No issues.</string>
+    <string name="je_requests_issue_open">Open</string>
+    <string name="je_requests_issue_resolved">Resolved</string>
+    <string name="je_requests_issue_video">Video</string>
+    <string name="je_requests_issue_audio">Audio</string>
+    <string name="je_requests_issue_subtitles">Subtitles</string>
+    <string name="je_requests_issue_other">Other</string>
+    <string name="je_requests_issue_unknown_title">Unknown title</string>
+    <string name="je_requests_issue_comments">%1$d comments</string>
+
+    <!-- Shared -->
+    <string name="je_requests_load_failed">Couldn\'t load this page (HTTP %1$d).</string>
+    <string name="je_requests_refresh">Refresh</string>
+</resources>
