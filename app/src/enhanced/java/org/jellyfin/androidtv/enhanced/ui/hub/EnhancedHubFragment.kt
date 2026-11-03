@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,7 +39,7 @@ import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
-import org.jellyfin.design.Tokens
+import org.koin.android.ext.android.getKoin
 import org.koin.android.ext.android.inject
 
 /**
@@ -52,6 +53,7 @@ class EnhancedHubFragment : Fragment() {
 
 	private val enhancedRepository by inject<EnhancedRepository>()
 	private val navigationRepository by inject<NavigationRepository>()
+	private val notices by lazy { getKoin().getAll<HubNotice>() }
 
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?) = content {
 		val state by enhancedRepository.state.collectAsState()
@@ -93,31 +95,35 @@ class EnhancedHubFragment : Fragment() {
 				return@EnhancedScreen
 			}
 
-			LazyVerticalGrid(
-				columns = GridCells.Fixed(3),
-				contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
-				horizontalArrangement = Arrangement.spacedBy(16.dp),
-				verticalArrangement = Arrangement.spacedBy(16.dp),
-			) {
-				items(entries, key = { it.id }) { entry ->
-					val modifier = if (entry === entries.firstOrNull()) Modifier.focusRequester(firstFocus) else Modifier
-					Button(
-						onClick = { navigationRepository.navigate(entry.destination()) },
-						shape = JellyfinTheme.shapes.medium,
-						contentPadding = PaddingValues(20.dp),
-						colors = ButtonDefaults.colors(),
-						modifier = modifier.fillMaxWidth(),
-					) {
-						Row(
-							horizontalArrangement = Arrangement.spacedBy(16.dp),
-							verticalAlignment = Alignment.CenterVertically,
-							modifier = Modifier.fillMaxWidth(),
+			Column(modifier = Modifier.fillMaxSize()) {
+				for (notice in notices) notice.Content(state)
+
+				LazyVerticalGrid(
+					columns = GridCells.Fixed(3),
+					contentPadding = PaddingValues(horizontal = 48.dp, vertical = 8.dp),
+					horizontalArrangement = Arrangement.spacedBy(16.dp),
+					verticalArrangement = Arrangement.spacedBy(16.dp),
+				) {
+					items(entries, key = { it.id }) { entry ->
+						val modifier = if (entry === entries.firstOrNull()) Modifier.focusRequester(firstFocus) else Modifier
+						Button(
+							onClick = { navigationRepository.navigate(entry.destination()) },
+							shape = JellyfinTheme.shapes.medium,
+							contentPadding = PaddingValues(20.dp),
+							colors = ButtonDefaults.colors(),
+							modifier = modifier.fillMaxWidth(),
 						) {
-							Icon(painter = painterResource(entry.icon), contentDescription = null, modifier = Modifier.size(32.dp))
-							Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-								Text(text = stringResource(entry.title), fontSize = 18.sp)
-								// Inherits the button's content colour so it stays readable when focused
-								Text(text = stringResource(entry.description), fontSize = 13.sp, modifier = Modifier.alpha(0.75f))
+							Row(
+								horizontalArrangement = Arrangement.spacedBy(16.dp),
+								verticalAlignment = Alignment.CenterVertically,
+								modifier = Modifier.fillMaxWidth(),
+							) {
+								Icon(painter = painterResource(entry.icon), contentDescription = null, modifier = Modifier.size(32.dp))
+								Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+									Text(text = stringResource(entry.title), fontSize = 18.sp)
+									// Inherits the button's content colour so it stays readable when focused
+									Text(text = stringResource(entry.description), fontSize = 13.sp, modifier = Modifier.alpha(0.75f))
+								}
 							}
 						}
 					}
