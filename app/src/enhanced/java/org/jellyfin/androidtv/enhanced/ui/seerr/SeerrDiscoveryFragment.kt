@@ -242,18 +242,24 @@ class SeerrDiscoveryFragment : Fragment() {
 			if (inLibrary || protectionChanged) it.copy(libraryArtwork = true, libraryPosterUrl = null) else it
 		}
 		applyFilter()
+		// applyFilter() may have started loading the next page, which appends while the snapshot is re-filtered
+		val snapshot = allResults.toList()
+		val snapshotKeys = snapshot.mapTo(HashSet()) { it.dedupeKey }
+		val snapshotCursor = cursor
 		lifecycleScope.launch {
 			val refreshed = try {
-				seerrRepository.filterResults(allResults.toList(), recommendations).associateBy { it.dedupeKey }
+				seerrRepository.filterResults(snapshot, recommendations).associateBy { it.dedupeKey }
 			} catch (err: CancellationException) {
 				throw err
 			} catch (err: Exception) {
 				Timber.w(err, "Failed to re-filter Seerr results")
 				return@launch
 			}
+			// A new sort started over meanwhile: these results belong to the old list
+			if (cursor !== snapshotCursor) return@launch
 			artworkGeneration = generation
-			// Whatever the filter dropped (hidden meanwhile) leaves the grid
-			allResults.retainAll { it.dedupeKey in refreshed }
+			// Whatever the filter dropped (hidden meanwhile) leaves the grid; pages appended since were filtered on load
+			allResults.retainAll { it.dedupeKey !in snapshotKeys || it.dedupeKey in refreshed }
 			allResults.replaceAll { refreshed[it.dedupeKey] ?: it }
 			applyFilter()
 		}
