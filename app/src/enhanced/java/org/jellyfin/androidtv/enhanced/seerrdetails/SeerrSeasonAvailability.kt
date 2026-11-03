@@ -31,7 +31,7 @@ object SeerrSeasonAvailability {
 		val mediaStatus = when {
 			raw != SeerrMediaStatus.AVAILABLE && raw != SeerrMediaStatus.PARTIALLY_AVAILABLE -> raw
 			librarySeasons != null -> if (seasonNumber in librarySeasons) raw else SeerrMediaStatus.DELETED
-			else -> media?.effectiveSeasonStatus(seasonNumber)
+			else -> media.effectiveSeasonStatus(seasonNumber)
 		}
 		if (!SeerrMediaStatus.isRequestable(mediaStatus)) return mediaStatus
 		// In the library even though Seerr hasn't caught up: nothing to request
