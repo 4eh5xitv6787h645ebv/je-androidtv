@@ -80,8 +80,8 @@ class SeerrSearchRepository(
 		val filterHidden = snapshot != null && snapshot.settings.enabled && snapshot.settings.filterSearch
 
 		return SeerrSearchFilter(
-			hiddenTmdbIds = if (filterHidden) snapshot!!.hiddenTmdbIds else emptySet(),
-			hiddenItemIds = if (filterHidden) snapshot!!.hiddenItemIds else emptySet(),
+			hiddenTmdbIds = if (filterHidden) snapshot.hiddenTmdbIds else emptySet(),
+			hiddenItemIds = if (filterHidden) snapshot.hiddenItemIds else emptySet(),
 			excludeLibraryItems = state.config.jellyseerrSearchExcludeLibraryItems,
 			excludeBlocklisted = state.config.jellyseerrExcludeBlocklistedItems,
 			year = year,
