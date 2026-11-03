@@ -85,7 +85,8 @@ enum class RowDensity(val height: Dp, val posterWidth: Dp, val posterHeight: Dp)
  *
  * Focus: the ring treatment when the row has artwork, badges or progress (inversion would wash them out), otherwise
  * upstream's inversion. The main part of the row is one focus target running [onClick] (and [onMenu] on long press
- * or the menu key); [mainModifier] goes on it, e.g. a `ListFocus` requester.
+ * or the menu key); [mainModifier] goes on it, e.g. a `ListFocus` requester. [enabled] false disables the [actions]
+ * too.
  */
 @Composable
 fun ListRow(
@@ -175,19 +176,26 @@ fun ListRow(
 				if (progress != null) ProgressLine(progress, Modifier.padding(top = 2.dp))
 			}
 		}
-		if (actions.isNotEmpty()) RowActions(actions, density, padding)
+		if (actions.isNotEmpty()) RowActions(actions, density, padding, enabled)
 	}
 }
 
 @Composable
-private fun RowActions(actions: List<RowAction>, density: RowDensity, padding: Dp) {
+private fun RowActions(actions: List<RowAction>, density: RowDensity, padding: Dp, enabled: Boolean) {
 	val stacked = density != RowDensity.Compact && actions.size == 2 && actions.none { it.showLabel }
 	val content: @Composable () -> Unit = {
 		for (action in actions) {
 			if (action.showLabel || action.icon == null) {
-				JeButton(text = action.label, onClick = action.onClick, icon = action.icon, busy = action.busy, modifier = action.modifier)
+				JeButton(text = action.label, onClick = action.onClick, icon = action.icon, enabled = enabled, busy = action.busy, modifier = action.modifier)
 			} else {
-				JeIconButton(icon = action.icon, contentDescription = action.label, onClick = action.onClick, busy = action.busy, modifier = action.modifier)
+				JeIconButton(
+					icon = action.icon,
+					contentDescription = action.label,
+					onClick = action.onClick,
+					enabled = enabled,
+					busy = action.busy,
+					modifier = action.modifier,
+				)
 			}
 		}
 	}

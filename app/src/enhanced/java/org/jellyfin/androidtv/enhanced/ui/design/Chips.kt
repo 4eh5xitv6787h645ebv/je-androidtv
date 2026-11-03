@@ -6,8 +6,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
@@ -20,6 +22,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
@@ -60,7 +63,8 @@ data class TabSpec(val label: String, val count: Int? = null)
  * Text tabs with an underline (spec §6.6): the selected tab is light with a 3 dp cyan underline, the focused tab gets
  * upstream's inversion pill (its underline stays), and a divider runs under the row. [onSelect] runs on click, not on
  * focus, so moving along the row with the D-pad doesn't reload pages. Entering the row from below lands on the last
- * focused tab, or on the selected one the first time.
+ * focused tab, or on the selected one the first time. Tabs wider than the page scroll horizontally, keeping the focused
+ * tab in view.
  *
  * Use it for page-level tabs (Requests / Watchlist / Queue…, Activity's Watched / Favorited / Reviewed).
  */
@@ -78,6 +82,8 @@ fun JeTabRow(
 			// The pill's padding sits outside the page edge so the labels line up with the page title
 			modifier = Modifier
 				.offset(x = -TabPadding)
+				// Focused tabs bring themselves into view inside the scroll container
+				.horizontalScroll(rememberScrollState())
 				.focusRestorer(fallback)
 				.focusGroup(),
 			horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -249,20 +255,28 @@ fun ChoiceChip(
 	}
 }
 
-/** A chip row: 8 dp gaps, and re-entering it with the D-pad returns to the chip that last had the focus. */
+/**
+ * A chip row: 8 dp gaps, and re-entering it with the D-pad returns to the chip that last had the focus. Chips wider
+ * than the row scroll horizontally, keeping the focused chip in view (don't give children a weight). A [modifier] that
+ * already scrolls sideways keeps working: the row then leaves the scrolling to it.
+ */
 @Composable
 fun ChipRow(
 	modifier: Modifier = Modifier,
 	content: @Composable RowScope.() -> Unit,
 ) {
-	Row(
-		modifier = modifier
-			.focusRestorer()
-			.focusGroup(),
-		horizontalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
-		verticalAlignment = Alignment.CenterVertically,
-		content = content,
-	)
+	BoxWithConstraints(modifier = modifier) {
+		// Nesting two sideways scrolls throws, and an unbounded width means the caller scrolls already
+		val scroll = if (constraints.hasBoundedWidth) Modifier.horizontalScroll(rememberScrollState()) else Modifier
+		Row(
+			modifier = scroll
+				.focusRestorer()
+				.focusGroup(),
+			horizontalArrangement = Arrangement.spacedBy(JeSpace.chipGap),
+			verticalAlignment = Alignment.CenterVertically,
+			content = content,
+		)
+	}
 }
 
 /** The 1 × 22 dp divider between an exclusive chip group and the toggle chips after it ("Only mine"). */
