@@ -8,6 +8,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.fragment.app.Fragment
 import androidx.leanback.widget.Row
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
@@ -54,15 +55,11 @@ class ReviewsDetailsContributor(
 		val wantUser = config.showUserReviews
 		val wantTmdb = config.showReviews && config.tmdbEnabled && item.type in TMDB_REVIEW_TYPES
 		val anilistId = if (config.showAnilistReviews) {
-			runCatching { repository.anilistId(item) }
-				.onFailure { Timber.w(it, "Failed to resolve the AniList id for reviews") }
-				.getOrNull()
+			orNull("Failed to resolve the AniList id for reviews") { repository.anilistId(item) }
 		} else null
 		if (!wantUser && !wantTmdb && anilistId == null) return null
 		val tmdb = if (wantUser || wantTmdb) {
-			runCatching { metadataRepository.tmdbTarget(item) }
-				.onFailure { Timber.w(it, "Failed to resolve the TMDB id for reviews") }
-				.getOrNull()
+			orNull("Failed to resolve the TMDB id for reviews") { metadataRepository.tmdbTarget(item) }
 				?.takeIf { it.mediaType != TmdbTarget.PERSON }
 		} else null
 		// An anime with only an AniList id still gets its AniList reviews, but nothing keyed by TMDB id
@@ -83,12 +80,22 @@ class ReviewsDetailsContributor(
 		)
 	}
 
+	/** [block]'s result, or null when it fails; cancellation (the screen closing) still cancels. */
+	private inline fun <T> orNull(message: String, block: () -> T): T? = try {
+		block()
+	} catch (err: CancellationException) {
+		throw err
+	} catch (err: Exception) {
+		Timber.w(err, message)
+		null
+	}
+
 	override suspend fun actions(context: DetailsContext): List<DetailsAction> {
 		val target = target(context)?.takeIf { it.includeUser } ?: return emptyList()
 		val fragment = context.fragment
 		val me = repository.currentUserKey
 		val own = me?.let { key ->
-			runCatching { repository.userReviews(target.mediaType, target.key) }.getOrNull()?.firstOrNull { sameUser(it.userId, key) }
+			orNull("Failed to load the user's own review") { repository.userReviews(target.mediaType, target.key) }?.firstOrNull { sameUser(it.userId, key) }
 		}
 		val label = own?.rating?.takeIf { it > 0 }?.let { fragment.getString(R.string.je_reviews_rated, formatRating(it)) }
 			?: fragment.getString(R.string.je_reviews_rate)
@@ -122,7 +129,7 @@ class ReviewsDetailsContributor(
 		if (!hasContent) return emptyList()
 
 		val fragment = context.fragment
-		val config = runCatching { metadataRepository.publicConfig() }.getOrNull()
+		val config = orNull("Failed to read the reviews configuration") { metadataRepository.publicConfig() }
 		val expanded = state.userSettings.reviewsExpandedByDefault ?: config?.reviewsExpandedByDefault ?: false
 		val revision = revision(fragment)
 

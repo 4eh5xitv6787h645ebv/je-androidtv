@@ -8,7 +8,8 @@ Wired together with the metadata feature; see `../metadata/INTEGRATION.md`. In s
 Nothing new to register: `reviewsModule` now also binds `TranslationService` (`EnhancedTranslationService`),
 `ReviewTranslator` and `TranslationTargetStore`, and `ReviewsRepository` takes `EnhancedRepository` as a third
 constructor argument (all inside `ReviewsModule.kt`). `TranslationTargetStore` needs `SessionRepository` and the
-Android context, both already in the app's Koin graph.
+Android context, both already in the app's Koin graph; `ReviewTranslator` is keyed by `SessionRepository.currentSession`
+(its cache is per server, user and token).
 
 - AniList reviews: gate `EnhancedPublicConfig.showAnilistReviews` (already in `EnhancedConfig.kt`) plus an AniList
   provider id (`AniList`/`Anilist`, case-insensitive) on the item or, for seasons and episodes, on the series.

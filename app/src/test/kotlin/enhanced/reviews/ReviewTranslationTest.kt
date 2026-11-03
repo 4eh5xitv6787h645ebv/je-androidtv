@@ -35,12 +35,14 @@ private class FakeTranslationService(var failure: Exception? = null) : Translati
 	}
 }
 
+private const val SESSION = "server-a/user-a/token-a"
+
 class ReviewTranslationTest : FunSpec({
 	val review = ReviewEntry(ReviewEntry.Source.ANILIST, "paradigm", 85.0, null, "Body text.", summary = "Headline")
 
 	test("translates the headline and the body and caches them per target") {
 		val service = FakeTranslationService()
-		val translator = ReviewTranslator(service)
+		val translator = ReviewTranslator(service) { SESSION }
 
 		val german = translator.translate(review, "de")
 		german shouldBe TranslatedReview("[de] Headline", "[de] Body text.", truncated = false)
@@ -56,13 +58,13 @@ class ReviewTranslationTest : FunSpec({
 	test("reviews without a headline make one call") {
 		val service = FakeTranslationService()
 		val tmdb = ReviewEntry(ReviewEntry.Source.TMDB, "tricksy", null, null, "Only text")
-		ReviewTranslator(service).translate(tmdb, "de") shouldBe TranslatedReview(null, "[de] Only text", false)
+		ReviewTranslator(service) { SESSION }.translate(tmdb, "de") shouldBe TranslatedReview(null, "[de] Only text", false)
 		service.calls shouldContainExactly listOf("Only text" to "de")
 	}
 
 	test("failures map to disabled, service down or the server's message, and nothing is cached") {
 		val service = FakeTranslationService(EnhancedApi.EnhancedApiException(503, "HTTP 503", JsonPrimitive("Review translation is not enabled.")))
-		val translator = ReviewTranslator(service)
+		val translator = ReviewTranslator(service) { SESSION }
 		val disabled = shouldThrow<EnhancedApi.EnhancedApiException> { translator.translate(review, "de") }
 		TranslationFailure.of(disabled) shouldBe TranslationFailure.Disabled
 		service.calls shouldBe emptyList()
@@ -78,7 +80,7 @@ class ReviewTranslationTest : FunSpec({
 
 	test("the language list is trimmed and de-duplicated") {
 		val service = FakeTranslationService().apply { languageList = listOf("de", " fr ", "", "de") }
-		ReviewTranslator(service).languages() shouldContainExactly listOf("de", "fr")
+		ReviewTranslator(service) { SESSION }.languages() shouldContainExactly listOf("de", "fr")
 	}
 
 	test("the plugin service posts Text and Target and reads text back") {

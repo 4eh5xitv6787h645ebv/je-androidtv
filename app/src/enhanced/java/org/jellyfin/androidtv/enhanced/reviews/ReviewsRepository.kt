@@ -41,7 +41,10 @@ class ReviewsRepository(
 	private val mutex = Mutex()
 	private var configFor: EnhancedState? = null
 	private var config: ReviewsPublicConfig? = null
-	private val seriesAnilistIds = HashMap<Pair<UUID, UUID>, Int?>()
+	private val seriesAnilistIds = HashMap<SeriesKey, Int?>()
+
+	/** A series as one user on one server sees it: Jellyfin ids are only unique per server. */
+	private data class SeriesKey(val server: String?, val userId: UUID, val seriesId: UUID)
 
 	/** The signed-in user's id, dashless, to recognise their own review. */
 	val currentUserKey: String? get() = userRepository.currentUser.value?.id?.toString()?.replace("-", "")
@@ -71,18 +74,20 @@ class ReviewsRepository(
 
 	/**
 	 * The AniList id of [item], or for a season or episode without one of its own, of its series (the AniList
-	 * metadata plugin only tags shows and movies). Series lookups are cached per user.
+	 * metadata plugin only tags shows and movies). Series lookups are cached per server and user.
 	 */
 	suspend fun anilistId(item: BaseItemDto): Int? {
 		anilistIdOf(item.providerIds)?.let { return it }
 		if (item.type != BaseItemKind.SEASON && item.type != BaseItemKind.EPISODE) return null
 		val seriesId = item.seriesId ?: return null
 		val userId = userRepository.currentUser.value?.id ?: return null
-		val key = userId to seriesId
+		// Pinned, so the lookup is made on the server the key names even if the account changes meanwhile
+		val api = enhancedApi.pinned()
+		val key = SeriesKey(api.baseUrl, userId, seriesId)
 		mutex.withLock {
 			if (seriesAnilistIds.containsKey(key)) return seriesAnilistIds[key]
 		}
-		val series = enhancedApi.get("/Items/$seriesId", mapOf("userId" to userId.toString())) as? JsonObject
+		val series = api.get("/Items/$seriesId", mapOf("userId" to userId.toString())) as? JsonObject
 		val ids = (series?.get("ProviderIds") as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull }
 		val anilistId = anilistIdOf(ids)
 		mutex.withLock { seriesAnilistIds[key] = anilistId }

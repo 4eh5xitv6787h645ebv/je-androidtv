@@ -17,7 +17,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.jsonObject
+import org.jellyfin.androidtv.auth.repository.Session
 import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
@@ -33,12 +35,17 @@ import timber.log.Timber
  *
  * Nothing is written while JE's custom subtitle styles are off for the user (`DisableCustomSubtitleStyles`) or while
  * the plugin state is unknown; the user's own values come back as soon as the signed-in account doesn't sync.
+ *
+ * Every sync is bound to one session: its reads go through a client pinned to that session's token, and the result is
+ * only applied if the app is still signed in as that session afterwards (see [isCurrent]). During an account switch the
+ * shared API client changes before the new session is published, so an unpinned read could fetch the next account's
+ * style while the session still names the previous one.
  */
 class SubtitleStyleSync(
 	private val enhancedApi: EnhancedApi,
 	private val enhancedRepository: EnhancedRepository,
-	private val settingsRepository: EnhancedSettingsRepository,
 	private val sessionRepository: SessionRepository,
+	private val userRepository: UserRepository,
 	private val userPreferences: UserPreferences,
 	private val store: SubtitleSyncStore,
 ) {
@@ -50,12 +57,11 @@ class SubtitleStyleSync(
 	/** Whether the signed-in account syncs its JE subtitle style to this device. */
 	val enabled: StateFlow<Boolean> = _enabled.asStateFlow()
 
-	private val account
-		get() = sessionRepository.currentSession.value?.let { SubtitleSyncAccount(it.serverId, it.userId) }
+	private val account get() = sessionRepository.currentSession.value?.account
 
 	init {
 		val accounts = sessionRepository.currentSession
-			.map { session -> session?.let { SubtitleSyncAccount(it.serverId, it.userId) } }
+			.map { it?.account }
 			.distinctUntilChanged()
 		scope.launch {
 			combine(accounts, enhancedRepository.state, ::Pair).collectLatest { (account, state) ->
@@ -76,9 +82,12 @@ class SubtitleStyleSync(
 	 * style can't be read. Runs in the sync's own scope so leaving the page doesn't stop a write halfway.
 	 */
 	suspend fun refresh(): JeSubtitleStyle = scope.async {
-		val account = account ?: error("No signed-in user")
-		val style = fetchStyle()
-		mutex.withLock { if (account == this@SubtitleStyleSync.account) apply(account, style) }
+		val session = sessionRepository.currentSession.value ?: error("No signed-in user")
+		val style = fetchStyle(session) ?: error("The signed-in account changed")
+		mutex.withLock {
+			if (!isCurrent(session)) error("The signed-in account changed")
+			apply(session.account, style)
+		}
 		style
 	}.await()
 
@@ -99,19 +108,38 @@ class SubtitleStyleSync(
 	private suspend fun sync(account: SubtitleSyncAccount?, state: EnhancedState) {
 		// Signed out: keep everything as it is until someone signs in
 		if (account == null) return
-		val style = if (store.isEnabled(account) && state.available) fetchStyle() else null
+		// A session that isn't the one this emission is for is mid-switch: its own emission syncs it
+		val session = sessionRepository.currentSession.value?.takeIf { it.account == account } ?: return
+		val style = if (store.isEnabled(account) && state.available) fetchStyle(session) ?: return else null
 		mutex.withLock {
 			// The account may have changed while the documents loaded
-			if (account == this.account) apply(account, style)
+			if (isCurrent(session)) apply(account, style)
 		}
 	}
 
-	/** The user's `settings.json` and the server defaults from `public-config`; both are needed to resolve. */
-	private suspend fun fetchStyle(): JeSubtitleStyle = coroutineScope {
-		val public = async { enhancedApi.get("public-config").jsonObject }
-		val user = async { settingsRepository.read(EnhancedSettingsRepository.SETTINGS).json }
+	/**
+	 * The user's `settings.json` and the server defaults from `public-config`; both are needed to resolve. Null when
+	 * the shared client no longer belongs to [session] (a switch is under way), so nothing of another account is read.
+	 */
+	private suspend fun fetchStyle(session: Session): JeSubtitleStyle? = coroutineScope {
+		val api = enhancedApi.pinned()
+		if (api.accessToken != session.accessToken) return@coroutineScope null
+		val userKey = session.userId.toString().replace("-", "")
+		val public = async { api.get("public-config").jsonObject }
+		val user = async { api.get("user-settings/$userKey/${EnhancedSettingsRepository.SETTINGS}").jsonObject }
 		JeSubtitleStyle.resolve(user.await(), public.await())
 	}
+
+	/**
+	 * Whether the app is still signed in as [session] everywhere a switch passes through: the shared API client (updated
+	 * first), the current user that the plugin state is loaded for (updated next) and the published session (last).
+	 */
+	private fun isCurrent(session: Session) =
+		enhancedApi.accessToken == session.accessToken &&
+			userRepository.currentUser.value?.id == session.userId &&
+			sessionRepository.currentSession.value == session
+
+	private val Session.account get() = SubtitleSyncAccount(serverId, userId)
 
 	private fun apply(account: SubtitleSyncAccount, style: JeSubtitleStyle?) {
 		val action = SubtitleSyncPlanner.plan(

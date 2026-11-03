@@ -73,7 +73,11 @@ val featureSettingsEntries: List<SettingsEntry> =
   Signed out → nothing. Restoring is the only write that can happen while JE's custom styles are off; it puts back the
   user's own values, never JE's.
 - Routes called: `GET /JellyfinEnhanced/public-config`, `GET /JellyfinEnhanced/user-settings/{userId}/settings.json`
-  (read only, through `EnhancedSettingsRepository.read`, pinned client). Nothing is written to the server.
+  (read only). Nothing is written to the server. Both reads go through one `EnhancedApi.pinned()` client that must
+  carry the session's token, and the result is applied only if the shared client's token, `UserRepository.currentUser`
+  and `SessionRepository.currentSession` still match that session afterwards, so a sync can't apply another account's
+  style during a switch. `SubtitleStyleSync` takes `UserRepository` (already in the app's Koin graph) instead of
+  `EnhancedSettingsRepository`; `subtitlesModule` is unchanged.
 
 ## Suggested ENHANCED.md rows
 

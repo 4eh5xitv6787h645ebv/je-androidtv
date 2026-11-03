@@ -8,6 +8,7 @@ import io.mockk.mockk
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.jellyfin.androidtv.auth.repository.Session
 import org.jellyfin.androidtv.auth.repository.SessionRepository
+import org.jellyfin.androidtv.auth.repository.UserRepository
 import org.jellyfin.androidtv.enhanced.api.EnhancedApi
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
@@ -29,6 +30,7 @@ class SubtitlesModuleTest : FunSpec({
 					single { mockk<EnhancedSettingsRepository>(relaxed = true) }
 					single<SessionRepository> { mockk { every { currentSession } returns MutableStateFlow<Session?>(null) } }
 					single { mockk<UserPreferences>(relaxed = true) }
+					single<UserRepository> { mockk(relaxed = true) }
 				},
 				subtitlesModule,
 			)
