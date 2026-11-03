@@ -22,6 +22,7 @@ import org.jellyfin.androidtv.ui.base.Text
 import org.jellyfin.androidtv.ui.base.button.Button
 import org.jellyfin.androidtv.ui.base.button.ButtonDefaults
 import org.jellyfin.design.Tokens
+import java.util.UUID
 
 // Small pieces shared by the Calendar, Bookmarks, Activity and About pages.
 
@@ -37,6 +38,15 @@ internal inline fun <T> attempt(block: () -> T): Result<T> = try {
 /** The plugin's own message for a failed call, when it sent one (null lets the page show its generic text). */
 internal val Throwable.serverMessage: String?
 	get() = (this as? EnhancedApi.EnhancedApiException)?.serverMessage?.takeIf { it.isNotBlank() }
+
+/**
+ * Whether the signed-in user can open library item [id]: loads it as the user, since ids from plugin feeds (calendar,
+ * active streams) aren't necessarily filtered by library access.
+ */
+internal suspend fun EnhancedApi.canOpen(id: UUID): Boolean {
+	val userId = attempt { currentUserId() }.getOrNull() ?: return false
+	return attempt { get("/Items/$id", mapOf("userId" to userId)) }.isSuccess
+}
 
 /** A toggle button for a filter; [selected] uses the theme's "active" colours. */
 @Composable

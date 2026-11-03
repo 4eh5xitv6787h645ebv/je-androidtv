@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="je_activity_title">Activity</string>
+    <string name="je_activity_description">What people on this server watch, like and review</string>
+    <string name="je_activity_filter_watched">Watched</string>
+    <string name="je_activity_filter_favorited">Favorited</string>
+    <string name="je_activity_filter_reviewed">Reviewed</string>
+    <string name="je_activity_watched">%1$s watched %2$s</string>
+    <string name="je_activity_completed">%1$s finished %2$s</string>
+    <string name="je_activity_favorited">%1$s favorited %2$s</string>
+    <string name="je_activity_reviewed">%1$s reviewed %2$s</string>
+    <string name="je_activity_other">%1$s: %2$s</string>
+    <string name="je_activity_rated">%1$s rated %2$s %3$s</string>
+    <string name="je_activity_progress">%1$d%% watched</string>
+    <string name="je_activity_just_now">just now</string>
+    <string name="je_activity_ago">%1$s ago</string>
+    <string name="je_activity_empty">No activity yet.</string>
+    <string name="je_activity_empty_filtered">No activity of this kind yet.</string>
+    <string name="je_activity_feed_off">The activity feed is turned off on this server.</string>
+    <string name="je_activity_streams_title">Watching now (%1$d)</string>
+    <string name="je_activity_streams_none">Nobody is watching anything right now.</string>
+    <string name="je_activity_streams_failed">Couldn\'t load who\'s watching: %1$s</string>
+    <string name="je_activity_streams_paused">Paused</string>
+    <string name="je_activity_play_direct">Direct play</string>
+    <string name="je_activity_play_stream">Direct stream</string>
+    <string name="je_activity_play_transcode">Transcoding</string>
+    <string name="je_activity_not_accessible">That title isn\'t in your libraries.</string>
+</resources>

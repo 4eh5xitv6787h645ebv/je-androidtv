@@ -350,13 +350,10 @@ class CalendarFragment : Fragment() {
 		lifecycleScope.launch {
 			try {
 				val candidates = listOfNotNull(event.libraryEpisodeId, event.libraryItemId).mapNotNull { it.toUUIDOrNull() }
-				if (candidates.isNotEmpty()) {
-					val userId = attempt { enhancedApi.currentUserId() }.getOrNull()
-					for (id in candidates) {
-						if (attempt { enhancedApi.get("/Items/$id", mapOf("userId" to userId)) }.isSuccess) {
-							navigationRepository.navigate(Destinations.itemDetails(id))
-							return@launch
-						}
+				for (id in candidates) {
+					if (enhancedApi.canOpen(id)) {
+						navigationRepository.navigate(Destinations.itemDetails(id))
+						return@launch
 					}
 				}
 				val tmdbId = event.validTmdbId
