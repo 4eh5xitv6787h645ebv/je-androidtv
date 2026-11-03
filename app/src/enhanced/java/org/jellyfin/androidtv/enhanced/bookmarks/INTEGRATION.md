@@ -8,4 +8,4 @@
 - Settings: none. Upstream hooks: none. Playback goes through upstream's `PlaybackHelper.retrieveAndPlay(ids, false,
   positionTicks, 0, context)`.
 - Not done here: capturing a bookmark from inside the player (needs a playback-overlay hook).
-- Needs `SpoilerProtection` (bound in `metadataModule`) for the bookmark list's episode names.
+- Needs `SpoilerProtection` (bound in `enhancedModule`) for the bookmark list's episode names.

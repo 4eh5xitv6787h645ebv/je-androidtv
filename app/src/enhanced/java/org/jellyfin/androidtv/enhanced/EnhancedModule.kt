@@ -5,6 +5,7 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.EnhancedSettingsRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.seerr.SeerrRepository
 import org.koin.dsl.module
 
@@ -19,6 +20,8 @@ val enhancedModule = module {
 	single(createdAtStart = true) { EnhancedRepository(get(), get()) }
 	single { EnhancedSettingsRepository(get(), get()) }
 	single { SpoilerGuardRepository(get()) }
+	// Effective Spoiler Guard policy per title, shared by metadata, reviews, calendar and bookmarks
+	single { SpoilerProtection(get(), get(), get()) }
 	single { HiddenContentRepository(get(), get(), get()) }
 	single { SeerrRepository(get(), get(), get()) }
 
