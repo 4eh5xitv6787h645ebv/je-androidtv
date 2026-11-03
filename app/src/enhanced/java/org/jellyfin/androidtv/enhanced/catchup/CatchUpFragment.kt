@@ -175,7 +175,7 @@ class CatchUpFragment : Fragment() {
 					dimmed = button == DeckButton.UNDO && !canUndo,
 					modifier = Modifier
 						.focusRequester(requesters.getValue(button))
-						.onFocusChanged { if (it.isFocused) focused = button.ordinal },
+						.onFocusChanged { if (it.hasFocus) focused = button.ordinal },
 				)
 			}
 		}
