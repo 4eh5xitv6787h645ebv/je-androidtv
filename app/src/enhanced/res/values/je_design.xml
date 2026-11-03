@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Status badges (JeStatus defaults and the specific labels of JeStatuses) -->
+    <string name="je_design_status_pending">Pending approval</string>
+    <string name="je_design_status_approved">Approved</string>
+    <string name="je_design_status_processing">Processing</string>
+    <string name="je_design_status_coming_soon">Coming soon</string>
+    <string name="je_design_status_available">Available</string>
+    <string name="je_design_status_partly_available">Partly available</string>
+    <string name="je_design_status_declined">Declined</string>
+    <string name="je_design_status_warning">Warning</string>
+    <string name="je_design_status_unknown">Unknown</string>
+    <string name="je_design_status_requested">Requested</string>
+    <string name="je_design_status_blocklisted">Blocklisted</string>
+    <string name="je_design_status_deleted">Deleted</string>
+    <string name="je_design_status_not_requested">Not requested</string>
+    <string name="je_design_status_failed">Failed</string>
+    <string name="je_design_status_completed">Completed</string>
+    <string name="je_design_status_open">Open</string>
+    <string name="je_design_status_resolved">Resolved</string>
+    <string name="je_design_status_monitored">Monitored</string>
+    <string name="je_design_status_downloaded">Downloaded</string>
+    <string name="je_design_status_orphaned">Orphaned</string>
+    <string name="je_design_status_stalled">Stalled</string>
+    <string name="je_design_status_downloading">Downloading</string>
+    <string name="je_design_status_importing">Importing</string>
+    <string name="je_design_status_queued">Queued</string>
+    <string name="je_design_status_paused">Paused</string>
+    <string name="je_design_status_delayed">Delayed</string>
+
+    <!-- States and dialogs -->
+    <string name="je_design_back">Back</string>
+    <string name="je_design_retry">Retry</string>
+    <string name="je_design_error_generic">Something went wrong. Try again.</string>
+    <string name="je_design_nothing_here">Nothing here</string>
+    <string name="je_design_loading">Loading</string>
+    <string name="je_design_cancel">Cancel</string>
+    <string name="je_design_ok">OK</string>
+    <string name="je_design_done">Done</string>
+    <string name="je_design_more">More</string>
+
+    <!-- "Where: All", the label of a ChoiceChip -->
+    <string name="je_design_choice_value">%1$s: %2$s</string>
+</resources>
