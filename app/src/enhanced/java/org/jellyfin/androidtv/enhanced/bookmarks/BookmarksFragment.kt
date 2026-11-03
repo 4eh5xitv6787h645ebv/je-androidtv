@@ -46,6 +46,7 @@ import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
 import org.jellyfin.androidtv.enhanced.data.SpoilerProtection
 import org.jellyfin.androidtv.enhanced.data.SpoilerSnapshot
+import org.jellyfin.androidtv.enhanced.ui.design.JeConfirmDialog
 import org.jellyfin.androidtv.enhanced.ui.design.JeSpace
 import org.jellyfin.androidtv.enhanced.ui.design.ListRow
 import org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent
@@ -58,6 +59,7 @@ import org.jellyfin.androidtv.enhanced.ui.design.RowLeading
 import org.jellyfin.androidtv.enhanced.ui.design.SkeletonShape
 import org.jellyfin.androidtv.enhanced.ui.hub.ListFocus
 import org.jellyfin.androidtv.enhanced.ui.hub.LoadState
+import org.jellyfin.androidtv.enhanced.ui.hub.rememberLastNonNull
 import org.jellyfin.androidtv.ui.navigation.Destinations
 import org.jellyfin.androidtv.ui.navigation.NavigationRepository
 import org.jellyfin.androidtv.util.PlaybackHelper
@@ -125,6 +127,8 @@ class BookmarksFragment : Fragment() {
 
 	private val loadState = MutableStateFlow<LoadState<Loaded>>(LoadState.Loading)
 	private val busy = MutableStateFlow<Set<String>>(emptySet())
+	/** The bookmark whose delete confirmation is open, if any. */
+	private val deleting = MutableStateFlow<BookmarkRow?>(null)
 	private val listFocus = ListFocus()
 	private var loadJob: Job? = null
 	private var generation = 0
@@ -262,6 +266,26 @@ class BookmarksFragment : Fragment() {
 					listFocus.moveTo(selected ?: loaded.rows.firstOrNull()?.key)
 				}
 			}
+
+			val pendingDelete by deleting.collectAsState()
+			val deleteRow = rememberLastNonNull(pendingDelete)
+			JeConfirmDialog(
+				visible = pendingDelete != null,
+				title = stringResource(if (deleteRow?.stale == true) R.string.je_bookmarks_stale_title else R.string.je_bookmarks_delete_title),
+				body = when {
+					deleteRow == null -> null
+					deleteRow.stale -> stringResource(R.string.je_bookmarks_stale_message)
+					else -> stringResource(R.string.je_bookmarks_delete_message, title(deleteRow), BookmarkLogic.formatTimestamp(deleteRow.entry.bookmark.timestampSeconds))
+				},
+				confirmLabel = stringResource(R.string.je_bookmarks_delete),
+				// A stale bookmark can only be deleted: there the confirm button is the expected answer
+				destructive = deleteRow?.stale != true,
+				onConfirm = { deleteRow?.let(::delete) },
+				onDismissRequest = {
+					deleting.value = null
+					deleteRow?.let(::refocus)
+				},
+			)
 		}
 	}
 
@@ -406,25 +430,11 @@ class BookmarksFragment : Fragment() {
 	}
 
 	private fun confirmDelete(row: BookmarkRow) {
-		val context = context ?: return
-		AlertDialog.Builder(context)
-			.setTitle(R.string.je_bookmarks_delete_title)
-			.setMessage(getString(R.string.je_bookmarks_delete_message, title(row), BookmarkLogic.formatTimestamp(row.entry.bookmark.timestampSeconds)))
-			.setPositiveButton(R.string.je_bookmarks_delete) { _, _ -> delete(row) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.setOnDismissListener { refocus(row) }
-			.show()
+		deleting.value = row
 	}
 
 	private fun confirmStaleDelete(row: BookmarkRow) {
-		val context = context ?: return
-		AlertDialog.Builder(context)
-			.setTitle(R.string.je_bookmarks_stale_title)
-			.setMessage(R.string.je_bookmarks_stale_message)
-			.setPositiveButton(R.string.je_bookmarks_delete) { _, _ -> delete(row) }
-			.setNegativeButton(android.R.string.cancel, null)
-			.setOnDismissListener { refocus(row) }
-			.show()
+		deleting.value = row
 	}
 
 	private fun delete(row: BookmarkRow) {

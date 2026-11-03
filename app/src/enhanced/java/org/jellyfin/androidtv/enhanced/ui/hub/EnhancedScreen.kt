@@ -73,6 +73,21 @@ fun rememberBackAction(): EmptyAction {
 }
 
 /**
+ * [value], or the last non-null value it had: what a dialog keeps showing while it fades out after its state was
+ * cleared, so its texts don't flip to placeholders mid-animation.
+ */
+@Composable
+fun <T : Any> rememberLastNonNull(value: T?): T? {
+	val last = remember { LastValue<T>() }
+	if (value != null) last.value = value
+	return last.value
+}
+
+private class LastValue<T : Any> {
+	var value: T? = null
+}
+
+/**
  * Loading / error (with a focused Retry) / empty / content switch: the design system's
  * [org.jellyfin.androidtv.enhanced.ui.design.LoadStateContent] (skeleton, error state, empty state with a focusable
  * action), kept here for the pages that still import this one.
