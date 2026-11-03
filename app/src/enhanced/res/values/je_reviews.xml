@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Details action -->
+    <string name="je_reviews_rate">Rate</string>
+    <string name="je_reviews_rated">Rated %1$s★</string>
+
+    <!-- Rating dialog -->
+    <string name="je_reviews_dialog_title">Your rating</string>
+    <string name="je_reviews_stars_hint">Left and right change the stars</string>
+    <string name="je_reviews_no_rating">No rating</string>
+    <string name="je_reviews_rating_value">%1$s / 5</string>
+    <string name="je_reviews_text_label">Review (optional)</string>
+    <string name="je_reviews_text_count">%1$d / %2$d</string>
+    <string name="je_reviews_save">Save</string>
+    <string name="je_reviews_delete">Delete</string>
+    <string name="je_reviews_cancel">Cancel</string>
+    <string name="je_reviews_saved">Review saved</string>
+    <string name="je_reviews_deleted">Review deleted</string>
+    <string name="je_reviews_empty">Add a rating or some text first</string>
+    <string name="je_reviews_failed">Couldn\'t save the review: %1$s</string>
+
+    <!-- Reviews row -->
+    <string name="je_reviews_title">Reviews</string>
+    <string name="je_reviews_average">%1$s★ average</string>
+    <plurals name="je_reviews_ratings_count">
+        <item quantity="one">%1$d rating</item>
+        <item quantity="other">%1$d ratings</item>
+    </plurals>
+    <string name="je_reviews_none_yet">No ratings yet</string>
+    <string name="je_reviews_write">Rate and review</string>
+    <string name="je_reviews_edit">Edit your review</string>
+    <string name="je_reviews_you">You</string>
+    <string name="je_reviews_source_tmdb">TMDB</string>
+    <string name="je_reviews_tmdb_rating">%1$s/10</string>
+    <string name="je_reviews_load_failed">Couldn\'t load reviews. Retry</string>
+
+    <!-- Reader -->
+    <string name="je_reviews_position">%1$d of %2$d</string>
+    <string name="je_reviews_none">No reviews yet.</string>
+    <string name="je_reviews_reader_hint">Left and right for other reviews, up and down to scroll</string>
+</resources>
