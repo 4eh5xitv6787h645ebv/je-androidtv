@@ -1,5 +1,6 @@
 package org.jellyfin.androidtv.enhanced.ui.menu
 
+import android.app.AlertDialog
 import android.view.Menu
 import android.view.MenuItem
 import android.widget.Toast
@@ -7,34 +8,46 @@ import androidx.fragment.app.FragmentActivity
 import androidx.leanback.widget.ListRow
 import androidx.leanback.widget.Row
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import org.jellyfin.androidtv.R
 import org.jellyfin.androidtv.constant.QueryType
 import org.jellyfin.androidtv.enhanced.data.EnhancedRepository
 import org.jellyfin.androidtv.enhanced.data.HiddenContentRepository
 import org.jellyfin.androidtv.enhanced.data.HomeSurface
+import org.jellyfin.androidtv.enhanced.data.SpoilerGuardRepository
+import org.jellyfin.androidtv.enhanced.management.errorMessage
 import org.jellyfin.androidtv.enhanced.ui.HideFlow
 import org.jellyfin.androidtv.ui.itemhandling.BaseRowItem
 import org.jellyfin.androidtv.ui.itemhandling.ItemRowAdapter
+import org.jellyfin.sdk.model.api.BaseItemDto
+import org.jellyfin.sdk.model.api.BaseItemKind
 import org.koin.java.KoinJavaComponent.inject
 import timber.log.Timber
 import java.lang.ref.WeakReference
 
 /**
  * Jellyfin Enhanced entries for the card context menu (long-press OK or the menu key):
- * "Remove from Continue Watching" / "Remove from Next Up" on those rows, and "Hide" everywhere.
+ * "Remove from Continue Watching" / "Remove from Next Up" on those rows, "Hide" everywhere, and Spoiler Guard on
+ * collections (which open in the collection browser, so they have no details button).
  */
 object EnhancedItemMenu {
 	private val enhancedRepository by inject<EnhancedRepository>(EnhancedRepository::class.java)
 	private val hiddenContentRepository by inject<HiddenContentRepository>(HiddenContentRepository::class.java)
+	private val spoilerGuardRepository by inject<SpoilerGuardRepository>(SpoilerGuardRepository::class.java)
 
 	// Menu ids well clear of KeyProcessor's MENU_* constants
 	private const val MENU_REMOVE_CONTINUE_WATCHING = 9001
 	private const val MENU_REMOVE_NEXT_UP = 9002
 	private const val MENU_HIDE = 9003
+	private const val MENU_SPOILER_GUARD = 9004
 
 	private var selectedItem = WeakReference<BaseRowItem>(null)
 	private var selectedRow = WeakReference<ListRow>(null)
+
+	/** The collection Spoiler Guard entry's label as shown: the state it offers to switch to, null when unknown. */
+	private var spoilerMenuItem = WeakReference<BaseRowItem>(null)
+	private var spoilerTarget: Boolean? = null
 
 	/** Remember which row the focused card belongs to, so the menu knows whether it's Continue Watching or Next Up. */
 	@JvmStatic
@@ -65,7 +78,22 @@ object EnhancedItemMenu {
 			null -> Unit
 		}
 
-		if (state.hideControls) menu.add(0, MENU_HIDE, position, R.string.je_hide)
+		val item = rowItem.baseItem
+		// Collections can only be hidden with the user's experimental "hide collections" option, as on the web
+		val hideable = item?.type != BaseItemKind.BOX_SET || state.hiddenSettings?.experimentalHideCollections == true
+		if (state.hideControls && hideable) menu.add(0, MENU_HIDE, position++, R.string.je_hide)
+
+		if (state.spoilerGuard && item?.type == BaseItemKind.BOX_SET) {
+			// The menu is built synchronously, so the label comes from the last state read; the click re-checks it
+			val guarded = spoilerGuardRepository.cachedState()?.let { spoilerGuardRepository.isGuarded(it, SpoilerGuardRepository.Kind.COLLECTION, item.id) }
+			spoilerMenuItem = WeakReference(rowItem)
+			spoilerTarget = guarded?.not()
+			menu.add(0, MENU_SPOILER_GUARD, position, when (guarded) {
+				true -> R.string.je_management_sg_menu_off
+				false -> R.string.je_management_sg_menu_on
+				null -> R.string.je_management_sg_menu
+			})
+		}
 	}
 
 	/** Handle a click on one of our entries. Returns false for entries that aren't ours. */
@@ -81,10 +109,11 @@ object EnhancedItemMenu {
 					runCatching { hiddenContentRepository.removeFromHome(item.id, surface) }
 						.onSuccess {
 							removeFromRow(row, rowItem)
+							// A toast can't hold an Undo button on TV (no Snackbar here), so point to where it can be restored
 							Toast.makeText(
 								activity,
-								if (surface == HomeSurface.CONTINUE_WATCHING) R.string.je_removed_continue_watching else R.string.je_removed_next_up,
-								Toast.LENGTH_SHORT,
+								if (surface == HomeSurface.CONTINUE_WATCHING) R.string.je_management_removed_continue_watching else R.string.je_management_removed_next_up,
+								Toast.LENGTH_LONG,
 							).show()
 						}
 						.onFailure {
@@ -112,9 +141,71 @@ object EnhancedItemMenu {
 				}
 			}
 
+			MENU_SPOILER_GUARD -> {
+				val target = spoilerTarget.takeIf { spoilerMenuItem.get() === rowItem }
+				toggleCollectionGuard(activity, item, target)
+			}
+
 			else -> return false
 		}
 		return true
+	}
+
+	/**
+	 * Switch Spoiler Guard for a collection to [target] (what the menu offered), after re-reading the current state.
+	 * With an unknown [target] the current state is shown first and the user picks. Turning protection off asks for
+	 * confirmation unless the user chose to skip it.
+	 */
+	private fun toggleCollectionGuard(activity: FragmentActivity, item: BaseItemDto, target: Boolean?) {
+		activity.lifecycleScope.launch {
+			val state = try {
+				spoilerGuardRepository.getState()
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Failed to load Spoiler Guard state")
+				Toast.makeText(activity, errorMessage(activity, err), Toast.LENGTH_LONG).show()
+				return@launch
+			}
+			val guarded = spoilerGuardRepository.isGuarded(state, SpoilerGuardRepository.Kind.COLLECTION, item.id)
+
+			fun apply(enable: Boolean) = activity.lifecycleScope.launch {
+				try {
+					spoilerGuardRepository.setGuarded(SpoilerGuardRepository.Kind.COLLECTION, item.id, item.name, enable)
+					Toast.makeText(activity, if (enable) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off, Toast.LENGTH_SHORT).show()
+					// Warm the cache so the next menu shows the right label
+					runCatching { spoilerGuardRepository.getState() }
+				} catch (err: CancellationException) {
+					throw err
+				} catch (err: Exception) {
+					Timber.w(err, "Failed to toggle Spoiler Guard for collection %s", item.id)
+					Toast.makeText(activity, errorMessage(activity, err), Toast.LENGTH_LONG).show()
+				}
+			}
+
+			when {
+				target == null -> AlertDialog.Builder(activity)
+					.setTitle(item.name)
+					.setMessage(if (guarded) R.string.je_management_sg_collection_on else R.string.je_management_sg_collection_off)
+					.setPositiveButton(if (guarded) R.string.je_management_sg_turn_off else R.string.je_management_sg_turn_on) { _, _ -> apply(!guarded) }
+					.setNegativeButton(android.R.string.cancel, null)
+					.show()
+
+				// Already there (changed elsewhere since the label was built)
+				target == guarded -> Toast.makeText(activity, if (guarded) R.string.je_spoiler_guard_on else R.string.je_spoiler_guard_off, Toast.LENGTH_SHORT).show()
+
+				target -> apply(true)
+
+				state.prefs.skipDisableConfirm -> apply(false)
+
+				else -> AlertDialog.Builder(activity)
+					.setTitle(R.string.je_spoiler_disable_title)
+					.setMessage(R.string.je_spoiler_disable_message)
+					.setPositiveButton(R.string.je_spoiler_disable_confirm) { _, _ -> apply(false) }
+					.setNegativeButton(android.R.string.cancel, null)
+					.show()
+			}
+		}
 	}
 
 	private fun removeFromRow(row: ListRow?, rowItem: BaseRowItem) {
