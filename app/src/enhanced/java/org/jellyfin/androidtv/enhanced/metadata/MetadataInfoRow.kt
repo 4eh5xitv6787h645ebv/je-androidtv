@@ -12,9 +12,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -84,18 +83,20 @@ private fun ChipLine(content: @Composable RowScope.() -> Unit) {
 
 /**
  * The content of the "Enhanced info" row: stats, release dates, ratings, awards, providers and person facts, a line
- * each. [onProgressMode] persists a new watch-progress display mode; [onAwards] opens the full awards list;
+ * each. The state lives outside the composition ([infoState], [progressModeState]) because leanback rebinds rows
+ * when they scroll back into view. [onProgressMode] persists a new watch-progress display mode; [onAwards] opens the full awards list;
  * [reload] loads everything again (for the retry chip).
  */
 @Composable
 fun MetadataInfoContent(
-	initial: MetadataInfo,
+	infoState: MutableState<MetadataInfo>,
+	progressModeState: MutableState<WatchProgressMode>,
 	onProgressMode: (WatchProgressMode) -> Unit,
 	onAwards: (Awards) -> Unit,
 	reload: suspend () -> MetadataInfo,
 ) {
-	var info by remember { mutableStateOf(initial) }
-	var progressMode by remember { mutableStateOf(initial.progressMode) }
+	var info by infoState
+	var progressMode by progressModeState
 	val scope = rememberCoroutineScope()
 	val context = LocalContext.current
 

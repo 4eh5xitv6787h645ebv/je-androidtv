@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.fragment.app.Fragment
@@ -121,9 +122,12 @@ class MetadataDetailsContributor(
 		val info = loadInfo(context.item, state, config)
 		if (!info.isEmpty) {
 			val fragment = context.fragment
+			val infoState = mutableStateOf(info)
+			val progressModeState = mutableStateOf(info.progressMode)
 			rows += EnhancedComposeRow(null) {
 				MetadataInfoContent(
-					initial = info,
+					infoState = infoState,
+					progressModeState = progressModeState,
 					onProgressMode = { mode -> saveProgressMode(fragment, mode) },
 					onAwards = { awards -> showComposeDialog(fragment) { AwardsDialog(awards) } },
 					reload = { loadInfo(context.item, state, config) },
@@ -171,10 +175,20 @@ class MetadataDetailsContributor(
 		} else null
 
 		val tmdb = publicConfig.tmdbEnabled
+		// Region and services for release dates and providers; a failed read falls back to the server defaults
+		val elsewhere = if (target != null && tmdb && (publicConfig.showReleaseDates || publicConfig.elsewhereEnabled)) async {
+			try {
+				repository.elsewhereSettings()
+			} catch (err: CancellationException) {
+				throw err
+			} catch (err: Exception) {
+				Timber.w(err, "Failed to read Elsewhere settings")
+				null
+			}
+		} else null
 		val releases = if (target != null && tmdb && publicConfig.showReleaseDates && item.type in TV_TYPES && !guarded) async {
 			attempt(failures, R.string.je_metadata_source_releases) {
-				val elsewhere = runCatching { repository.elsewhereSettings() }.getOrNull()
-				repository.releaseInfo(target, releaseRegions(elsewhere?.region, config.defaultRegion))
+				repository.releaseInfo(target, releaseRegions(elsewhere?.await()?.region, config.defaultRegion))
 			}
 		} else null
 
@@ -195,9 +209,9 @@ class MetadataDetailsContributor(
 
 		val providers = if (titleTarget != null && tmdb && publicConfig.elsewhereEnabled) async {
 			attempt(failures, R.string.je_metadata_source_providers) {
-				val elsewhere = runCatching { repository.elsewhereSettings() }.getOrNull()
-				val region = (elsewhere?.region ?: config.defaultRegion)?.trim()?.uppercase()?.ifEmpty { null } ?: "US"
-				region to repository.watchProviders(titleTarget, region, elsewhere?.services.orEmpty(), config)
+				val settings = elsewhere?.await()
+				val region = (settings?.region ?: config.defaultRegion)?.trim()?.uppercase()?.ifEmpty { null } ?: "US"
+				region to repository.watchProviders(titleTarget, region, settings?.services.orEmpty(), config)
 			}
 		} else null
 

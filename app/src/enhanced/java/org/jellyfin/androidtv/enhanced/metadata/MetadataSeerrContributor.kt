@@ -88,7 +88,8 @@ private fun SeerrMetadataSection(info: MetadataInfo) {
 	if (info.isEmpty) return
 	var awards by remember { mutableStateOf<Awards?>(null) }
 	MetadataInfoContent(
-		initial = info,
+		infoState = remember(info) { mutableStateOf(info) },
+		progressModeState = remember { mutableStateOf(WatchProgressMode.PERCENTAGE) },
 		onProgressMode = {},
 		onAwards = { awards = it },
 		reload = { info },

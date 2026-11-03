@@ -101,7 +101,9 @@ class ReviewsReaderFragment : Fragment() {
 			state = LoadState.Loading
 			scope.launch {
 				state = try {
-					LoadState.Ready(repository.load(target))
+					val data = repository.load(target)
+					val failure = data.userError ?: data.tmdbError
+					if (data.entries.isEmpty() && failure != null) LoadState.Error(failure.message, ::load) else LoadState.Ready(data)
 				} catch (err: CancellationException) {
 					throw err
 				} catch (err: Exception) {
@@ -142,7 +144,7 @@ class ReviewsReaderFragment : Fragment() {
 					.fillMaxSize()
 					.background(JellyfinTheme.colorScheme.background),
 			) {
-				LoadStateContent(state, empty = { it.entries.isEmpty() }) { data ->
+				LoadStateContent(state, empty = { it.entries.isEmpty() }, emptyMessage = stringResource(R.string.je_reviews_none)) { data ->
 					val entry = data.entries[index.coerceIn(data.entries.indices)]
 					ReviewPage(
 						title = target.title,

@@ -36,5 +36,6 @@
 
     <!-- Reader -->
     <string name="je_reviews_position">%1$d of %2$d</string>
+    <string name="je_reviews_none">No reviews yet.</string>
     <string name="je_reviews_reader_hint">Left and right for other reviews, up and down to scroll</string>
 </resources>

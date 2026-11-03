@@ -4,7 +4,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.fragment.app.Fragment
@@ -106,8 +105,11 @@ class ReviewsDetailsContributor(
 		val expanded = state.userSettings.reviewsExpandedByDefault ?: config?.reviewsExpandedByDefault ?: false
 		val revision = revision(fragment)
 
+		// Outside the composition: leanback rebinds the row when it scrolls back into view
+		val dataState = mutableStateOf(initial)
+
 		return listOf(EnhancedComposeRow(fragment.getString(R.string.je_reviews_title)) {
-			var data by remember { mutableStateOf(initial) }
+			var data by dataState
 			val scope = rememberCoroutineScope()
 			val currentRevision by revision.collectAsState()
 			LaunchedEffect(currentRevision) {
