@@ -100,13 +100,15 @@ sealed interface CatchUpAction {
 
 	/**
 	 * Marked played: [targetIds] are the movie, the whole show, or the chosen seasons. [seasonNumbers] is logged
-	 * (`["all"]` for a whole show, null for a movie). [previouslyPlayed] are the episodes that were already played
-	 * under the targets, restored by undo so it doesn't wipe the user's earlier progress.
+	 * (`["all"]` for a whole show, null for a movie). [markedIds] are the items this action itself marked played (the
+	 * movie, or the episodes under the targets that weren't played yet). Undo unmarks exactly those and never a whole
+	 * show or season, so episodes watched earlier (including ones hidden from the listing) keep their state. After a
+	 * partly failed undo it holds only the ones still to unmark.
 	 */
 	data class Watched(
 		val targetIds: List<String>,
 		val seasonNumbers: List<String>?,
-		val previouslyPlayed: List<String> = emptyList(),
+		val markedIds: List<String> = emptyList(),
 	) : CatchUpAction {
 		override val logName get() = "watched"
 	}

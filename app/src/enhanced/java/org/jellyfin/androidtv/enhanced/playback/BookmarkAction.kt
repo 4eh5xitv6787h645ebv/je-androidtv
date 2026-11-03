@@ -28,7 +28,8 @@ import timber.log.Timber
  */
 class BookmarkAction(
 	context: Context,
-	glue: CustomPlaybackTransportControlGlue,
+	/** The glue this action belongs to; it's reused only for that glue. */
+	internal val glue: CustomPlaybackTransportControlGlue,
 	private val playbackBookmarks: PlaybackBookmarks,
 ) : CustomAction(context, glue) {
 	private var popup: PopupMenu? = null

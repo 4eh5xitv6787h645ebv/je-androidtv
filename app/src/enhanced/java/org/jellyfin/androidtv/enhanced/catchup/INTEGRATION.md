@@ -79,8 +79,8 @@ All as the signed-in user through a pinned `EnhancedApi` (`CatchUpRepository.ope
 | `GET /Items?userId&IncludeItemTypes=Movie,Series&Recursive=true&Filters=IsUnplayed&SortBy=Random&Limit=20&Fields=…ChildCount&EnableImageTypes=Primary,Backdrop&ImageTypeLimit=1&EnableUserData=true` | deal a batch (refilled when < 6 cards remain) |
 | `GET /Items?userId&Ids={id}` | re-check a title after returning from playback/details (dropped if now played or gone) |
 | `GET /Shows/{seriesId}/Seasons?userId&Fields=ChildCount` | season picker |
-| `GET /Items?userId&ParentId={target}&Recursive=true&IncludeItemTypes=Episode&Filters=IsPlayed` | before marking a show/season: remember already played episodes so Undo can restore them |
-| `POST` / `DELETE /Users/{uid}/PlayedItems/{id}` | Watched (movie, whole show, or each selected season) / Undo |
+| `GET /Items?userId&ParentId={target}&Recursive=true&IncludeItemTypes=Episode&Filters=IsUnplayed&IsMissing=false` | before marking a show/season: the episodes to mark (server-filtered, so hidden episodes are left alone) |
+| `POST` / `DELETE /Users/{uid}/PlayedItems/{id}` | Watched / Undo, always per item (the movie, or each listed episode; never a show or season), 4 at a time. Undo unmarks exactly the ids Watched marked; a partly failed Undo stays on the stack with the ids still marked, so Undo again finishes it. Writes run in `NonCancellable`, so leaving the page doesn't stop them halfway |
 | `POST /Users/{uid}/Items/{id}/Rating?likes=true` / `DELETE /Users/{uid}/Items/{id}/Rating` | Watchlist (JE's "Likes" watchlist) / Undo (skipped when the title was already liked) |
 | `POST /JellyfinEnhanced/catchup/event` | fire-and-forget log `{type:"swipe",action,undoOf?,itemId,ok,seasons?}` |
 

@@ -15,8 +15,10 @@ import org.jellyfin.sdk.model.api.BaseItemKind
 import java.util.UUID
 
 /**
- * Bookmarks of the playing item. The user's `bookmark.json` is read once per item and cached for the player session;
- * saving goes through the plugin's atomic `bookmark.json/add` route and updates the cache.
+ * Bookmarks of the playing item. The user's `bookmark.json` is read when a player starts the item ([refresh]) and
+ * cached for that player session; the cache is dropped whenever bookmarks are added or deleted elsewhere in the app
+ * (the Bookmarks page, the details screen). Saving goes through the plugin's atomic `bookmark.json/add` route and
+ * updates the cache.
  */
 class PlaybackBookmarks(
 	private val bookmarksRepository: BookmarksRepository,
@@ -24,22 +26,35 @@ class PlaybackBookmarks(
 ) {
 	private val cache = mutableMapOf<UUID, List<BookmarkEntry>>()
 	private var cacheToken: String? = null
+	private var cacheRevision: Long? = null
 
 	/** Bookmarks can be captured for movies and episodes, the types the web's bookmarks support. */
 	fun supports(item: BaseItemDto?): Boolean = item?.type == BaseItemKind.MOVIE || item?.type == BaseItemKind.EPISODE
 
 	/** The item's bookmarks, earliest first. Throws on failure so the caller can show it. */
 	suspend fun forItem(itemId: UUID): List<BookmarkEntry> {
-		resetIfUserChanged()
+		resetIfStale()
 		cache[itemId]?.let { return it }
+		return load(itemId)
+	}
+
+	/** Reads the item's bookmarks again, for a new player session (they may have changed on another device). */
+	suspend fun refresh(itemId: UUID): List<BookmarkEntry> {
+		resetIfStale()
+		return load(itemId)
+	}
+
+	private suspend fun load(itemId: UUID): List<BookmarkEntry> {
+		val revision = bookmarksRepository.revision.value
 		val entries = PlaybackBookmarkLogic.forItem(bookmarksRepository.list(), itemId)
-		cache[itemId] = entries
+		// A change made while reading may not be in it; then the next call reads again
+		if (bookmarksRepository.revision.value == revision) cache[itemId] = entries
 		return entries
 	}
 
 	/** Saves a bookmark at [positionMs] with [label] (the formatted time when blank) and returns it. */
 	suspend fun add(item: BaseItemDto, positionMs: Long, label: String?): BookmarkEntry {
-		resetIfUserChanged()
+		resetIfStale()
 		val seconds = PlaybackBookmarkLogic.seconds(positionMs)
 		val isEpisode = item.type == BaseItemKind.EPISODE
 		// Like the web, episodes carry the show's provider ids (with season/episode) for later re-matching
@@ -57,17 +72,25 @@ class PlaybackBookmarks(
 			seasonNumber = if (isEpisode) item.parentIndexNumber else null,
 			episodeNumber = if (isEpisode) item.indexNumber else null,
 		)
+		val revision = bookmarksRepository.revision.value
 		val bookmarkId = bookmarksRepository.add(newBookmark).orEmpty()
 		val entry = PlaybackBookmarkLogic.entry(bookmarkId, newBookmark)
-		cache[item.id]?.let { cache[item.id] = PlaybackBookmarkLogic.sortedByTime(it + entry) }
+		// Our own save is the only change since: keep the cache, with the new bookmark in it
+		if (bookmarksRepository.revision.value == revision + 1 && cacheRevision == revision) {
+			cacheRevision = revision + 1
+			cache[item.id]?.let { cache[item.id] = PlaybackBookmarkLogic.sortedByTime(it + entry) }
+		}
 		return entry
 	}
 
-	private fun resetIfUserChanged() {
+	/** Drops the cache after a user switch or when bookmarks were added or deleted elsewhere. */
+	private fun resetIfStale() {
 		val token = enhancedApi.accessToken
-		if (token != cacheToken) {
+		val revision = bookmarksRepository.revision.value
+		if (token != cacheToken || revision != cacheRevision) {
 			cache.clear()
 			cacheToken = token
+			cacheRevision = revision
 		}
 	}
 

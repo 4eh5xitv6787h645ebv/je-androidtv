@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- View tags that tie the player additions to the player's own views, so nothing static holds a player -->
+    <item name="je_playback_enhancer" type="id" />
+    <item name="je_playback_bookmark_action" type="id" />
+</resources>
